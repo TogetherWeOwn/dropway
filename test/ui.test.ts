@@ -182,6 +182,15 @@ describe("UI slots for embedding apps", () => {
     expect(await (await plain.call("/login")).text()).not.toContain("Sign in with your account");
   });
 
+  it("sign-in forms never put a key in a URL, even before the script loads", async () => {
+    const dw = await freshInstance();
+    const html = await (await dw.call("/login")).text();
+    expect(html).toContain('<form class="dw-pad" id="dw-signin" method="post" action="/login">');
+    const res = await dw.call("/login", { method: "POST", body: form({ key: "dw_secret_value" }) });
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/login?retry=1");
+  });
+
   it("an extension page can replace a core dashboard page", async () => {
     const dw = await freshInstance({}, { uiSlots: { pages: [{ path: "/dashboard/keys", title: "Keys", handler: (c) => c.text("replaced") }] } });
     expect(await (await dw.call("/dashboard/keys")).text()).toBe("replaced");

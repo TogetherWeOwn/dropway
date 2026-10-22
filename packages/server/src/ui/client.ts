@@ -917,6 +917,7 @@ export function dropwayClient() {
     var note = d.getElementById("dw-login-note");
     if (note && params.get("expired")) add(note, errorBox({ message: "Your key was rejected (revoked or expired). Sign in again." }));
     if (note && params.get("signedout")) add(note, h("div", { class: "dw-callout", role: "status", text: "Signed out. The key was removed from this browser." }));
+    if (note && params.get("retry")) add(note, h("div", { class: "dw-callout", role: "status", text: "The page was still loading. Nothing was sent anywhere else; please sign in again." }));
     var form = d.getElementById("dw-signin");
     if (form) {
       form.addEventListener("submit", async function (e) {
@@ -1790,9 +1791,15 @@ export function dropwayClient() {
       }
     } catch (e) {}
   }
-  probeSession().then(function () {
+  if (d.body.getAttribute("data-page") === "login" || !SESSION || getKey()) {
+    // Nothing to probe (or the sign-in page, whose forms must work at once): start now.
     if (start) start();
     else renderAccount();
-  });
+  } else {
+    probeSession().then(function () {
+      if (start) start();
+      else renderAccount();
+    });
+  }
 
 }

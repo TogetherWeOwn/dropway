@@ -138,7 +138,7 @@ export async function loginPage(c: Context<DropwayEnv>): Promise<Response> {
   const bootstrapField = `<div class="dw-field"><label class="dw-label" for="%ID%">Bootstrap secret (ADMIN_BOOTSTRAP_KEY)</label><input class="dw-input" id="%ID%" name="secret" type="password" autocomplete="off" required><p class="dw-help">Sent once to this instance's API, never stored in the browser.</p></div>`;
   const setup = setUp
     ? ""
-    : `<section class="dw-section" id="setup"><header><h2>Set up this instance</h2></header><form class="dw-pad" id="dw-setup">
+    : `<section class="dw-section" id="setup"><header><h2>Set up this instance</h2></header><form class="dw-pad" id="dw-setup" method="post" action="/login">
 ${bootstrapField.replaceAll("%ID%", "dw-setup-secret")}
 <div class="dw-grid2"><div class="dw-field"><label class="dw-label" for="dw-setup-email">Your email</label><input class="dw-input" id="dw-setup-email" name="email" type="email" autocomplete="email"></div>
 <div class="dw-field"><label class="dw-label" for="dw-setup-name">Name</label><input class="dw-input" id="dw-setup-name" name="name" autocomplete="name"></div></div>
@@ -147,7 +147,7 @@ ${bootstrapField.replaceAll("%ID%", "dw-setup-secret")}
 <h1 class="dw-h1">Sign in to ${e(dw.config.instanceName)}</h1>
 <div id="dw-login-note"></div>
 ${sessionNote}${setup}
-<section class="dw-section"><header><h2>API key</h2></header><form class="dw-pad" id="dw-signin">
+<section class="dw-section"><header><h2>API key</h2></header><form class="dw-pad" id="dw-signin" method="post" action="/login">
 <div class="dw-field"><label class="dw-label" for="dw-key">API key</label><input class="dw-input dw-mono" id="dw-key" name="key" type="password" autocomplete="current-password" placeholder="dw_…" required spellcheck="false"></div>
 <label class="dw-check"><input type="checkbox" name="remember"><span>Keep me signed in on this browser<span class="dw-sub">Otherwise the key is forgotten when this tab closes.</span></span></label>
 <div class="dw-row" style="margin-top:.75rem"><button type="submit" class="dw-btn primary">Sign in</button></div>
@@ -156,7 +156,7 @@ ${sessionNote}${setup}
 <p class="dw-small dw-muted">Keys come from the instance owner: the owner key is created at setup, and anyone with the <code>keys:write</code> scope can create more under API keys. The key is only ever sent to this instance's API.</p>
 ${
   setUp
-    ? `<details><summary>Lost the owner key?</summary><form class="dw-section dw-pad" id="dw-recover" style="margin-top:.6rem">${bootstrapField.replaceAll("%ID%", "dw-recover-secret")}<button type="submit" class="dw-btn">Create a new owner key</button><div class="dw-out" aria-live="polite"></div></form></details>`
+    ? `<details><summary>Lost the owner key?</summary><form class="dw-section dw-pad" id="dw-recover" method="post" action="/login" style="margin-top:.6rem">${bootstrapField.replaceAll("%ID%", "dw-recover-secret")}<button type="submit" class="dw-btn">Create a new owner key</button><div class="dw-out" aria-live="polite"></div></form></details>`
     : ""
 }
 ${NOSCRIPT}

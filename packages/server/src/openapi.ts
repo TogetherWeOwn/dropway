@@ -325,7 +325,10 @@ export function buildOpenApi(origin: string, instanceName: string): Json {
         get: op("health", "Health check", { tags: ["agents"], security: false, responses: { 200: json({ type: "object", properties: { ok: { type: "boolean" }, service: { type: "string" } } }) }, mcpExclude: "monitoring" }),
       },
       "/claim": { get: op("claim_page", "Claim page for anonymous sites (token in the URL fragment)", { tags: ["agents"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use claim_site" }) },
-      "/login": { get: op("login_page", "Sign-in page (API key; first-run setup)", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page" }) },
+      "/login": {
+        get: op("login_page", "Sign-in page (API key; first-run setup)", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page" }),
+        post: op("login_form_fallback", "Where the sign-in forms post before the page script has loaded: redirects back to /login and ignores the body", { tags: ["pages"], security: false, responses: { 303: { description: "Redirect to /login?retry=1" } }, mcpExclude: "browser page" }),
+      },
       "/dashboard": { get: op("dashboard_page", "Dashboard: sites list", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use list_sites" }) },
       "/dashboard/": { get: op("dashboard_page_slash", "Redirects to /dashboard", { tags: ["pages"], security: false, responses: { 301: { description: "Redirect" } }, mcpExclude: "redirect" }) },
       "/dashboard/sites/{slug}": { get: op("dashboard_site_page", "Dashboard: one site (versions, files, settings)", { tags: ["pages"], security: false, params: [slugParam], responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use get_site" }) },
