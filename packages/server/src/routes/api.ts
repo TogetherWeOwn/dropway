@@ -9,7 +9,7 @@ import {
   createApiKey,
   createDeploy,
   createMember,
-  createSite,
+  createSiteWithDeploy,
   deleteSite,
   deleteVersion,
   describeSite,
@@ -181,7 +181,12 @@ export function installApiRoutes(api: Hono<DropwayEnv>) {
     const dw = D(c);
     const p = P(c);
     const body = await readJson(c);
-    const { site, claimToken } = await createSite(dw, p, { slug: (body.slug as string | undefined) ?? null, ...parseSettings(body) });
+    // Validates `files` before the site exists and removes the site again if its deploy fails.
+    const { site, claimToken, deploy } = await createSiteWithDeploy(dw, p, { slug: (body.slug as string | undefined) ?? null, ...parseSettings(body) }, body.files, {
+      message: body.message,
+      client: clientOf(c),
+      source: "api",
+    });
     const out: Record<string, unknown> = { site: serializeSite(dw, site, null), url: siteUrl(dw, site.slug) };
     if (claimToken) {
       out.claimToken = claimToken;
@@ -189,10 +194,7 @@ export function installApiRoutes(api: Hono<DropwayEnv>) {
       out.expiresAt = site.expires_at ? new Date(site.expires_at).toISOString() : null;
       out.note = "Anonymous site: it expires. Use `Authorization: Bearer <claimToken>` for deploys and uploads to it.";
     }
-    if (body.files !== undefined) {
-      const deployer = claimToken ? { kind: "claim" as const, siteId: site.id, ip: p.ip } : p;
-      out.deploy = await createDeploy(dw, deployer, site, body.files, { message: body.message, client: clientOf(c), source: "api" });
-    }
+    if (deploy) out.deploy = deploy;
     return c.json(out, 201);
   });
 

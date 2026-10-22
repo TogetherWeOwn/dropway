@@ -8,7 +8,7 @@ import { normaliseFilePath } from "../lib/paths";
 import type { Principal } from "../principal";
 import { blobScope, putVerifiedBlob } from "./blobs";
 import { createDeploy, finalizeDeploy, type Warning } from "./deploys";
-import { findSite, getVersion, serializeSite, serializeVersion, type SiteRow, type VersionRow } from "./sites";
+import { discardNewSite, findSite, getVersion, serializeSite, serializeVersion, type SiteRow, type VersionRow } from "./sites";
 import { resolvePublishTarget } from "./publish";
 import { getSiteByRef, resolveSiteSlug, resolveVersionRef } from "./site-ops";
 
@@ -576,12 +576,19 @@ export async function publishSources(dc: DropwayContext, p: Principal, input: Pu
 
   const fields: Record<string, unknown> = { slug };
   for (const k of ["title", "description", "spa", "renderMarkdown", "crossOriginIsolation", "password"] as const) if (input[k] !== undefined) fields[k] = input[k];
-  const target = await resolvePublishTarget(dc, p, fields);
+  const manifest = resolved.files.map((f) => ({ path: f.path, size: f.size, sha256: f.sha256, contentType: f.contentType }));
+  const target = await resolvePublishTarget(dc, p, fields, manifest);
   const site = target.site;
   const actor: Principal = target.claimToken ? { kind: "claim", siteId: site.id, ip: p.ip } : p;
-  const manifest = resolved.files.map((f) => ({ path: f.path, size: f.size, sha256: f.sha256, contentType: f.contentType }));
-  const deploy = await createDeploy(dc, actor, site, manifest, { source: input.source ?? "mcp", message: input.message, client: input.client ?? null, baseVersionId: input.baseVersionId });
-  const out = await completeVersion(dc, actor, site, deploy, resolved.files, { fetched: resolved.fetched });
+  let out: Awaited<ReturnType<typeof completeVersion>>;
+  try {
+    const deploy = await createDeploy(dc, actor, site, manifest, { source: input.source ?? "mcp", message: input.message, client: input.client ?? null, baseVersionId: input.baseVersionId });
+    out = await completeVersion(dc, actor, site, deploy, resolved.files, { fetched: resolved.fetched });
+  } catch (e) {
+    // A site created by this call is removed again, so a failed publish leaves nothing behind.
+    if (target.created) await discardNewSite(dc, site);
+    throw e;
+  }
   return {
     ...out,
     created: target.created,

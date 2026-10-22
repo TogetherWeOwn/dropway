@@ -7,8 +7,8 @@ import { contentTypeFor, normaliseContentType } from "../lib/mime";
 import { normaliseFilePath, stripCommonRoot } from "../lib/paths";
 import type { Principal } from "../principal";
 import { blobScope, putVerifiedBlob } from "./blobs";
-import { createDeploy, finalizeDeploy } from "./deploys";
-import { createSite, findSite, getSiteFor, parseSettings, serializeSite, updateSite, type SiteRow, type VersionRow } from "./sites";
+import { createDeploy, finalizeDeploy, precheckManifest } from "./deploys";
+import { createSite, discardNewSite, findSite, getSiteFor, parseSettings, serializeSite, updateSite, type SiteRow, type VersionRow } from "./sites";
 
 /** A file held in memory for one-shot publishing. */
 export interface InlineFile {
@@ -162,8 +162,11 @@ function unzipFiles(bytes: Uint8Array, maxBytes: number): InlineFile[] {
   return hasRootIndex ? files : stripCommonRoot(files);
 }
 
-/** Which site a one-shot publish targets: the claim token's site, an existing site by slug, or a new one. */
-export async function resolvePublishTarget(dc: DropwayContext, p: Principal, fields: Record<string, unknown>) {
+/**
+ * Which site a one-shot publish targets: the claim token's site, an existing site by slug, or a new one.
+ * `manifest` (when known) is checked before a new site is created, so a refused publish creates nothing.
+ */
+export async function resolvePublishTarget(dc: DropwayContext, p: Principal, fields: Record<string, unknown>, manifest?: unknown) {
   const settings = parseSettings(fields);
   const slug = fields.slug ? String(fields.slug).trim().toLowerCase() : null;
   if (p.kind === "claim") {
@@ -180,7 +183,9 @@ export async function resolvePublishTarget(dc: DropwayContext, p: Principal, fie
       return { site: Object.keys(settings).length ? await updateSite(dc, p, site.slug, settings) : site, claimToken: null, created: false };
     }
   }
-  const created = await createSite(dc, p, { slug, ...settings });
+  const created = await createSite(dc, p, { slug, ...settings }, {
+    beforeInsert: manifest === undefined ? undefined : (owner) => precheckManifest(dc, p, owner.tenantId, manifest),
+  });
   return { site: created.site, claimToken: created.claimToken, created: true };
 }
 
@@ -189,13 +194,30 @@ export async function resolvePublishTarget(dc: DropwayContext, p: Principal, fie
  * (deduplicated), record a version and make it live.
  */
 export async function publishFiles(dc: DropwayContext, p: Principal, input: PublishInput, opts: { client?: string | null } = {}) {
-  const target = await resolvePublishTarget(dc, p, input.fields);
+  const hashed = await Promise.all(input.files.map(async (f) => ({ ...f, sha256: await sha256Hex(f.bytes) })));
+  const manifest = hashed.map((f) => ({ path: f.path, size: f.bytes.length, sha256: f.sha256, contentType: f.contentType }));
+  const target = await resolvePublishTarget(dc, p, input.fields, manifest);
+  try {
+    return await publishToTarget(dc, p, input, target, hashed, manifest, opts);
+  } catch (e) {
+    // A site created by this call is removed again, so a failed publish leaves nothing behind.
+    if (target.created) await discardNewSite(dc, target.site);
+    throw e;
+  }
+}
+
+async function publishToTarget(
+  dc: DropwayContext,
+  p: Principal,
+  input: PublishInput,
+  target: Awaited<ReturnType<typeof resolvePublishTarget>>,
+  hashed: Array<InlineFile & { sha256: string }>,
+  manifest: Array<{ path: string; size: number; sha256: string; contentType: string }>,
+  opts: { client?: string | null },
+) {
   let site: SiteRow = target.site;
   // Claim tokens act for the new anonymous site from here on.
   const actor: Principal = target.claimToken ? { kind: "claim", siteId: site.id, ip: p.ip } : p;
-
-  const hashed = await Promise.all(input.files.map(async (f) => ({ ...f, sha256: await sha256Hex(f.bytes) })));
-  const manifest = hashed.map((f) => ({ path: f.path, size: f.bytes.length, sha256: f.sha256, contentType: f.contentType }));
   const deploy = await createDeploy(dc, actor, site, manifest, {
     source: input.source,
     message: input.fields.message,

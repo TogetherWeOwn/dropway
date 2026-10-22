@@ -10,7 +10,7 @@ import { hasScope, type Principal } from "../principal";
 import { blobScope, putVerifiedBlob } from "./blobs";
 import { emit, meter } from "./events";
 import { refreshLive } from "./live";
-import { getVersion, serializeVersion, type SiteRow, type VersionRow } from "./sites";
+import { createSite, discardNewSite, getVersion, serializeVersion, type SiteRow, type SiteSettingsInput, type VersionRow } from "./sites";
 
 /** One entry of a deploy manifest as sent by clients. */
 export interface ManifestEntry {
@@ -221,6 +221,39 @@ export async function createDeploy(dc: DropwayContext, p: Principal, site: SiteR
         ? `All files are already stored. POST ${base}/finalize to go live.`
         : `PUT the raw bytes of each of the ${missing.length} missing files to its upload url (same Authorization header), then POST ${base}/finalize.`,
   };
+}
+
+/** Check a manifest against the caps for a site that does not exist yet (throws the same errors as createDeploy). */
+export async function precheckManifest(dc: DropwayContext, p: Principal, tenantId: string | null, files: unknown): Promise<void> {
+  validateManifest(files, await dc.adapters.policy.limits(p, { siteId: null, tenantId }, dc));
+}
+
+/**
+ * Create a site and, when `files` is given, start its first deploy (POST /api/v1/sites).
+ * The manifest is checked before the site row exists, and if the deploy is still
+ * refused (for example by a policy adapter) the new site is removed again, so a
+ * failed call never leaves an empty site, a taken slug or a used rate-limit slot.
+ */
+export async function createSiteWithDeploy(
+  dc: DropwayContext,
+  p: Principal,
+  input: { slug?: string | null } & SiteSettingsInput,
+  files: unknown,
+  opts: DeployOptions = {},
+) {
+  const withFiles = files !== undefined;
+  const { site, claimToken } = await createSite(dc, p, input, {
+    beforeInsert: withFiles ? (owner) => precheckManifest(dc, p, owner.tenantId, files) : undefined,
+  });
+  if (!withFiles) return { site, claimToken, deploy: null };
+  // A new anonymous site is deployed with its own claim token from here on.
+  const deployer: Principal = claimToken ? { kind: "claim", siteId: site.id, ip: p.ip } : p;
+  try {
+    return { site, claimToken, deploy: await createDeploy(dc, deployer, site, files, opts) };
+  } catch (e) {
+    await discardNewSite(dc, site);
+    throw e;
+  }
 }
 
 function versionConflict(site: SiteRow) {

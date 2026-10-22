@@ -175,10 +175,20 @@ export function anonymousDisabled(): ApiError {
   );
 }
 
+export interface CreateSiteOptions {
+  /**
+   * Runs after every permission, rate-limit and policy check, just before the row
+   * is written. Throw to refuse without creating anything (used to validate the
+   * first deploy's manifest up front).
+   */
+  beforeInsert?(owner: { tenantId: string | null }): void | Promise<void>;
+}
+
 export async function createSite(
   dc: DropwayContext,
   p: Principal,
   input: { slug?: string | null } & SiteSettingsInput,
+  opts: CreateSiteOptions = {},
 ): Promise<{ site: SiteRow; claimToken: string | null }> {
   if (p.kind === "bootstrap") throw forbidden("The bootstrap key cannot own sites.", "Use the owner API key returned by POST /api/v1/setup.");
   if (p.kind === "claim") throw forbidden("A claim token controls exactly one anonymous site.", "Use an API key to create more sites.");
@@ -206,6 +216,7 @@ export async function createSite(
   const tenantId = p.kind === "member" ? p.tenantId : null;
   const wanted = input.slug ? validateSlug(input.slug) : null;
   await dc.adapters.policy.beforeCreateSite?.(p, { slug: wanted, tenantId }, dc);
+  await opts.beforeInsert?.({ tenantId });
 
   const claimToken = anonymous ? newSecret(CLAIM_TOKEN_PREFIX) : null;
   const claimHash = claimToken ? await sha256Hex(claimToken) : null;
@@ -344,6 +355,34 @@ export async function deleteSite(dc: DropwayContext, p: Principal, slug: string)
   emit(dc, "onDelete", { site: { id: site.id, slug: site.slug, tenantId: site.tenant_id, url: siteUrl(dc, site.slug) }, principal: p, reason: "api", at: now });
   meter(dc, { type: "site_deleted", tenantId: site.tenant_id, siteId: site.id, at: now });
   return { deleted: true, slug: site.slug };
+}
+
+/**
+ * Undo a site created earlier in the same call whose first deploy then failed,
+ * so a failed create leaves nothing behind: the slug is free at once and the row
+ * no longer counts toward per-IP or plan limits. Only a site that never went
+ * live is removed (the guard makes a concurrent successful finalize win).
+ * Uploaded blobs stay until the hourly cleanup collects unreferenced ones.
+ */
+export async function discardNewSite(dc: DropwayContext, site: Pick<SiteRow, "id" | "slug" | "tenant_id">): Promise<boolean> {
+  const db = dc.env.DB;
+  const neverLive = "EXISTS (SELECT 1 FROM sites WHERE id = ? AND current_version_id IS NULL)";
+  try {
+    const results = await db.batch([
+      db.prepare(`DELETE FROM version_files WHERE version_id IN (SELECT id FROM versions WHERE site_id = ?) AND ${neverLive}`).bind(site.id, site.id),
+      db.prepare(`DELETE FROM versions WHERE site_id = ? AND ${neverLive}`).bind(site.id, site.id),
+      db.prepare(`DELETE FROM blob_scopes WHERE scope = ? AND ${neverLive}`).bind(`s:${site.id}`, site.id),
+      db.prepare("DELETE FROM sites WHERE id = ? AND current_version_id IS NULL").bind(site.id),
+    ]);
+    await dropLive(dc, site.slug);
+    const removed = (results[3]?.meta.changes ?? 0) > 0;
+    if (removed) meter(dc, { type: "site_deleted", tenantId: site.tenant_id, siteId: site.id, at: Date.now() });
+    return removed;
+  } catch (e) {
+    // Never mask the error that made the create fail; the site is left for its owner to delete.
+    console.error(JSON.stringify({ event: "discard_new_site_failed", siteId: site.id, error: String(e) }));
+    return false;
+  }
 }
 
 /** Move an anonymous site into the caller's tenant: it stops expiring and the claim token stops working. */
