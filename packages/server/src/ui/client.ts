@@ -945,16 +945,30 @@ export function dropwayClient() {
     function bootstrapForm(id, path, bodyFn, label) {
       var f = d.getElementById(id);
       if (!f) return;
+      var completed = false;
+      // A back/forward-cache restore must not replay the one-time key or a filled secret.
+      window.addEventListener("pagehide", function () {
+        f.reset();
+        clear(f.querySelector(".dw-out"));
+      });
+      window.addEventListener("pageshow", function (e) {
+        if (e.persisted) location.reload();
+      });
       f.addEventListener("submit", async function (e) {
         e.preventDefault();
+        if (completed) return;
         var out = f.querySelector(".dw-out");
         clear(out);
         var btn = f.querySelector("button[type=submit]");
         btn.disabled = true;
         try {
-          var res = await api(path, { method: "POST", key: f.elements.secret.value.trim(), body: bodyFn(f) });
-          var k = res.apiKey.key;
+          var secret = f.elements.secret.value.trim();
           f.elements.secret.value = "";
+          var pending = api(path, { method: "POST", key: secret, body: bodyFn(f) });
+          secret = "";
+          var res = await pending;
+          var k = res.apiKey.key;
+          completed = true;
           // The job of this form is done: leave only the key and the way on.
           $$(".dw-field, .dw-grid2, button[type=submit]", f).forEach(function (x) {
             x.hidden = true;
@@ -968,7 +982,7 @@ export function dropwayClient() {
               text: "I saved it. Continue",
               onclick: function () {
                 setKey(k, false);
-                location.href = "/dashboard";
+                location.href = id === "dw-setup" ? "/connect" : "/dashboard";
               },
             }),
           );

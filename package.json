@@ -21,7 +21,8 @@
     "check": "npm run guard && npm run typecheck && npm test",
     "db:migrate": "wrangler d1 migrations apply DB --remote",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
-    "deploy": "(wrangler d1 migrations apply DB --remote || wrangler deploy) && wrangler d1 migrations apply DB --remote && wrangler deploy",
+    "deploy": "(wrangler d1 migrations apply DB --remote || npm run deploy:worker) && wrangler d1 migrations apply DB --remote && npm run deploy:worker",
+    "deploy:worker": "node scripts/deploy-worker.mjs",
     "skill:sync": "esbuild scripts/print-skill.ts --bundle --platform=node --format=esm --log-level=warning | node --input-type=module > skills/dropway/SKILL.md"
   },
   "devDependencies": {

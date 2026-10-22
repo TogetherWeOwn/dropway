@@ -52,6 +52,12 @@ export async function homePage(c: Context<DropwayEnv>): Promise<Response> {
   const o = appOrigin(dw);
   const name = dw.config.instanceName;
   const setUp = await isSetUp(dw).catch(() => true);
+  if (!setUp) {
+    return renderAppPage(c, {
+      title: "Set up this instance", page: "login", nav: false, css: AUTH_CSS,
+      body: `<div class="dw-auth"><h1 class="dw-h1">Welcome to ${e(name)}</h1><p>This instance is not set up yet. Create the owner to start publishing, using the bootstrap secret you configured when deploying this instance.</p><div id="dw-login-note"></div>${setupForm()}</div>`,
+    });
+  }
   const anon = dw.config.anonymous.enabled;
   const tabs: Array<[string, string, string]> = [
     [
@@ -101,12 +107,6 @@ export async function homePage(c: Context<DropwayEnv>): Promise<Response> {
 <p class="lede">Publish a file, a folder or a whole site to a live URL in one call. Every publish is a version you can roll back to, and every file opens in the browser as what it is: pages, Markdown, code, data, images, PDFs and media, with the raw file one click away.</p>
 <div class="dw-row" id="dw-home-cta"><a class="dw-btn primary" href="/login">Sign in</a><a class="dw-btn" href="#dw-agents">Connect an agent</a></div>
 </section>
-${
-  setUp
-    ? ""
-    : `<div class="dw-callout"><strong>This instance is not set up yet.</strong> Create the owner with the <code>ADMIN_BOOTSTRAP_KEY</code> secret you configured: <a href="/login#setup">set it up in the browser</a>, or with curl:
-${snippet("dw-s-setup", `curl -X POST ${o}/api/v1/setup \\\n  -H "Authorization: Bearer $ADMIN_BOOTSTRAP_KEY" \\\n  -H "Content-Type: application/json" -d '{"email":"you@example.com"}'`)}</div>`
-}
 <div class="dw-home">
 <section class="dw-section" aria-labelledby="dw-quick-h"><header><h2 id="dw-quick-h">Publish from this browser</h2></header><div class="dw-pad" id="dw-quick"><p class="dw-muted dw-small">Sign in to drop a folder here.</p></div></section>
 <section class="dw-section" id="dw-agents" aria-labelledby="dw-agents-h"><header><h2 id="dw-agents-h">Publish from an agent</h2></header><div class="dw-pad"><div class="dw-tabs" role="tablist" aria-label="Ways to publish">${tabList}</div>${panels}</div></section>
@@ -127,6 +127,28 @@ ${snippet("dw-s-setup", `curl -X POST ${o}/api/v1/setup \\\n  -H "Authorization:
 
 const AUTH_CSS = `.dw-auth{max-width:30rem;margin:4vh auto 0}.dw-auth h1{margin-bottom:1.25rem}.dw-auth details{margin:1rem 0}.dw-auth summary{cursor:pointer;font-weight:600;font-size:.92rem}`;
 
+function bootstrapField(id: string): string {
+  return `<div class="dw-field"><label class="dw-label" for="${id}">Bootstrap secret (ADMIN_BOOTSTRAP_KEY)</label><input class="dw-input" id="${id}" name="secret" type="password" autocomplete="off" required><p class="dw-help">Sent once to this instance's API, never stored in the browser.</p></div>`;
+}
+
+function setupForm(): string {
+  return `<section class="dw-section" id="setup"><header><h2>Set up this instance</h2></header><form class="dw-pad" id="dw-setup" method="post" action="/login" autocomplete="off">
+${bootstrapField("dw-setup-secret")}
+<div class="dw-grid2"><div class="dw-field"><label class="dw-label" for="dw-setup-email">Your email</label><input class="dw-input" id="dw-setup-email" name="email" type="email" autocomplete="email" required></div>
+<div class="dw-field"><label class="dw-label" for="dw-setup-name">Name (optional)</label><input class="dw-input" id="dw-setup-name" name="name" autocomplete="name"></div></div>
+<button type="submit" class="dw-btn primary">Create the owner</button><div class="dw-out" aria-live="polite"></div></form></section>`;
+}
+
+export function connectPage(c: Context<DropwayEnv>): Promise<Response> {
+  const o = appOrigin(c.get("dw"));
+  const body = `${pageHead("Connect an agent", "Use your saved API key with this instance. Create narrower keys for individual agents.")}
+<section class="dw-section"><header><h2>CLI</h2></header><div class="dw-pad">${snippet("dw-connect-cli", `export DROPWAY_API=${o}\nexport DROPWAY_API_KEY=dw_...\nnpx dropway whoami\nnpx dropway publish ./dist`)}<p class="dw-help">Replace dw_... locally with your saved key. Never put it in a published file.</p></div></section>
+<section class="dw-section"><header><h2>MCP</h2></header><div class="dw-pad"><p>Streamable HTTP endpoint: <code>${e(o)}/mcp</code></p>${snippet("dw-connect-mcp", `claude mcp add --transport http dropway ${o}/mcp \\\n  --header "Authorization: Bearer $DROPWAY_API_KEY"`)}</div></section>
+<section class="dw-section"><header><h2>Agent instructions</h2></header><div class="dw-pad"><p><a href="/skill.md">Instance skill</a> · <a href="/llms.txt">Quick reference</a> · <a href="/llms-full.txt">Full reference</a> · <a href="/openapi.json">OpenAPI</a></p></div></section>
+<p><a class="dw-btn primary" href="/dashboard">Open dashboard</a> <a class="dw-btn" href="/dashboard/keys">Manage API keys</a></p>`;
+  return renderAppPage(c, { title: "Connect an agent", page: "connect", body, nav: false, css: HOME_CSS });
+}
+
 export async function loginPage(c: Context<DropwayEnv>): Promise<Response> {
   const dw = c.get("dw");
   const session = uiSlotsOf(c).session;
@@ -135,14 +157,7 @@ export async function loginPage(c: Context<DropwayEnv>): Promise<Response> {
     ? `<p class="dw-callout">People sign in with their account: <a class="dw-btn primary small" href="${e(session.signInPath + (next && next.startsWith("/") && !next.startsWith("//") ? `${session.signInPath.includes("?") ? "&" : "?"}next=${encodeURIComponent(next)}` : ""))}">Sign in with your account</a> Agents and scripts can also sign in here with an API key.</p>`
     : "";
   const setUp = await isSetUp(dw).catch(() => true);
-  const bootstrapField = `<div class="dw-field"><label class="dw-label" for="%ID%">Bootstrap secret (ADMIN_BOOTSTRAP_KEY)</label><input class="dw-input" id="%ID%" name="secret" type="password" autocomplete="off" required><p class="dw-help">Sent once to this instance's API, never stored in the browser.</p></div>`;
-  const setup = setUp
-    ? ""
-    : `<section class="dw-section" id="setup"><header><h2>Set up this instance</h2></header><form class="dw-pad" id="dw-setup" method="post" action="/login">
-${bootstrapField.replaceAll("%ID%", "dw-setup-secret")}
-<div class="dw-grid2"><div class="dw-field"><label class="dw-label" for="dw-setup-email">Your email</label><input class="dw-input" id="dw-setup-email" name="email" type="email" autocomplete="email"></div>
-<div class="dw-field"><label class="dw-label" for="dw-setup-name">Name</label><input class="dw-input" id="dw-setup-name" name="name" autocomplete="name"></div></div>
-<button type="submit" class="dw-btn primary">Create the owner</button><div class="dw-out" aria-live="polite"></div></form></section>`;
+  const setup = setUp ? "" : setupForm();
   const body = `<div class="dw-auth">
 <h1 class="dw-h1">Sign in to ${e(dw.config.instanceName)}</h1>
 <div id="dw-login-note"></div>
@@ -156,7 +171,7 @@ ${sessionNote}${setup}
 <p class="dw-small dw-muted">Keys come from the instance owner: the owner key is created at setup, and anyone with the <code>keys:write</code> scope can create more under API keys. The key is only ever sent to this instance's API.</p>
 ${
   setUp
-    ? `<details><summary>Lost the owner key?</summary><form class="dw-section dw-pad" id="dw-recover" method="post" action="/login" style="margin-top:.6rem">${bootstrapField.replaceAll("%ID%", "dw-recover-secret")}<button type="submit" class="dw-btn">Create a new owner key</button><div class="dw-out" aria-live="polite"></div></form></details>`
+    ? `<details><summary>Lost the owner key?</summary><form class="dw-section dw-pad" id="dw-recover" method="post" action="/login" style="margin-top:.6rem">${bootstrapField("dw-recover-secret")}<button type="submit" class="dw-btn">Create a new owner key</button><div class="dw-out" aria-live="polite"></div></form></details>`
     : ""
 }
 ${NOSCRIPT}

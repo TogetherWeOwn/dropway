@@ -61,6 +61,23 @@ belongs to something else, change `name`, `database_name` and `bucket_name` in `
 
 ## First run: create the owner
 
+In the browser:
+
+1. Open the app's `/` URL. Until an owner exists, it shows the setup form directly.
+2. Enter your `ADMIN_BOOTSTRAP_KEY` and owner email (optionally a display name). The form sends the
+   bootstrap secret only to this app's API, never to the sites origin, and does not save it in browser
+   storage. A rejected submission clears the secret so you can enter it again.
+3. Copy the owner API key into a password manager. It is displayed once; refreshing or leaving this
+   page does not reveal it again. Keep the bootstrap secret securely for owner recovery.
+4. Select **I saved it. Continue** to open `/connect`, with this instance's CLI, MCP and skill
+   instructions. Continuing signs this tab in with the owner key in session storage, not the bootstrap
+   secret. Use **API keys** to create narrower keys for individual agents.
+
+JavaScript is required for the browser flow. Before the script loads, forms POST to `/login`, which
+ignores the body and redirects to retry; secrets are never placed in a query string. Use the CLI or
+curl below without JavaScript. An embedding app that replaces the landing page may provide its own flow;
+`/login` retains the core setup form.
+
 With the CLI (it saves the owner key in `~/.config/dropway/credentials.json`, mode 0600):
 
 ```sh
@@ -187,6 +204,49 @@ To put the app itself on your domain too, add a Custom Domain route such as
 ## Verify a deployment
 
 ```sh
-npx dropway whoami --api https://<worker>          # instance reachable, key accepted
-curl -s https://<worker>/openapi.json | head -c 200  # the API describes itself
+curl -fsS https://<worker>/health                   # ok, service, version, build
+npx dropway whoami --api https://<worker>           # instance reachable, key accepted
+curl -fsS https://<worker>/openapi.json              # the API describes itself
 ```
+
+`/health` is public and uncached. `version` comes from the repository's package version; `build` is the
+Worker variable `BUILD_SHA`, or `"dev"` when unset. Both Worker deploys inside `npm run deploy` stamp
+`BUILD_SHA` from Workers Builds' `WORKERS_CI_COMMIT_SHA`, or from the local Git HEAD for command-line
+use. The helper refuses malformed commit IDs and propagates Wrangler's failure status. When deploying
+with a separate config or directly through Wrangler, pass `--var BUILD_SHA:<full-commit-sha>` yourself.
+Do not deploy the root template to an account running hosted Dropway: use distinct Worker, D1, R2, KV
+and Analytics names in a test config.
+
+### One-click acceptance record (R-16 / SPEC 12.5)
+
+As of 2026-10-22, the following external acceptance runs have **not been performed**. Local acceptance
+tests are not substitutes for an actual Deploy-button run, browser verification or seven elapsed days.
+
+| Scenario | Status | Evidence required |
+|---|---|---|
+| Fresh Cloudflare Free account | NOT RUN | Start/end timestamps; click-to-first-publish time; every manual step; tested commit/build |
+| Fresh Cloudflare Paid account | NOT RUN | Start/end timestamps; click-to-first-publish time; every manual step; tested commit/build |
+| Seven-day CLI and MCP dogfood | NOT RUN | Seven days of real prototype/report publishing; observed error-code counts; remediation/documentation for the top five codes (all if fewer) |
+
+For each separately authorized fresh account:
+
+1. Record the start time before clicking the button. Enable R2 if needed (the button cannot activate it).
+   Record that manual step and whether it happened before the timed run; do not silently exclude time.
+2. Record repository-provider connection, repository copy/name choices, bootstrap-secret entry and any
+   provisioning or migration intervention. Record account type, not private account identifiers. Do not
+   activate a subscription or paid service just to run this checklist.
+3. Complete the browser first-run flow above. Record the one-time key display and explicit `/connect`
+   continuation. Verify rejected-secret retry, refresh/back navigation, no bootstrap secret in browser
+   storage/URLs/cookies, and app-origin-only submissions, including with a separate sites origin.
+4. Publish a 40-file Vite build using `npx dropway publish ./dist --json --wait`, record the time the live
+   URL first serves it, and calculate elapsed time (target under five minutes). Record all extra inputs.
+5. Open the published page, Markdown and CSV in both rendered and raw views. Publish a second version,
+   restore the first, and verify the live bytes. Connect an actual coding client to `/mcp` using a scoped
+   key and publish through it. Record build SHA, client/version and result, never credentials.
+6. Record each failed check's exact error code and remediation, including any manual step the button
+   cannot perform. Preserve unsuccessful timings rather than replacing them with a later success.
+
+For M0 exit, retain sanitized timestamped CLI and MCP publish outcomes across a full week, including
+client attribution and error-code counts. Review the five most frequent observed codes and link fixes
+or recovery instructions; an empty or incomplete telemetry window is not a completed review. Keep raw
+sensitive telemetry private and add only sanitized aggregate evidence here.
