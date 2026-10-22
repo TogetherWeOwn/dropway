@@ -171,7 +171,7 @@ export const HTTP_OPERATIONS = [
     path: "/api/v1/publish",
     aliases: [],
     toolset: "publish",
-    scopes: [],
+    scopes: ["sites:write"],
     summary: "Publish files in one call and get a live URL",
     description:
       'Accepts multipart/form-data (field name = file path, e.g. -F "assets/app.js=@dist/assets/app.js"; or field `files[]` with filenames; a single .zip is unpacked), application/json ({"files":[{"path","content","encoding?":"base64"}]}), a .zip body, or one raw file body named by ?path= or X-Dropway-Path. Settings and `slug` may be sent as form fields, JSON fields or query parameters. With an existing `slug` you own, publishes a new version of it. Byte-identical content returns unchanged:true. The MCP tool publish_site also accepts url, sha256 and copyFrom file sources.',
@@ -270,7 +270,7 @@ export const HTTP_OPERATIONS = [
     path: "/api/v1/sites/{slug}/deploys",
     aliases: [],
     toolset: "versions",
-    scopes: [],
+    scopes: ["sites:write"],
     summary: "Start a version from a file manifest (upload only what is missing)",
     description:
       "Send every file's path, size and sha256. The response lists only the files the server does not have yet (`uploads`). PUT each, then finalize.",
@@ -364,7 +364,7 @@ export const HTTP_OPERATIONS = [
     path: "/api/v1/sites/{slug}/deploys/{id}",
     aliases: [],
     toolset: "versions",
-    scopes: [],
+    scopes: ["sites:read"],
     summary: "Pending version status (missing files)",
     description: "Pending version status (missing files). Use this REST compatibility endpoint for its documented wire format.",
     input: fromSchema({
@@ -400,7 +400,7 @@ export const HTTP_OPERATIONS = [
     path: "/api/v1/blobs/{sha256}",
     aliases: [{ method: "POST", path: "/api/v1/blobs/{sha256}" }],
     toolset: "versions",
-    scopes: [],
+    scopes: ["sites:write"],
     summary: "Upload one file's raw bytes",
     description:
       "Body = the exact file bytes, with Content-Length. The SHA-256 is verified. Only files listed as missing by a pending version you control are accepted.",
@@ -451,7 +451,7 @@ export const HTTP_OPERATIONS = [
     path: "/api/v1/sites/{slug}/files/{path}",
     aliases: [],
     toolset: "files",
-    scopes: [],
+    scopes: ["sites:read"],
     summary: "Read one file's raw bytes (ETag = sha256)",
     description: "The MCP tool read_file returns text or base64 in JSON and pages with offset/length.",
     input: fromSchema({

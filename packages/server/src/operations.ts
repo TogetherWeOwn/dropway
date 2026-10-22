@@ -1,6 +1,16 @@
 import { z } from "zod";
 import type { Context, Hono } from "hono";
-import { ApiError, requireMember, type DropwayContext, type Principal, type Scope } from "@dropway/core";
+import {
+  ApiError,
+  requireMember,
+  requireConfirm,
+  idempotencyScope,
+  validateIdempotencyKey,
+  withIdempotency,
+  type DropwayContext,
+  type Principal,
+  type Scope,
+} from "@dropway/core";
 import type { DropwayEnv } from "./env";
 import type { McpToolDefinition } from "./extensions";
 import { readJson } from "./routes/api";
@@ -11,6 +21,8 @@ export interface OperationContext {
   request: Request;
   client: string | null;
   idempotencyKey: string | null;
+  /** Set by the generated adapter; optional for manually composed contexts. */
+  transport?: "rest" | "mcp";
 }
 
 export interface OperationDefinition<I extends z.ZodType = z.ZodType, O extends z.ZodType = z.ZodType> {
@@ -57,11 +69,27 @@ export function defineOperation<I extends z.ZodType, O extends z.ZodType, S exte
   definition: OperationDefinition<I, O> & { scopes: S[] },
 ): OperationDefinition<I, O> & { scopes: S[] } {
   if (!/^[a-z][a-z0-9_]*$/.test(definition.id)) throw new Error(`Invalid operation id: ${definition.id}`);
-  if (!definition.path.startsWith("/api/v1")) throw new Error(`Operation ${definition.id} needs an /api/v1 path.`);
+  for (const route of [{ method: definition.method, path: definition.path }, ...(definition.aliases ?? [])]) {
+    if (
+      !/^[A-Z]+$/i.test(route.method) ||
+      !["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"].includes(route.method.toUpperCase()) ||
+      !/^\/api\/v1(?:\/|$)/.test(route.path)
+    ) {
+      throw new Error(`Invalid operation route: ${route.method} ${route.path}`);
+    }
+  }
   if (!definition.summary.trim() || definition.summary.length > 80) throw new Error(`Invalid summary: ${definition.id}`);
   if (!definition.description.trim() || definition.description.length >= 4096) throw new Error(`Invalid description: ${definition.id}`);
   if (definition.mcp && "exclude" in definition.mcp && !definition.mcp.exclude.trim()) throw new Error(`Empty MCP exclusion: ${definition.id}`);
   if (definition.rawBody && !(definition.mcp && "exclude" in definition.mcp)) throw new Error(`Raw operation needs an MCP exclusion: ${definition.id}`);
+  if (definition.confirm) {
+    const input = schemaJson(definition.input);
+    for (const name of ["confirm", definition.confirm]) {
+      if (input.properties?.[name]?.type !== "string" || !input.required?.includes(name)) {
+        throw new Error(`Operation ${definition.id} confirmation needs required string fields confirm and ${definition.confirm}.`);
+      }
+    }
+  }
   return definition;
 }
 
@@ -92,21 +120,37 @@ function validate(schema: z.ZodType, input: unknown, operation: string): any {
   return result.data;
 }
 
-export async function executeOperation(op: OperationDefinition, input: unknown, ctx: OperationContext): Promise<any> {
-  if (ctx.principal.kind === "anonymous" && !op.anonymous) requireMember(ctx.principal);
-  if (ctx.principal.kind === "bootstrap") requireMember(ctx.principal);
-  if (ctx.principal.kind === "member") {
-    for (const scope of op.scopes) {
-      if (!ctx.principal.scopes.includes(scope))
-        throw new ApiError(
-          403,
-          "insufficient_scope",
-          `Your API key lacks the "${scope}" scope needed for ${op.id}.`,
-          "Ask the instance owner for a key with every required scope.",
-        );
-    }
-  }
+function validateOperationInput(op: OperationDefinition, input: unknown): any {
   const parsed = validate(op.input, input, op.id);
+  if (op.confirm) requireConfirm(parsed.confirm, parsed[op.confirm], `the ${op.confirm}`);
+  return parsed;
+}
+
+export function requireOperationScopes(principal: Principal, scopes: readonly Scope[], operation: string): void {
+  const held: readonly Scope[] = principal.kind === "member" ? principal.scopes : principal.kind === "claim" ? ["sites:read", "sites:write"] : [];
+  for (const scope of scopes) {
+    if (!held.includes(scope))
+      throw new ApiError(
+        403,
+        "insufficient_scope",
+        `Your credential lacks the "${scope}" scope needed for ${operation}.`,
+        "Use a member API key with the required scopes; a claim token only controls its own site.",
+        { required: scope, held: [...held] },
+      );
+  }
+}
+
+function authorizeOperation(op: OperationDefinition, ctx: OperationContext): void {
+  if ((ctx.principal.kind === "anonymous" || ctx.principal.kind === "bootstrap") && !op.anonymous) requireMember(ctx.principal);
+  if (ctx.principal.kind === "member" || ctx.principal.kind === "claim") requireOperationScopes(ctx.principal, op.scopes, op.id);
+}
+
+export async function executeOperation(op: OperationDefinition, input: unknown, ctx: OperationContext): Promise<any> {
+  authorizeOperation(op, ctx);
+  return runOperation(op, validateOperationInput(op, input), ctx);
+}
+
+async function runOperation(op: OperationDefinition, parsed: unknown, ctx: OperationContext): Promise<any> {
   const result = await op.handler(parsed, ctx);
   const output = op.output.safeParse(result);
   if (!output.success) {
@@ -140,7 +184,7 @@ export function operationTools(operations: readonly OperationDefinition[]): McpT
       alwaysLoad: op.mcp && "alwaysLoad" in op.mcp ? op.mcp.alwaysLoad : false,
       inputSchema: schemaJson(op.input),
       outputSchema: schemaJson(op.output, "output"),
-      handler: (args, ctx) => executeOperation(op, args, ctx),
+      handler: (args, ctx) => executeOperation(op, args, { ...ctx, transport: "mcp" }),
     }));
 }
 
@@ -150,7 +194,7 @@ export function commandTable(operations: readonly OperationDefinition[]) {
     method: op.method,
     path: op.path,
     scopes: op.scopes,
-    inputSchema: schemaJson(op.input),
+    inputSchema: schemaJson(op.http?.input ?? op.input),
     ...(op.cli ? { cli: op.cli } : {}),
   }));
 }
@@ -167,7 +211,7 @@ async function requestInput(c: Context<DropwayEnv>, op: OperationDefinition) {
     if (field?.type === "integer" || field?.type === "number") query[key] = value === "" ? value : Number(value);
     if (field?.type === "boolean" && (value === "true" || value === "false")) query[key] = value === "true";
   }
-  const body = ["GET", "HEAD"].includes(c.req.method) ? {} : await readJson(c);
+  const body = op.rawBody || ["GET", "HEAD"].includes(c.req.method) ? {} : await readJson(c);
   // The URL names the resource; a body cannot select a different one.
   return { ...query, ...body, ...c.req.param() };
 }
@@ -176,7 +220,7 @@ export function installOperationRoutes(api: Hono<DropwayEnv>, operations: readon
   const routes = new Set<string>();
   for (const op of operations) {
     for (const route of [{ method: op.method, path: op.path }, ...(op.aliases ?? [])]) {
-      const key = `${route.method} ${route.path}`;
+      const key = `${route.method.toUpperCase()} ${route.path.replace(/\{[^}]+\}/g, "{}")}`;
       if (routes.has(key)) throw new Error(`Duplicate operation route: ${key}`);
       routes.add(key);
       const handler =
@@ -187,12 +231,27 @@ export function installOperationRoutes(api: Hono<DropwayEnv>, operations: readon
             principal: c.get("principal"),
             request: c.req.raw,
             client: c.req.header("x-dropway-client") ?? null,
-            idempotencyKey: c.req.header("idempotency-key") ?? null,
+            idempotencyKey: validateIdempotencyKey(c.req.header("idempotency-key")),
+            transport: "rest",
           };
-          return c.json(await executeOperation(op, await requestInput(c, op), ctx), (op.http?.status ?? 200) as 200);
+          // Authorization and validation also run before a cached response can be returned.
+          authorizeOperation(op, ctx);
+          const input = validateOperationInput(op, await requestInput(c, op));
+          const { result, replayed } = await withIdempotency(
+            ctx.dw,
+            {
+              scope: idempotencyScope(ctx.principal),
+              operation: `rest:${op.id}`,
+              key: op.tool?.idempotent ? ctx.idempotencyKey : null,
+              input,
+              redactForReplay: op.tool?.redactForReplay,
+            },
+            () => runOperation(op, input, ctx),
+          );
+          return c.json(replayed ? { ...(result as Record<string, unknown>), replayed: true } : result, (op.http?.status ?? 200) as 200);
         });
       const path = honoPath(route.path);
-      api.on(route.method, op.http?.wildcard ? path.replace(/:path$/, ":path{.+}") : path, handler);
+      api.on(route.method.toUpperCase(), op.http?.wildcard ? path.replace(/:path$/, ":path{.+}") : path, handler);
     }
   }
 }

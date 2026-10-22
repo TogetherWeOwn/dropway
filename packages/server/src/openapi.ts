@@ -10,7 +10,8 @@ const json = (schema: Json, example: unknown, description = "OK") => ({
 
 /** Generated from the same definitions that mount REST and register MCP tools. */
 export function buildOpenApi(origin: string, instanceName: string, operations: readonly OperationDefinition[] = createOperationRegistry()): Json {
-  const paths: Json = structuredClone(PAGE_PATHS);
+  const paths: Json = Object.create(null);
+  for (const [path, item] of Object.entries(PAGE_PATHS)) paths[path] = Object.assign(Object.create(null), structuredClone(item));
   for (const item of Object.values<Json>(paths))
     for (const page of Object.values<Json>(item)) {
       page.description ??= page.summary;
@@ -34,7 +35,7 @@ export function buildOpenApi(origin: string, instanceName: string, operations: r
       const props = Object.fromEntries(Object.entries(input.properties ?? {}).filter(([key]) => !names.includes(key)));
       const required = (input.required ?? []).filter((key: string) => !names.includes(key));
       const method = route.method.toLowerCase();
-      if (method === "get" || method === "head") {
+      if (method === "get" || method === "head" || (op.rawBody && !op.http?.handler)) {
         for (const [name, schema] of Object.entries(props))
           parameters.push({
             name,
@@ -43,7 +44,7 @@ export function buildOpenApi(origin: string, instanceName: string, operations: r
             schema,
           });
       }
-      const contentTypes = op.http?.contentTypes ?? ["application/json"];
+      const contentTypes = op.http?.contentTypes ?? [op.rawBody ? "application/octet-stream" : "application/json"];
       const requestBody =
         !["get", "head", "delete"].includes(method) || (Object.keys(props).length > 0 && method === "delete")
           ? {
@@ -108,7 +109,7 @@ export function buildOpenApi(origin: string, instanceName: string, operations: r
         for (const code of op.http.statuses) responses[code] = success;
       }
       responses[400] = responses.default;
-      paths[route.path] ??= {};
+      paths[route.path] ??= Object.create(null);
       paths[route.path][method] = {
         operationId: index === 0 ? op.id : `${op.id}_alias_${index}`,
         summary: op.summary,

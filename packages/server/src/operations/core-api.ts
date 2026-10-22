@@ -214,12 +214,12 @@ export const CORE_API_OPERATIONS = [
       idempotentHint: true,
       openWorldHint: true,
     },
-    async handler(a, { dw, principal, client }) {
+    async handler(a, { dw, principal, client, transport }) {
       return publishSources(dw, principal, {
         ...a,
         files: a.files,
         client,
-        source: "mcp",
+        source: transport === "rest" ? "api" : "mcp",
       });
     },
     tool: {
@@ -287,7 +287,7 @@ export const CORE_API_OPERATIONS = [
       idempotentHint: true,
       openWorldHint: true,
     },
-    async handler(a, { dw, principal, client }) {
+    async handler(a, { dw, principal, client, transport }) {
       return updateSiteFiles(dw, principal, a.site, {
         files: a.files,
         delete: a.delete,
@@ -295,7 +295,7 @@ export const CORE_API_OPERATIONS = [
         baseVersionId: a.baseVersionId,
         message: a.message,
         client,
-        source: "mcp",
+        source: transport === "rest" ? "api" : "mcp",
       });
     },
     http: {
