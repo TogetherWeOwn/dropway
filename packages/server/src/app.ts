@@ -32,7 +32,7 @@ export function createAppRouter(opts: { app: Hono<DropwayEnv>; uiSlots: UiSlots;
   app.get("/health", (c) => c.json({ ok: true, service: "dropway" }));
   app.get("/openapi.json", (c) => {
     const dw = c.get("dw");
-    return c.json(buildOpenApi(appOrigin(dw), dw.config.instanceName), 200, { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300" });
+    return c.json(buildOpenApi(appOrigin(dw), dw.config.instanceName, dw.config.anonymous.enabled), 200, { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300" });
   });
   // Agent discovery (./discovery): llms.txt, llms-full.txt, the skill and its well-known indexes.
   const markdown = { "Content-Type": "text/markdown; charset=utf-8", "Cache-Control": "public, max-age=300", "Access-Control-Allow-Origin": "*", "X-Content-Type-Options": "nosniff" };
