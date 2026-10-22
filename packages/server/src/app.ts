@@ -4,6 +4,7 @@ import type { DropwayEnv } from "./env";
 import type { McpHandlerFactory, McpToolDefinition, UiSlots } from "./extensions";
 import { APP_PAGE_CSP, escapeHtml, htmlPage } from "./html";
 import { buildOpenApi } from "./openapi";
+import { agentSkillsIndex, legacySkillsIndex, llmsFullTxt, llmsTxt, skillInstance, skillMarkdown, SKILL_NAME } from "./discovery";
 
 /**
  * App-origin pages: landing, /openapi.json, /llms.txt, /health, /claim, /mcp.
@@ -65,47 +66,14 @@ curl ${e(o)}/api/v1/publish -H "Authorization: Bearer $DROPWAY_API_KEY" \\
 <h2>Large sites: incremental deploys</h2>
 <p>Send a manifest of <code>{path, size, sha256}</code> to <code>POST /api/v1/sites/:slug/deploys</code>, upload only the files it reports missing with <code>PUT /api/v1/blobs/:sha256</code>, then <code>POST .../finalize</code>. Unchanged files are never uploaded twice.</p>
 <h2>For agents</h2>
-<p><a href="/openapi.json">OpenAPI</a> · <a href="/llms.txt">llms.txt</a> · MCP endpoint at <code>${e(o)}/mcp</code></p>
+<p><a href="/openapi.json">OpenAPI</a> · <a href="/llms.txt">llms.txt</a> · <a href="/llms-full.txt">llms-full.txt</a> · <a href="/skill.md">Agent Skill</a> (<code>npx skills add ${e(o)}</code>) · MCP endpoint at <code>${e(o)}/mcp</code></p>
 <footer>Open source (MIT): <a href="https://github.com/TogetherWeOwn/dropway">github.com/TogetherWeOwn/dropway</a>. Self-host it on your own Cloudflare account.</footer>
 </main>`;
   return c.html(htmlPage({ title: dw.config.instanceName, css: LANDING_CSS, body, head: headHtml }), 200, pageHeaders());
 }
 
-export function llmsTxt(origin: string, config: DropwayConfig): string {
-  return `# ${config.instanceName}
-
-> Instant web hosting for AI agents. Publish a file, folder or site to a live URL with one HTTP call. Every publish is an immutable version.
-
-Base URL: ${origin}
-Auth: \`Authorization: Bearer dw_...\` (API key from the instance owner).${config.anonymous.enabled ? " Anonymous publishing is enabled: without a key, sites expire after 24 hours and a claimToken is returned." : " Anonymous publishing is disabled on this instance."}
-Errors: JSON \`{ "error": { "code", "message", "hint" } }\`. Follow the hint.
-
-## Publish
-- One call: \`curl ${origin}/api/v1/publish -H "Authorization: Bearer $KEY" -F "index.html=@index.html" -F "assets/app.js=@assets/app.js"\` (form field name = file path). Also accepts a .zip body, JSON \`{"files":[{"path","content"}]}\`, or one raw file with \`?path=name.ext\`.
-- Same site again: add \`slug=<slug>\` (form field or query). Identical content returns \`unchanged: true\`.
-- Share the \`url\` from the response exactly as returned.
-
-## Incremental deploys (large sites)
-1. \`POST /api/v1/sites/{slug}/deploys\` with \`{"files":[{"path","size","sha256","contentType"}]}\` (create the site first with \`POST /api/v1/sites {"slug":...}\`).
-2. \`PUT /api/v1/blobs/{sha256}\` with the raw bytes of each file listed in \`uploads\`.
-3. \`POST /api/v1/sites/{slug}/deploys/{id}/finalize\` makes the version live atomically.
-Pass \`baseVersionId\` to avoid overwriting someone else's newer publish (409 version_conflict).
-
-## Manage
-- \`GET /api/v1/sites\`, \`GET|PATCH|DELETE /api/v1/sites/{slug}\` (settings: title, description, spa, renderMarkdown, crossOriginIsolation, password)
-- \`GET /api/v1/sites/{slug}/versions\`, \`POST /api/v1/sites/{slug}/versions/{id}/restore\`
-- \`GET /api/v1/sites/{slug}/files\`, \`GET /api/v1/sites/{slug}/files/{path}\` (raw bytes, ETag = sha256)
-- \`POST /api/v1/keys\` (scopes: sites:read, sites:write, keys:write, members:write; optional \`site\` restriction)
-
-## Viewing
-- Browsers get rendered views for Markdown; \`?raw=1\` returns any file's raw bytes (HTML as source), \`?download=1\` downloads it, \`?view=1\` forces the rendered view.
-
-## Docs
-- OpenAPI: ${origin}/openapi.json
-- MCP (Streamable HTTP): ${origin}/mcp
-- Source: https://github.com/TogetherWeOwn/dropway
-`;
-}
+/** /llms.txt (moved to ./discovery; re-exported here for compatibility). */
+export { llmsTxt } from "./discovery";
 
 /** Install the core app-origin routes on `app` (which may already hold extension routes). */
 export function createAppRouter(opts: { app: Hono<DropwayEnv>; uiSlots: UiSlots; mcp?: McpHandlerFactory | undefined; mcpTools: readonly McpToolDefinition[] }) {
@@ -119,10 +87,27 @@ export function createAppRouter(opts: { app: Hono<DropwayEnv>; uiSlots: UiSlots;
     const dw = c.get("dw");
     return c.json(buildOpenApi(appOrigin(dw), dw.config.instanceName), 200, { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300" });
   });
+  // Agent discovery (./discovery): llms.txt, llms-full.txt, the skill and its well-known indexes.
+  const markdown = { "Content-Type": "text/markdown; charset=utf-8", "Cache-Control": "public, max-age=300", "Access-Control-Allow-Origin": "*", "X-Content-Type-Options": "nosniff" };
+  const describedBy = (o: string) => ({ Link: `<${o}/llms.txt>; rel="describedby"; type="text/markdown", <${o}/openapi.json>; rel="service-desc"` });
   app.get("/llms.txt", (c) => {
     const dw = c.get("dw");
-    return c.text(llmsTxt(appOrigin(dw), dw.config), 200, { "Cache-Control": "public, max-age=300" });
+    return c.body(llmsTxt(appOrigin(dw), dw.config, opts.mcpTools), 200, markdown);
   });
+  app.get("/llms-full.txt", (c) => {
+    const dw = c.get("dw");
+    return c.body(llmsFullTxt(appOrigin(dw), dw.config, opts.mcpTools), 200, markdown);
+  });
+  const skill = (c: Context<DropwayEnv>) => {
+    const name = c.req.param("name");
+    if (name !== undefined && name !== SKILL_NAME) return c.notFound();
+    return c.body(skillMarkdown(skillInstance(c.get("dw"))), 200, { ...markdown, ...describedBy(appOrigin(c.get("dw"))) });
+  };
+  app.get("/skill.md", skill);
+  app.get("/.well-known/agent-skills/:name/SKILL.md", skill);
+  app.get("/.well-known/skills/:name/SKILL.md", skill);
+  app.get("/.well-known/agent-skills/index.json", async (c) => c.json(await agentSkillsIndex(c.get("dw")), 200, { "Cache-Control": "public, max-age=300", "Access-Control-Allow-Origin": "*" }));
+  app.get("/.well-known/skills/index.json", (c) => c.json(legacySkillsIndex(), 200, { "Cache-Control": "public, max-age=300", "Access-Control-Allow-Origin": "*" }));
   app.get("/claim", (c) => {
     const slug = c.req.query("slug") ?? "";
     const o = appOrigin(c.get("dw"));

@@ -1,0 +1,267 @@
+import { appOrigin, sha256Hex, siteUrl, type DropwayConfig, type DropwayContext } from "@dropway/core";
+import type { McpToolDefinition } from "./extensions";
+import { buildOpenApi } from "./openapi";
+
+/**
+ * Agent discovery documents, all generated from the same sources so they cannot drift:
+ * the OpenAPI document (REST), the MCP tool list, and the skill template.
+ *
+ *   /llms.txt         short reference (llmstxt.org format)
+ *   /llms-full.txt    every endpoint, every MCP tool with its input schema, error codes
+ *   /skill.md         Agent Skill (SKILL.md) with this instance's URLs filled in
+ *   /.well-known/agent-skills/index.json  discovery index v0.2.0 (npx skills add <origin>)
+ *   /.well-known/skills/index.json        legacy index v0.1.0
+ *
+ * The repository copy at skills/dropway/SKILL.md is skillMarkdown(null): a test keeps it in sync.
+ */
+
+export const SKILL_NAME = "dropway";
+export const SKILL_DESCRIPTION =
+  "Publish files, folders and static sites to a live URL with Dropway, then update, version, roll back and share them. Use when the user wants to publish, host, share, deploy or preview HTML pages, Markdown docs, reports, images, PDFs, demos or a built web app, or to change, check or roll back something already on Dropway.";
+
+export interface SkillInstance {
+  origin: string;
+  instanceName: string;
+  anonymousPublish: boolean;
+  exampleSiteUrl: string;
+}
+
+/** The Dropway Agent Skill. `instance` null renders the generic copy kept in the repository. */
+export function skillMarkdown(instance: SkillInstance | null): string {
+  const app = instance ? instance.origin : "$DROPWAY_URL";
+  const where = instance
+    ? `- Instance: \`${app}\` (${instance.instanceName}). API key: \`$DROPWAY_API_KEY\` (starts with \`dw_\`; the instance owner creates keys). If the key is missing, ask the user.
+- ${instance.anonymousPublish ? "This instance also accepts publishing without a key: such sites expire after 24 hours and return a claim token." : "This instance requires an API key for every publish."}`
+    : `- Instance: \`$DROPWAY_URL\` (the app origin, for example \`https://dropway.<account>.workers.dev\`). API key: \`$DROPWAY_API_KEY\` (starts with \`dw_\`; the instance owner creates keys). If either is missing, ask the user.
+- \`$DROPWAY_URL/skill.md\` serves this skill with the instance's own URLs and settings filled in.`;
+  return `---
+name: ${SKILL_NAME}
+description: ${SKILL_DESCRIPTION}
+license: MIT
+metadata:
+  homepage: https://github.com/TogetherWeOwn/dropway
+---
+
+# Dropway
+
+Dropway turns files into a live URL. Every publish is an immutable version you can roll back. People opening a site get the right view for each file (HTML runs as a real page, Markdown is rendered, images, PDFs and code are displayed) and \`?raw=1\` on any file URL returns the raw bytes.
+
+## Connect
+
+${where}
+- MCP (preferred when your client supports remote MCP): \`${app}/mcp\` with header \`Authorization: Bearer $DROPWAY_API_KEY\`.
+  Claude Code: \`claude mcp add --transport http dropway ${app}/mcp --header "Authorization: Bearer $DROPWAY_API_KEY"\`
+- REST with curl works everywhere: \`${app}/api/v1\`, same header. Full reference: \`${app}/llms-full.txt\`, OpenAPI: \`${app}/openapi.json\`.
+
+## Publish
+
+MCP: \`publish_site\` with \`files\`, each \`{ path, content }\` (text; base64 only for small binaries), \`{ path, url }\` (the server downloads a public https file), \`{ path, sha256, size }\` (then PUT the bytes to the returned upload link and call \`finalize_version\`) or \`{ path, copyFrom }\`.
+
+REST, one call (form field name = file path):
+
+\`\`\`sh
+curl -fsS ${app}/api/v1/publish -H "Authorization: Bearer $DROPWAY_API_KEY" \\
+  -F "index.html=@index.html" -F "assets/app.js=@assets/app.js"
+\`\`\`
+
+A built folder: \`(cd dist && zip -qr ../site.zip .) && curl -fsS ${app}/api/v1/publish -H "Authorization: Bearer $DROPWAY_API_KEY" -H "Content-Type: application/zip" --data-binary @site.zip\`
+
+Publish to the same site again with \`-F slug=<slug>\` (REST) or \`site: "<slug>"\` (MCP). Identical content returns \`unchanged\` and creates no version.
+
+## Change, check, roll back
+
+- Change a few files: \`update_site_files\` (MCP) or \`PATCH ${app}/api/v1/sites/<slug>/files\` with \`files\`, \`delete\`, \`move\`, and \`baseVersionId\` from your last result. \`version_conflict\` means someone published since: re-read, re-apply, retry.
+- Check your work: \`list_files\`, \`read_file\`, or fetch the returned \`url\`.
+- Roll back: \`list_versions\`, then \`restore_version\` with \`"v3"\`.
+- Settings: \`update_site_settings\` (spa, renderMarkdown, title). Password: \`set_site_access\`.
+
+## Rules
+
+1. Share the \`url\` from the response exactly as returned. Never build site URLs yourself${instance ? ` (on this instance they look like \`${instance.exampleSiteUrl}\`, but that can change)` : ""}.
+2. Put \`index.html\` (or \`index.md\` / \`README.md\`) at the root so the URL opens a page.
+3. Use relative links inside a site (\`assets/app.js\`, not \`/assets/app.js\`) so it works on every instance.
+4. Keep big or binary files out of the conversation: use url sources or the upload links, not base64.
+5. Never publish secrets (.env files, keys, tokens). If one slipped out, publish a fixed version and delete the bad one with \`delete_version\`.
+6. Retrying a write? Reuse the same \`idempotencyKey\` (MCP) or \`Idempotency-Key\` header (REST).
+7. Errors carry \`code\`, \`message\` and \`hint\`: follow the hint. Destructive tools need \`confirm\` set to the slug.
+`;
+}
+
+export function skillInstance(dw: DropwayContext): SkillInstance {
+  return { origin: appOrigin(dw), instanceName: dw.config.instanceName, anonymousPublish: dw.config.anonymous.enabled, exampleSiteUrl: siteUrl(dw, "bright-otter-x7k2") };
+}
+
+/** /.well-known/agent-skills/index.json (Agent Skills discovery v0.2.0). */
+export async function agentSkillsIndex(dw: DropwayContext) {
+  const md = skillMarkdown(skillInstance(dw));
+  return {
+    $schema: "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+    skills: [
+      {
+        name: SKILL_NAME,
+        type: "skill-md",
+        description: SKILL_DESCRIPTION,
+        url: `${appOrigin(dw)}/.well-known/agent-skills/${SKILL_NAME}/SKILL.md`,
+        digest: `sha256:${await sha256Hex(md)}`,
+      },
+    ],
+  };
+}
+
+/** /.well-known/skills/index.json (legacy v0.1.0 layout: <base>/<name>/SKILL.md). */
+export function legacySkillsIndex() {
+  return { skills: [{ name: SKILL_NAME, description: SKILL_DESCRIPTION, files: ["SKILL.md"] }] };
+}
+
+// ---------------------------------------------------------------- llms.txt
+
+type OpenApiOp = { operationId?: string; summary?: string; description?: string; deprecated?: boolean; parameters?: Array<Record<string, unknown>>; requestBody?: Record<string, any>; "x-mcp-tool"?: string; "x-mcp-exclude"?: string };
+
+function operations(origin: string, instanceName: string) {
+  const doc = buildOpenApi(origin, instanceName) as { paths: Record<string, Record<string, OpenApiOp>> };
+  const out: Array<{ method: string; path: string; op: OpenApiOp }> = [];
+  for (const [path, item] of Object.entries(doc.paths)) {
+    for (const [method, op] of Object.entries(item)) out.push({ method: method.toUpperCase(), path, op });
+  }
+  return out;
+}
+
+/** Is a tool listed on this instance? (Evaluated with the instance config only.) */
+function toolEnabled(t: McpToolDefinition, config: DropwayConfig): boolean {
+  if (!t.enabled) return true;
+  try {
+    return t.enabled({ config } as DropwayContext);
+  } catch {
+    return true;
+  }
+}
+
+const firstSentence = (s: string) => {
+  const m = /^(.+?[.!?])(\s|$)/.exec(s.trim());
+  return (m ? m[1]! : s.trim()).replace(/\s+/g, " ");
+};
+
+function mcpLines(origin: string): string {
+  return `- Endpoint: \`${origin}/mcp\` (Streamable HTTP; header \`Authorization: Bearer dw_...\`). Narrow the tool list with \`?toolsets=core\` (or sites, versions, keys, members) and \`?read_only=1\`.
+- Claude Code: \`claude mcp add --transport http dropway ${origin}/mcp --header "Authorization: Bearer $DROPWAY_API_KEY"\`
+- Codex (~/.codex/config.toml): \`[mcp_servers.dropway]\` with \`url = "${origin}/mcp"\` and \`bearer_token_env_var = "DROPWAY_API_KEY"\`
+- Cursor, VS Code and other clients: add a remote (HTTP) MCP server with that URL and header.
+- Inspector: \`npx @modelcontextprotocol/inspector --cli ${origin}/mcp --transport http --header "Authorization: Bearer $DROPWAY_API_KEY" --method tools/list\``;
+}
+
+/** /llms.txt: what this is, how to connect, every endpoint and tool in one line each. */
+export function llmsTxt(origin: string, config: DropwayConfig, tools: readonly McpToolDefinition[] = []): string {
+  const ops = operations(origin, config.instanceName).filter((o) => o.path.startsWith("/api/") && !o.op.deprecated);
+  const visibleTools = tools.filter((t) => toolEnabled(t, config));
+  return `# ${config.instanceName}
+
+> Instant web hosting for AI agents (Dropway, open source, on Cloudflare). Publish a file, folder or site to a live URL with one call; every publish is an immutable version you can roll back. Use the REST API, the remote MCP server or the Agent Skill.
+
+Base URL: ${origin}
+Auth: \`Authorization: Bearer dw_...\` (API key from the instance owner; scopes sites:read, sites:write, keys:write, members:write).${
+    config.anonymous.enabled ? " Anonymous publishing is enabled: without a key, sites expire after 24 hours and a claimToken is returned." : " Anonymous publishing is disabled on this instance."
+  }
+Errors: JSON \`{ "error": { "code", "message", "hint", "details" }, "requestId" }\`. Follow the hint; validation errors list every bad field in details.fields.
+URLs: share the \`url\` from responses exactly as returned (site URLs look like ${siteUrl({ config, requestUrl: new URL(origin) }, "bright-otter-x7k2")}).
+
+## Quick start
+
+- Publish: \`curl ${origin}/api/v1/publish -H "Authorization: Bearer $KEY" -F "index.html=@index.html" -F "assets/app.js=@assets/app.js"\` (form field name = file path). Also accepts a .zip body, JSON \`{"files":[{"path","content"}]}\`, or one raw file with \`?path=name.ext\`.
+- Same site again: add \`slug=<slug>\`. Identical content returns \`unchanged\`.
+- Change some files: \`PATCH ${origin}/api/v1/sites/{slug}/files\` with \`files\`, \`delete\`, \`move\`, \`baseVersionId\`.
+- Large sites: \`POST /api/v1/sites/{slug}/deploys\` with \`{path,size,sha256}\` for every file, \`PUT /api/v1/blobs/{sha256}\` only for the missing ones, then \`POST .../deploys/{id}/finalize\`.
+- Viewing: browsers get rendered views (HTML is the real page, Markdown rendered); \`?raw=1\` returns raw bytes, \`?download=1\` downloads.
+
+## MCP
+
+${mcpLines(origin)}
+
+## Docs
+
+- [Full reference](${origin}/llms-full.txt): every endpoint, every MCP tool with its input schema, error codes
+- [OpenAPI 3.1](${origin}/openapi.json): operationId = MCP tool name
+- [Agent Skill](${origin}/skill.md): install with \`npx skills add ${origin}\` or \`npx skills add TogetherWeOwn/dropway\`
+- [Source (MIT)](https://github.com/TogetherWeOwn/dropway)
+
+## REST endpoints
+
+${ops.map((o) => `- \`${o.method} ${o.path}\` (${o.op.operationId}): ${o.op.summary ?? ""}`).join("\n")}
+
+## MCP tools
+
+${visibleTools.map((t) => `- \`${t.name}\`: ${firstSentence(t.description)}`).join("\n")}
+`;
+}
+
+const ERROR_CODES: Array<[string, string]> = [
+  ["400 invalid_request, invalid_json, invalid_path, duplicate_path, invalid_sha256, invalid_slug, slug_reserved", "Input problems; details.fields lists every bad field. Fix and resend."],
+  ["400 hash_mismatch, size_mismatch", "Uploaded bytes differ from the declared sha256 or size. Re-read the file; do not re-encode it."],
+  ["400 confirm_mismatch", "Destructive call without the right confirm value; details.expected names it."],
+  ["401 unauthorized, invalid_api_key, api_key_expired", "Missing or bad credential. Send Authorization: Bearer dw_..."],
+  ["403 insufficient_scope, scope_not_grantable, forbidden", "The key lacks a scope (details.required) or the action is not allowed."],
+  ["404 site_not_found, version_not_found, file_not_found, member_not_found, key_not_found", "Nothing by that name that this key can see; the hint names the list call."],
+  ["409 slug_taken, version_conflict, version_is_live, missing_blobs, already_claimed", "Conflicts. version_conflict: re-read the live version and retry with its id as baseVersionId. missing_blobs: upload details.uploads, then finalize again."],
+  ["409 idempotency_in_progress", "The first call with this idempotency key is still running; retry in a second."],
+  ["411 length_required", "Send Content-Length with raw uploads."],
+  ["413 inline_too_large, file_too_large, site_too_large, request_too_large", "Over a size cap; the hint names the right upload path."],
+  ["422 fetch_failed, fetch_blocked", "A url source could not be fetched, or is not a public https URL."],
+  ["422 idempotency_key_reused", "Same idempotency key, different arguments. Use a new key."],
+  ["429 rate_limited", "Wait details.retryAfterSeconds (Retry-After header)."],
+  ["501 feature_unavailable", "This instance lacks the feature; details.requires says what."],
+  ["500 internal_error, 502 blob_missing", "Retry once; report the requestId if it repeats."],
+];
+
+/** /llms-full.txt: the complete agent reference. */
+export function llmsFullTxt(origin: string, config: DropwayConfig, tools: readonly McpToolDefinition[]): string {
+  const ops = operations(origin, config.instanceName);
+  const visibleTools = tools.filter((t) => toolEnabled(t, config));
+  const opBlock = (o: (typeof ops)[number]) => {
+    const lines = [`### ${o.method} ${o.path}`, "", `operationId \`${o.op.operationId}\`${o.op.deprecated ? " (deprecated alias)" : ""}. ${o.op.summary ?? ""}`];
+    if (o.op["x-mcp-tool"]) lines.push(`MCP tool: \`${o.op["x-mcp-tool"]}\`.`);
+    else if (o.op["x-mcp-exclude"]) lines.push(`No MCP tool: ${o.op["x-mcp-exclude"]}.`);
+    if (o.op.description) lines.push("", o.op.description);
+    const params = (o.op.parameters ?? []).map((p) => `\`${String(p.name)}\` (${String(p.in)}${p.required ? ", required" : ""})${p.description ? `: ${String(p.description)}` : ""}`);
+    if (params.length) lines.push("", `Parameters: ${params.join("; ")}.`);
+    const bodyTypes = o.op.requestBody?.content ? Object.keys(o.op.requestBody.content) : [];
+    if (bodyTypes.length) lines.push(`Body: ${bodyTypes.join(", ")}.`);
+    return lines.join("\n");
+  };
+  const toolBlock = (t: McpToolDefinition) => {
+    const a = t.annotations ?? {};
+    const hints = [a.readOnlyHint ? "read-only" : "writes", a.destructiveHint ? "destructive" : null, t.idempotent ? "accepts idempotencyKey" : null].filter(Boolean).join(", ");
+    return `### ${t.name}\n\n${t.description}\n\nToolset \`${t.toolset ?? "extra"}\`; ${hints}${t.scopes?.length ? `; needs ${t.scopes.join(", ")}` : ""}.\n\nInput schema: \`${JSON.stringify(t.inputSchema)}\``;
+  };
+  return `${llmsTxt(origin, config, tools).trimEnd()}
+
+---
+
+# Full reference
+
+## Concepts
+
+- Site: a slug (DNS label, e.g. bright-otter-x7k2) with settings and a live version. Tools accept a slug, a site id or any URL of the site.
+- Version: an immutable set of files (path -> sha256, size, content type) with a number (v1, v2...). Publishing makes a new version live atomically; restore flips the live pointer back. Version arguments accept "live", "v3", "3" or an id.
+- Files are stored once per owner by SHA-256: unchanged files are never uploaded twice, across versions and sites.
+- File sources (MCP publish_site and update_site_files, REST PATCH .../files): each file has a path and exactly one of content (+encoding utf8 up to 1 MB or base64 up to 256 KB), url (+headers; public https only, up to 25 MB, 3 redirects, 30 s), sha256 (+size; reused if stored, otherwise an upload link is returned) or copyFrom {site?, version?, path?}.
+- status: "live" (the URL serves it now), "unchanged" (identical to the live version; nothing created) or "awaiting_upload" (PUT each upload.items[].url with the raw bytes and the same Authorization header, then finalize_version).
+- Idempotency: writes accept idempotencyKey (MCP) or the Idempotency-Key header (REST PATCH .../files). The same key and arguments within 24 hours replay the first result (replayed: true); a different body returns 422 idempotency_key_reused. Secrets (new API keys) are not replayed.
+- Viewers: navigations to a file get a rendered view chosen by type; sub-resource requests (img, script, fetch) always get raw bytes. ?raw=1 raw bytes (text types as text/plain), ?download=1 download, ?view=1 force the viewer.
+
+## Error codes
+
+${ERROR_CODES.map(([c, m]) => `- ${c}: ${m}`).join("\n")}
+
+## REST operations
+
+${ops.map(opBlock).join("\n\n")}
+
+## MCP tools
+
+Results carry structuredContent (matching the tool's outputSchema) plus a text block: one plain-English line, then the compact JSON. Live URLs also come as resource_link blocks. Business errors are results with isError: true and the text "<code>: <message> Fix: <hint>" followed by the error JSON.
+
+${visibleTools.map(toolBlock).join("\n\n")}
+
+## Agent Skill
+
+${skillMarkdown({ origin, instanceName: config.instanceName, anonymousPublish: config.anonymous.enabled, exampleSiteUrl: siteUrl({ config, requestUrl: new URL(origin) }, "bright-otter-x7k2") })}`;
+}
