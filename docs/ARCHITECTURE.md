@@ -245,8 +245,15 @@ consumers, scripts, tests). Inside routes, use `c.get("dw")` and
   `uiSlots.settingsSections` adds sections to `/dashboard/settings`.
   `uiSlots.session = { signInPath, signOutPath }` tells the dashboard that the
   embedding app signs people in with cookie sessions (its identity adapter must
-  resolve them for `/api/v1` and refuse cross-origin writes); API-key sign-in at
-  `/login` keeps working. Never render user content on the app origin.
+  resolve them for `/api/v1` and refuse cross-origin writes). App cookies must use
+  `__Host-` names; cookie-authenticated state-changing requests require both exact
+  app `Origin` and `Sec-Fetch-Site: same-origin`, not just `SameSite` cookies.
+  API-key sign-in at `/login` keeps working and issues no app cookie. The R-15
+  tests pin the current bearer-only and site-cookie surfaces; real app-cookie
+  issuance and authenticated-write integration tests remain deferred / not run
+  until R-21, before session activation. Embedding-cookie activation likewise
+  requires those real integration tests; the current tests are not approval.
+  Never render user content on the app origin.
 - **CLI:** `packages/cli` talks to the REST API (it runs on users' machines). The upload protocol
   (`src/publish.ts`, `src/client.ts`) uses only `fetch`, so `test/cli-publish.test.ts` runs it against
   the real Worker inside workerd; `packages/cli/test` covers the rest, end to end against a local Worker.

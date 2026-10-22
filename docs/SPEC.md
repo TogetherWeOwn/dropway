@@ -176,7 +176,7 @@ Full matrix in section 10.
 | ANON-01 | Off by default (`ANONYMOUS_PUBLISH=false`); one setting turns it on | P0 | Done |
 | ANON-02 | Anonymous sites expire (default 24 h), have smaller caps, a per-IP hourly creation limit and `noindex` | P0 | Done |
 | ANON-03 | Claim token and claim URL (token in the URL fragment, never sent to the server); claim by API (`claim_site`) or by signing in | P0 | Done (sign-in claim in R-21) |
-| ANON-04 | Anonymous sites are always sandboxed on a shared sites origin and carry a small "Report abuse" link | P0 | R-12, R-15 |
+| ANON-04 | Anonymous sites are always sandboxed on a shared sites origin and carry a small "Report abuse" link | P0 | Sandbox and link done; report form R-37 |
 | ANON-05 | Optional Turnstile on browser uploads; agent-compatible challenge (`anonymous_challenge_required` with a `challengeUrl` a human opens once) when abuse pressure is on | P1 | R-37 |
 | ANON-06 | Moderation hook: hold suspicious anonymous HTML (password fields, forms posting elsewhere) until claimed | P1 | R-37 |
 
@@ -184,7 +184,7 @@ Full matrix in section 10.
 
 | ID | Feature | Pri | Status |
 |---|---|---|---|
-| ACC-01 | Hard-to-guess random slugs (`adjective-noun-xxxx`; 6-character suffix for new slugs in R-15) | P0 | Done |
+| ACC-01 | Hard-to-guess random slugs (`adjective-noun-xxxxxx`; 6-character suffix for new slugs, existing 4-character slugs unchanged) | P0 | Done |
 | ACC-02 | Password per site: checked server-side, stored hashed, survives redeploys; changing it signs everyone out | P0 | Done |
 | ACC-03 | Access modes `public`, `password`, `restricted` (verified emails and email domains), `private` (members only); one mode at a time; applies on every address of the site | P1 | R-23 |
 | ACC-04 | Share links: signed, expiring, optionally pinned to a version, revocable, with a use count | P1 | R-23 |
@@ -1556,6 +1556,13 @@ origin and `Sec-Fetch-Site: same-origin`; the REST API authenticates by bearer t
 its CORS allows any origin without credentials. Subdomain mode on a separate registrable domain removes the
 caveat.
 
+**Current boundary:** built-in API-key sign-in issues no app cookie, and core REST ignores
+cookie-only credentials. Real app-cookie `__Host-` issuance and cookie-authenticated write
+integration checks are **deferred / not run** until R-21 introduces sessions, before any
+session is enabled. Cookie-rejection tests are not proof of either rule. An embedding
+identity adapter accepting cookies must enforce both header checks itself; this boundary
+does not approve a cookie-authenticated embedding deployment.
+
 ### 11.3 Headers by response class
 
 | Response | Headers |
@@ -1597,9 +1604,9 @@ grant more than they hold. Keys can be limited to one site and, for drives, a pa
 - **Dedupe privacy.** "Already have it" is answered only for hashes the caller's tenant (or anonymous
   claim) has proven it holds (`blob_scopes`). Other hashes are always requested, verified, and not rewritten
   if present. No unauthenticated endpoint reveals whether a hash exists.
-- **Enumeration.** Generated slugs are `adjective-noun-xxxx` (60 x 60 words x 32^4 suffixes, about 3.8
-  billion names, about 32 bits). That makes them hard to guess, not secret: anything private must use an
-  access mode. R-15 lengthens the suffix to 6 characters (about 42 bits) for new slugs. Listing endpoints
+- **Enumeration.** Newly generated slugs are `adjective-noun-xxxxxx` (60 x 60 words x 32^6 suffixes,
+  about 3.9 trillion names, about 42 bits). That makes them hard to guess, not secret: anything private
+  must use an access mode. Existing four-character slugs remain valid and are not renamed. Listing endpoints
   need credentials; version previews need a signed link; 404s look the same for "never existed" and "no access".
 - **IPs.** Only salted hashes (`SIGNING_SECRET`) are stored. Analytics visitors are daily salted hashes.
 - **SSRF.** URL sources, proxy routes and webhooks fetch `https` only, refuse private, loopback,
@@ -1622,6 +1629,15 @@ shared origin, "Report abuse" link on anonymous HTML pages, optional Turnstile o
 moderation adapter (hold pages with password fields or forms posting elsewhere until claimed), the
 `anonymous_challenge_required` flow for API callers under abuse pressure, and owner takedown with a
 blocked-hash list.
+
+Anonymous HTML responses carry a fixed, script-free "Report abuse" link injected by
+`HTMLRewriter`, including fragments. It opens the site's absolute `__dropway/report` URL
+in a new window with `noopener noreferrer`, so an untrusted `<base>` cannot redirect it
+and it works without script authority in the sandbox. Raw/download responses and stored
+bytes are not changed; claimed and owned sites carry no anonymous link. Transformed HTML
+uses a separate versioned ETag and ignores byte ranges. **The report form and submission
+processing remain R-37; the reserved destination currently returns 404.** The link alone
+is not an operational reporting channel.
 
 ### 11.7 Default limits (all admin-configurable)
 
