@@ -234,7 +234,7 @@ export function llmsFullTxt(origin: string, config: DropwayConfig, tools: readon
     const hints = [a.readOnlyHint ? "read-only" : "writes", a.destructiveHint ? "destructive" : null, t.idempotent ? "accepts idempotencyKey" : null].filter(Boolean).join(", ");
     return `### ${t.name}\n\n${t.description}\n\nToolset \`${t.toolset ?? "extra"}\`; ${hints}${t.scopes?.length ? `; needs ${t.scopes.join(", ")}` : ""}.\n\nInput schema: \`${JSON.stringify(t.inputSchema)}\``;
   };
-  return `${llmsTxt(origin, config, tools).trimEnd()}
+  return `${llmsTxt(origin, config, tools, registry, availableTools).trimEnd()}
 
 ---
 
