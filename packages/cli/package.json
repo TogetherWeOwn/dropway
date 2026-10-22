@@ -1,9 +1,22 @@
 {
   "name": "dropway",
-  "version": "0.0.1",
-  "description": "Dropway CLI (placeholder). Publish files and folders to a live URL.",
+  "version": "0.1.0",
+  "description": "Publish files, folders and sites to a live URL on any Dropway instance. Built for AI agents: one command, JSON output, content-addressed uploads.",
   "license": "MIT",
   "type": "module",
+  "keywords": [
+    "dropway",
+    "hosting",
+    "static-site",
+    "publish",
+    "deploy",
+    "cloudflare",
+    "ai-agents",
+    "mcp",
+    "cli"
+  ],
+  "homepage": "https://github.com/TogetherWeOwn/dropway/tree/main/packages/cli#readme",
+  "bugs": "https://github.com/TogetherWeOwn/dropway/issues",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/TogetherWeOwn/dropway.git",
@@ -13,6 +26,23 @@
     "dropway": "bin/dropway.mjs"
   },
   "files": [
-    "bin"
-  ]
+    "bin",
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/dropway.mjs --legal-comments=none",
+    "prepack": "npm run build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run -c vitest.config.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "esbuild": "^0.28.2",
+    "fflate": "^0.8.3"
+  }
 }

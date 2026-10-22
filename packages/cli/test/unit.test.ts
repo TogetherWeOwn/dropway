@@ -1,0 +1,171 @@
+import { mkdtemp, mkdir, readFile, stat, writeFile, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { describe, expect, it } from "vitest";
+import { parseArgs, UsageError } from "../src/args.ts";
+import { CliError, EXIT, exitCodeForStatus, normaliseApi, errorFromResponse } from "../src/client.ts";
+import { configDir, linkKey, readCredentials, readLink, removeCredentials, saveCredentials, writeLink } from "../src/config.ts";
+import { collectFiles } from "../src/files.ts";
+import { IgnoreMatcher } from "../src/ignore.ts";
+import { findSecrets } from "../src/secrets.ts";
+import { VERSION } from "../src/version.ts";
+
+const tmp = () => mkdtemp(join(tmpdir(), "dropway-cli-"));
+
+describe("args", () => {
+  const specs = { site: { kind: "string" as const, short: "s" }, json: { kind: "boolean" as const }, yes: { kind: "boolean" as const, short: "y" }, save: { kind: "boolean" as const } };
+
+  it("parses values, booleans, --x=y, --no-x, short flags and --", () => {
+    const p = parseArgs(["dist", "--site", "my-site", "--json", "-y", "--no-save", "--", "--literal"], specs);
+    expect(p.positionals).toEqual(["dist", "--literal"]);
+    expect(p.flags).toEqual({ site: "my-site", json: true, yes: true, save: false });
+    expect(parseArgs(["--site=a"], specs).flags.site).toBe("a");
+    expect(parseArgs(["-smy-site"], specs).flags.site).toBe("my-site");
+  });
+
+  it("rejects unknown flags and missing values", () => {
+    expect(() => parseArgs(["--nope"], specs)).toThrow(UsageError);
+    expect(() => parseArgs(["--site"], specs)).toThrow(/needs a value/);
+    expect(() => parseArgs(["--site", "--json"], specs)).toThrow(/needs a value/);
+  });
+});
+
+describe("client helpers", () => {
+  it("normalises instance URLs", () => {
+    expect(normaliseApi("https://x.example.dev/")).toBe("https://x.example.dev");
+    expect(normaliseApi("x.example.dev/api/v1")).toBe("https://x.example.dev");
+    expect(normaliseApi("localhost:8787")).toBe("http://localhost:8787");
+    expect(() => normaliseApi("ftp://x")).toThrow(CliError);
+  });
+
+  it("maps HTTP statuses to exit codes", () => {
+    expect([401, 403, 404, 409, 400, 413, 429, 500, 503].map(exitCodeForStatus)).toEqual([3, 3, 4, 5, 6, 6, 7, 7, 7]);
+  });
+
+  it("reads the API error envelope", async () => {
+    const res = new Response(JSON.stringify({ error: { code: "version_conflict", message: "moved", hint: "refetch", details: { liveVersionId: "ver_1" } }, requestId: "r1" }), { status: 409 });
+    const e = await errorFromResponse(res);
+    expect(e.toJSON()).toEqual({ code: "version_conflict", message: "moved", hint: "refetch", status: 409, retryable: false, details: { liveVersionId: "ver_1" }, requestId: "r1" });
+    expect(e.exitCode).toBe(EXIT.conflict);
+    const html = await errorFromResponse(new Response("<html>nope</html>", { status: 502 }));
+    expect(html.code).toBe("http_502");
+    expect(html.retryable).toBe(true);
+  });
+
+  it("keeps VERSION in sync with package.json", async () => {
+    const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+    expect(VERSION).toBe(pkg.version);
+  });
+});
+
+describe("ignore rules", () => {
+  it("ignores credentials and VCS folders by default", () => {
+    const m = new IgnoreMatcher();
+    for (const p of [".git", ".env", ".env.local", "sub/.env", "certs/server.pem", "node_modules", ".npmrc", ".dev.vars"]) expect(m.ignores(p, p === ".git" || p === "node_modules")).toBe(true);
+    for (const p of ["index.html", "env.js", "assets/app.js", ".well-known/security.txt", "key.txt"]) expect(m.ignores(p)).toBe(false);
+  });
+
+  it("supports anchors, globs, ** and negation", () => {
+    const m = new IgnoreMatcher(["/drafts/", "*.map", "**/tmp/**", "!keep.map", "docs/*.psd"], { defaults: false });
+    expect(m.ignoresWithParents("drafts/a.html")).toBe(true);
+    expect(m.ignoresWithParents("sub/drafts/a.html")).toBe(false);
+    expect(m.ignores("assets/app.js.map")).toBe(true);
+    expect(m.ignores("keep.map")).toBe(false);
+    expect(m.ignores("a/b/tmp/c.txt")).toBe(true);
+    expect(m.ignores("docs/x.psd")).toBe(true);
+    expect(m.ignores("other/docs/x.psd")).toBe(false);
+  });
+});
+
+describe("secret scan", () => {
+  it("finds high-signal credentials with the line number, and never echoes them", () => {
+    const aws = "AKIA" + "Q".repeat(16);
+    const pk = "-----BEGIN OPENSSH " + "PRIVATE KEY-----";
+    const found = findSecrets("config.js", `const a = 1;\nconst k = "${aws}";\n${pk}\n`);
+    expect(found).toEqual([
+      { path: "config.js", line: 3, kind: "private_key" },
+      { path: "config.js", line: 2, kind: "aws_access_key_id" },
+    ]);
+    expect(JSON.stringify(found)).not.toContain(aws);
+  });
+
+  it("does not flag ordinary code", () => {
+    expect(findSecrets("app.js", 'const sk = "sk-short"; const AKIA = 1; fetch("/api/key")')).toEqual([]);
+  });
+});
+
+describe("collectFiles", () => {
+  it("walks a folder, applies ignores and .dropwayignore, hashes, and skips symlinked folders", async () => {
+    const dir = await tmp();
+    await mkdir(join(dir, "assets"), { recursive: true });
+    await mkdir(join(dir, "drafts"));
+    await writeFile(join(dir, "index.html"), "<h1>hi</h1>");
+    await writeFile(join(dir, "assets/app.js"), "console.log(1)");
+    await writeFile(join(dir, ".env"), "SECRET=1");
+    await writeFile(join(dir, "drafts/wip.html"), "wip");
+    await writeFile(join(dir, ".dropwayignore"), "drafts/\n");
+    await symlink(join(dir, "assets"), join(dir, "linked"));
+    const c = await collectFiles(dir);
+    expect(c.kind).toBe("dir");
+    expect(c.files.map((f) => f.path)).toEqual(["assets/app.js", "index.html"]);
+    expect(c.ignored.sort()).toEqual([".dropwayignore", ".env", "drafts/"]);
+    expect(c.skippedLinks).toEqual(["linked"]);
+    const html = c.files.find((f) => f.path === "index.html")!;
+    expect(html.sha256).toBe(createHash("sha256").update("<h1>hi</h1>").digest("hex"));
+    expect(html.size).toBe(11);
+    const body = await html.body();
+    expect(new TextDecoder().decode(body instanceof Uint8Array ? body : new Uint8Array(await body.arrayBuffer()))).toBe("<h1>hi</h1>");
+  });
+
+  it("publishes a single named file at its base name, but never a credentials file", async () => {
+    const dir = await tmp();
+    await writeFile(join(dir, "report.md"), "# Report");
+    await writeFile(join(dir, ".env"), "X=1");
+    const c = await collectFiles(join(dir, "report.md"));
+    expect(c.kind).toBe("file");
+    expect(c.files.map((f) => f.path)).toEqual(["report.md"]);
+    await expect(collectFiles(join(dir, ".env"))).rejects.toMatchObject({ code: "ignored_file", exitCode: EXIT.usage });
+    await expect(collectFiles(join(dir, "missing"))).rejects.toMatchObject({ code: "path_not_found" });
+  });
+
+  it("reports secrets found in text files", async () => {
+    const dir = await tmp();
+    await writeFile(join(dir, "index.html"), `<script>const key = "${"ghp_" + "a".repeat(36)}"</script>`);
+    const c = await collectFiles(dir);
+    expect(c.secrets).toEqual([{ path: "index.html", line: 1, kind: "github_token" }]);
+    expect((await collectFiles(dir, { allowSecrets: true })).secrets).toEqual([]);
+  });
+});
+
+describe("config", () => {
+  it("resolves the config dir from env", () => {
+    expect(configDir({ DROPWAY_CONFIG_DIR: "/x/y" })).toBe("/x/y");
+    expect(configDir({ XDG_CONFIG_HOME: "/cfg" })).toBe("/cfg/dropway");
+  });
+
+  it("saves credentials owner-only and removes them", async () => {
+    const env = { DROPWAY_CONFIG_DIR: await tmp() };
+    const path = await saveCredentials("https://a.example", { key: "dw_x", email: "a@example.com" }, env);
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    const creds = await readCredentials(env);
+    expect(creds.default).toBe("https://a.example");
+    expect(creds.instances["https://a.example"]?.key).toBe("dw_x");
+    expect(await removeCredentials("https://a.example", env)).toBe(true);
+    expect((await readCredentials(env)).instances).toEqual({});
+  });
+
+  it("links published paths to sites in dropway.json, without secrets", async () => {
+    const cwd = await tmp();
+    expect(linkKey(cwd, "./dist/")).toBe("dist");
+    expect(linkKey(cwd, ".")).toBe(".");
+    expect((await writeLink(cwd, "https://a.example", "dist", "bright-otter-x7k2")).created).toBe(true);
+    await writeLink(cwd, "https://a.example", "docs", "docs-site");
+    // A different instance never overwrites the link.
+    await writeLink(cwd, "https://b.example", "dist", "other");
+    const link = await readLink(cwd);
+    expect(link?.api).toBe("https://a.example");
+    expect(link?.sites).toEqual({ dist: "bright-otter-x7k2", docs: "docs-site" });
+    expect(await readFile(join(cwd, "dropway.json"), "utf8")).not.toMatch(/dw_|dwc_/);
+  });
+});

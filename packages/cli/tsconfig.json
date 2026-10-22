@@ -1,0 +1,25 @@
+{
+  // The CLI runs on Node (users' machines and CI), so it gets Node types instead of
+  // Workers types. erasableSyntaxOnly keeps src/ runnable by Node's built-in type
+  // stripping, which bin/dropway.mjs uses in a working copy that has no dist/ build.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "resolveJsonModule": true
+  },
+  "include": ["src", "test", "vitest.config.ts"]
+}
