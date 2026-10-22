@@ -32,10 +32,14 @@ packages/server           @dropway/server: createDropway() Hono app factory
   src/path-rewrite.ts     Path mode: prefixes root-relative URLs in HTML/CSS
   src/viewers/            File viewers (markdown, listing); add more here
   src/routes/api.ts       REST API v1 (thin)
-  src/app.ts              App-origin pages: landing, /openapi.json, /llms.txt, /claim, /mcp slot
-  src/openapi.ts          OpenAPI 3.1 document
+  src/routes/api-agent.ts REST twins of the agent tools (PATCH files, PUT access, rename, GET version)
+  src/mcp/                Remote MCP server (/mcp): endpoint (index.ts), core tools (tools.ts), schemas
+  src/app.ts              App-origin pages: landing, /openapi.json, discovery routes, /claim, /mcp
+  src/openapi.ts          OpenAPI 3.1 document for every route (operationId = MCP tool name)
+  src/discovery.ts        /llms.txt, /llms-full.txt, /skill.md, /.well-known/agent-skills (generated)
   src/extensions.ts       Types for routes, MCP tools, UI slots, createDropway options
 packages/cli              `dropway` CLI (placeholder)
+skills/dropway/SKILL.md   Agent Skill (`npx skills add TogetherWeOwn/dropway`); generated, `npm run skill:sync`
 test/                     vitest + @cloudflare/vitest-plugin (runs inside workerd)
 ```
 
@@ -53,6 +57,9 @@ throws `ApiError` with a stable `code` and a `hint` for the caller.
 | `sites.ts` | Create, list, update, delete and claim sites; settings; access checks (`getSiteFor`) |
 | `deploys.ts` | Manifest validation, content-addressed upload, atomic finalize, versions, restore, read-back |
 | `publish.ts` | One-shot publish (multipart, JSON, zip, raw) built on `deploys.ts` |
+| `sources.ts` | Agent file sources (`content`, base64, `url` with an SSRF guard, `sha256` + upload links, `copyFrom`), `publishSources`, partial `updateSiteFiles`, `finalizeVersionByRef` |
+| `site-ops.ts` | Site refs (slug, id or URL), version refs (`live`, `v3`, `3`, id), rename, access modes, paged file reads, `confirm` checks |
+| `idempotency.ts` | Idempotency keys (KV, 24 h): replay the first result, 422 on a reused key with another body |
 | `blobs.ts` | R2 storage at `blobs/<sha256>` (R2 verifies the hash on write), edge cache |
 | `live.ts` | `live:<slug>` manifest in KV (D1 fallback, per-isolate 5 s cache) |
 | `cleanup.ts` | Hourly cron: expire anonymous sites, purge deleted sites, drop stale uploads, delete orphan blobs |
@@ -72,7 +79,8 @@ fetch(request)
        site      -> serveSite()       (packages/server/src/serve.ts)
        redirect  -> 301/307           (trailing slash, other origin, Referer fallback)
        app       -> Hono app: /api/v1/* (identity adapter resolves the principal),
-                    /, /openapi.json, /llms.txt, /claim, /mcp, UI pages
+                    /, /openapi.json, /llms.txt, /llms-full.txt, /skill.md,
+                    /.well-known/agent-skills/*, /claim, /mcp, UI pages
 ```
 
 ### Where sites are served (config `SITES_MODE`)
@@ -136,8 +144,8 @@ export default createDropway({
   hooks: [{ onPublish, onDelete, onRequest }], // after the response; errors are logged only
   apiMiddleware: [/* Hono middleware on /api/*, after the principal is resolved */],
   routes: [({ api, app }) => { api.get("/extra", handler); }], // registered BEFORE core routes (can override)
-  mcpTools: [/* McpToolDefinition: name, description, JSON Schema, scopes, handler(args, { dw, principal }) */],
-  mcp: (tools) => (c) => handleMcp(c, tools),  // mounts at /mcp; without it /mcp answers 501
+  mcpTools: [/* McpToolDefinition: name, description, JSON Schema in/out, scopes, toolset, handler(args, { dw, principal, client }) */],
+  mcp: createMcpEndpoint({ name, instructions }), // optional: the default endpoint is mounted at /mcp already
   uiSlots: { navItems: [], pages: [{ path, title, handler }], landing, headHtml },
   viewers: [/* extra viewers, tried before core ones */],
   scheduled: async (dw, controller) => { /* extra cron work */ },
@@ -151,13 +159,19 @@ consumers, scripts, tests). Inside routes, use `c.get("dw")` and
 ### Where to add things
 
 - **A REST endpoint (core):** service function in `packages/core/src/services`,
-  thin route in `packages/server/src/routes/api.ts`, path in `openapi.ts`, a
-  line in `llms.txt` (`app.ts`), a test in `test/`.
-- **MCP:** implement the MCP server as an `McpHandlerFactory` (Cloudflare Agents
-  SDK, Streamable HTTP) and core tools as `McpToolDefinition`s in
-  `CORE_MCP_TOOLS` (`packages/server/src/create.ts`). Each tool handler calls
-  services with `ctx.dw` and `ctx.principal`, which the MCP handler resolves with
-  `dw.adapters.identity.resolve(request, dw)`. Then pass `mcp` in `apps/worker`.
+  thin route in `packages/server/src/routes/api.ts`, path in `openapi.ts` with the
+  operationId equal to the MCP tool name, a test in `test/`. `llms.txt` and
+  `llms-full.txt` are generated from `openapi.ts`; a test fails when a route is
+  missing from the OpenAPI document.
+- **An MCP tool (core):** add an `McpToolDefinition` to `CORE_MCP_TOOLS` in
+  `packages/server/src/mcp/tools.ts` (name = operationId, toolset, scopes,
+  annotations, flat JSON Schema input, small output schema, `summarize`). The
+  handler calls a service with `ctx.dw` and `ctx.principal`. The endpoint
+  (`mcp/index.ts`) resolves the principal with the identity adapter, applies
+  `idempotencyKey`, scope checks and `?toolsets=` / `?read_only=1`, and turns
+  `ApiError`s into `isError` results. See `docs/MCP.md`.
+- **An MCP tool (extension):** pass it in `createDropway({ mcpTools })`; a tool with
+  a core tool's name replaces it.
 - **Dashboard pages:** register through `uiSlots.pages` / `uiSlots.landing`. Use
   `APP_PAGE_CSP` or a stricter CSP. Never render user content on the app origin.
 - **CLI:** `packages/cli` talks to the REST API (it runs on users' machines).

@@ -66,50 +66,21 @@ export const IDEMPOTENCY_KEY: Schema = {
 
 export const CONFIRM_SLUG: Schema = { type: "string", description: "Must equal the site's slug. Destructive actions need this explicit confirmation." };
 
-// ---------------------------------------------------------------- outputs (permissive: extra fields allowed)
-
-const nullable = (s: Schema): Schema => ({ anyOf: [s, { type: "null" }] });
+// ---------------------------------------------------------------- outputs
+// Deliberately small: clients validate structuredContent against these, and some send
+// them to the model, so they name the key fields and allow everything else.
 
 export const VERSION_OUT: Schema = {
   type: "object",
-  properties: {
-    id: { type: "string" },
-    number: { type: "integer" },
-    status: { type: "string", enum: ["pending", "ready"] },
-    live: { type: "boolean" },
-    fileCount: { type: "integer" },
-    totalBytes: { type: "integer" },
-    source: { type: "string" },
-    client: { type: ["string", "null"] },
-    message: { type: ["string", "null"] },
-    createdAt: { type: ["string", "null"] },
-    finalizedAt: { type: ["string", "null"] },
-  },
+  properties: { id: { type: "string" }, number: { type: "integer" }, status: { type: "string" }, live: { type: "boolean" } },
   required: ["id", "number", "status", "live"],
 };
 
 export const SITE_OUT: Schema = {
   type: "object",
-  properties: {
-    slug: { type: "string" },
-    url: { type: "string", description: "Live URL. Share it exactly as returned." },
-    title: { type: ["string", "null"] },
-    description: { type: ["string", "null"] },
-    anonymous: { type: "boolean" },
-    expiresAt: { type: ["string", "null"] },
-    settings: { type: "object" },
-    access: { type: "object", properties: { mode: { type: "string" } } },
-    currentVersionId: { type: ["string", "null"] },
-    currentVersion: nullable(VERSION_OUT),
-    createdAt: { type: ["string", "null"] },
-    updatedAt: { type: ["string", "null"] },
-    links: { type: "object" },
-  },
+  properties: { slug: { type: "string" }, url: { type: "string" }, currentVersionId: { type: ["string", "null"] } },
   required: ["slug", "url"],
 };
-
-const WARNINGS: Schema = { type: "array", items: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } }, required: ["code", "message"] } };
-const NEXT: Schema = { type: "array", items: { type: "object", properties: { tool: { type: "string" }, args: { type: "object" }, why: { type: "string" } }, required: ["tool", "why"] } };
 
 export const PUBLISH_OUT: Schema = {
   type: "object",
@@ -117,42 +88,12 @@ export const PUBLISH_OUT: Schema = {
     status: { type: "string", enum: ["live", "unchanged", "awaiting_upload"] },
     url: { type: "string", description: "Live URL. Share it exactly as returned." },
     slug: { type: "string" },
-    created: { type: "boolean" },
     site: SITE_OUT,
-    version: nullable(VERSION_OUT),
-    files: {
-      type: "object",
-      properties: { total: { type: "integer" }, stored: { type: "integer" }, reused: { type: "integer" }, fetched: { type: "integer" }, pending: { type: "integer" } },
-    },
-    upload: {
-      type: "object",
-      properties: {
-        versionId: { type: "string" },
-        expiresAt: { type: "string" },
-        items: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              path: { type: "string" },
-              paths: { type: "array", items: { type: "string" } },
-              sha256: { type: "string" },
-              size: { type: "integer" },
-              method: { type: "string" },
-              url: { type: "string" },
-              headers: { type: "object" },
-              curl: { type: "string" },
-            },
-          },
-        },
-        finalize: { type: "object" },
-      },
-    },
-    claim: { type: "object" },
-    changes: { type: "object" },
-    warnings: WARNINGS,
-    next: NEXT,
-    replayed: { type: "boolean" },
+    version: { type: ["object", "null"] },
+    files: { type: "object" },
+    upload: { type: "object", description: "Only when status is awaiting_upload: items to PUT, then finalize." },
+    warnings: { type: "array" },
+    next: { type: "array" },
   },
   required: ["status", "url", "slug"],
 };

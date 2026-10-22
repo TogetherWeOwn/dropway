@@ -109,7 +109,7 @@ export interface CreateDropwayOptions {
   routes?: RouteExtension[];
   /** Extra MCP tools, appended to the core tools. */
   mcpTools?: McpToolDefinition[];
-  /** The MCP endpoint implementation. Without one, /mcp answers 501. */
+  /** The MCP endpoint implementation. Default: the built-in server, createMcpEndpoint() (packages/server/src/mcp). */
   mcp?: McpHandlerFactory;
   /** Dashboard/UI slots. */
   uiSlots?: Partial<UiSlots>;

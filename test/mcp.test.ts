@@ -76,6 +76,13 @@ describe("MCP endpoint: transport and auth", () => {
     expect(names.slice(0, CORE_TOOLS.length)).toEqual(CORE_TOOLS);
   });
 
+  it("keeps the tool list small enough for agent context windows", async () => {
+    // About 4 characters per token: all tools ~8k tokens, core ~5.5k (SPEC 9.2 budget for core: about 5k).
+    expect(JSON.stringify(await mcp.tools()).length).toBeLessThan(36_000);
+    const core = await connectMcp(dw, dw.ownerKey, { path: "/mcp?toolsets=core" });
+    expect(JSON.stringify(await core.tools()).length).toBeLessThan(24_000);
+  });
+
   it("server instructions stay under 4,096 characters", () => {
     const text = mcpInstructions(dw.dropway.context(env as never, { waitUntil() {} }, new URL("https://dropway.test/mcp")));
     expect(text.length).toBeLessThan(4096);

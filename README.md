@@ -7,7 +7,7 @@ on your own Cloudflare account.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/TogetherWeOwn/dropway)
 
-> Status: early MVP. The REST API is usable today; the dashboard, MCP server and CLI are in progress.
+> Status: early MVP. The REST API and the remote MCP server are usable today; the dashboard and CLI are in progress.
 
 ## What you get
 
@@ -17,7 +17,7 @@ on your own Cloudflare account.
 - **Viewers**: Markdown renders as a page in browsers; `?raw=1` gives any file's raw bytes (HTML as source); folders without an index get a listing.
 - **Scoped API keys** (`sites:read`, `sites:write`, `keys:write`, `members:write`, optional single-site restriction); only hashes are stored.
 - **Single tenant**: an owner plus optional members. No signup, no billing.
-- **Agent-friendly**: every error has a stable `code` and a `hint`; `/openapi.json` and `/llms.txt` on every instance.
+- **Built for agents**: a remote MCP server at `/mcp` with a tool for every capability, an installable Agent Skill (`npx skills add TogetherWeOwn/dropway`), `/openapi.json`, `/llms.txt` and `/llms-full.txt` on every instance. Every error has a stable `code` and a `hint`; writes take idempotency keys.
 - **Cheap and fast**: one Worker; D1, R2 (bytes stored once by SHA-256), KV, Analytics Engine.
 
 ## Quick start (your own instance)
@@ -51,11 +51,19 @@ curl "https://<your-worker>.workers.dev/api/v1/publish?slug=my-site" \
   -H "Content-Type: application/zip" --data-binary @site.zip
 ```
 
+Connect an agent over MCP (same API key):
+
+```sh
+claude mcp add --transport http dropway https://<your-worker>.workers.dev/mcp \
+  --header "Authorization: Bearer $DROPWAY_API_KEY"
+```
+
 ## Docs
 
 - [Self-hosting and configuration](docs/SELF_HOST.md)
 - [Architecture and extension points](docs/ARCHITECTURE.md)
-- API: `GET /openapi.json` and `GET /llms.txt` on any instance
+- [Agents: MCP server, REST twins, skill](docs/MCP.md)
+- API: `GET /openapi.json`, `/llms.txt` and `/llms-full.txt` on any instance
 
 ## Development
 
