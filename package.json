@@ -12,10 +12,11 @@
   ],
   "scripts": {
     "dev": "wrangler dev",
-    "test": "vitest run && npm run test:cli",
+    "test": "vitest run && npm run test:cli && npm run test:browser-code",
     "test:cli": "vitest run -c packages/cli/vitest.config.ts",
+    "test:browser-code": "vitest run -c packages/server/vitest.config.ts",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/cli/tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/cli/tsconfig.json && tsc --noEmit -p packages/server/test/tsconfig.json",
     "guard": "node scripts/guard-open-core.mjs --self-test && node scripts/guard-open-core.mjs",
     "check": "npm run guard && npm run typecheck && npm test",
     "db:migrate": "wrangler d1 migrations apply DB --remote",

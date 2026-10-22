@@ -51,6 +51,13 @@ export interface DropwayConfig {
    * subdomain mode (SITES_SANDBOX=true turns it on there).
    */
   sitesSandbox: boolean;
+  /**
+   * Sandbox anonymous (unclaimed, expiring) sites even when sitesSandbox is off, so
+   * untrusted pages on a shared sites origin cannot read other sites' storage.
+   * SITES_SANDBOX=auto (the default) turns this on for a separate sites origin;
+   * subdomain mode gives every site its own origin and leaves it off.
+   */
+  sitesSandboxAnonymous: boolean;
   /** false (open source): exactly one tenant, created by POST /api/v1/setup. */
   multiTenant: boolean;
   anonymous: AnonymousConfig;
@@ -128,7 +135,10 @@ export function resolveConfig(vars: DropwayVars, overrides: ConfigOverrides = {}
   let sitesOrigin = overrides.sitesOrigin !== undefined ? overrides.sitesOrigin : normaliseOrigin(vars.SITES_ORIGIN);
   if (sitesOrigin && appOrigin && sitesOrigin === appOrigin) sitesOrigin = null;
   const sharedOrigin = sitesMode === "path" && !sitesOrigin;
-  const sandboxRequested = overrides.sitesSandbox ?? bool(vars.SITES_SANDBOX, false);
+  // SITES_SANDBOX: true (every site), false (none, unless sites share the app origin), auto (default: anonymous sites on a sites origin).
+  const sandboxVar = (vars.SITES_SANDBOX ?? "").trim().toLowerCase();
+  const sandboxAuto = sandboxVar === "" || sandboxVar === "auto";
+  const sandboxRequested = overrides.sitesSandbox ?? (sandboxAuto ? false : bool(sandboxVar, false));
   const limits: Limits = {
     maxFileBytes: num(vars.MAX_FILE_BYTES, 100 * MB),
     maxFiles: num(vars.MAX_FILES, 2500),
@@ -159,6 +169,7 @@ export function resolveConfig(vars: DropwayVars, overrides: ConfigOverrides = {}
     sitesPathPrefix: (overrides.sitesPathPrefix ?? "/s").replace(/\/+$/, ""),
     // Sites that share the app origin are always sandboxed: they must never touch the app's storage.
     sitesSandbox: sharedOrigin ? true : sandboxRequested,
+    sitesSandboxAnonymous: overrides.sitesSandboxAnonymous ?? (sandboxAuto && sitesMode === "path"),
     multiTenant: overrides.multiTenant ?? false,
     anonymous,
     limits,

@@ -118,7 +118,7 @@ What Dropway is not:
 | ID | Feature | Pri | Status |
 |---|---|---|---|
 | SRV-01 | Three serving modes: subdomain (each site its own origin), path on a dedicated sites origin, path on the app origin (always sandboxed). Section 11.2 | P0 | Done |
-| SRV-02 | Path mode keeps sites inside `/<slug>/`: HTML and CSS root-relative URLs are rewritten; URLs built at runtime are resolved by `Referer` with a 307; navigations inside an SPA fall back to the SPA. Interim until an instance has a domain | P0 | Done (SPA navigation fallback in R-12) |
+| SRV-02 | Path mode keeps sites inside `/<slug>/`: HTML and CSS root-relative URLs are rewritten; URLs built at runtime are resolved by `Referer` with a 307 (unsandboxed pages) or by an injected run-time shim (sandboxed pages, which send no Referer); navigations inside an SPA fall back to the SPA. Interim until an instance has a domain | P0 | Done (SPA navigation fallback in R-12) |
 | SRV-03 | Index resolution: `index.html`, `index.htm`, `index.md`, `README.md`; a one-file site serves that file at `/`; folders without an index get a listing; `404.html`; SPA fallback | P0 | Done |
 | SRV-04 | Headers: `ETag` (sha256), `Range`/206, pre-compressed `.br`/`.gz` with `Content-Encoding`, `X-Dropway-Version`, `X-Robots-Tag: noindex` on expiring sites, `X-Content-Type-Options: nosniff` | P0 | Done |
 | SRV-05 | Cache policy matrix (HTML and unfingerprinted files revalidate; fingerprinted files immutable; gated sites `private, no-store`; sites with `.wasm` revalidate) | P0 | Partial; R-27 |
@@ -1535,10 +1535,11 @@ Path mode is interim. It exists so an instance works on `workers.dev` with no do
   `Referer` checks do not help). **Path mode protects gated content from outsiders, not from other sites on
   the same instance.** Instances where publishers do not trust each other must use subdomain mode or
   `SITES_SANDBOX=true`.
-- Root-absolute URLs are handled by HTML/CSS rewriting and `Referer` redirects; URLs built in JavaScript
-  should be relative. Publish warnings (R-12) say this with the exact framework fix.
+- Root-absolute URLs are handled by HTML/CSS rewriting, `Referer` redirects (unsandboxed pages) and an
+  injected run-time shim (sandboxed pages: no Referer is ever sent from an opaque origin). Import
+  specifiers, `location.href` and `pushState` with root-relative URLs should be relative. Publish warnings (R-12) say this with the exact framework fix.
 
-`SITES_SANDBOX` (R-12 changes the default from `false` to `auto`):
+`SITES_SANDBOX` (default `auto` since 2026-10-22):
 
 | Value | Effect |
 |---|---|

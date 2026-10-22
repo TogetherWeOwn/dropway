@@ -212,7 +212,14 @@ export async function settingsPage(c: Context<DropwayEnv>, slots: UiSlots): Prom
     ["Instance name", e(cfg.instanceName)],
     ["App and API", `<code>${e(appOrigin(dw))}</code>`],
     ["Sites", sitesWhere(dw)],
-    ["Sandbox on sites", cfg.sitesSandbox ? "On: pages run in an opaque origin (no cookies, storage or service workers)" : "Off"],
+    [
+      "Sandbox on sites",
+      cfg.sitesSandbox
+        ? "On: pages run in an opaque origin (no cookies, storage or service workers)"
+        : cfg.sitesSandboxAnonymous
+          ? "Anonymous sites only (SITES_SANDBOX=auto)"
+          : "Off",
+    ],
     ["Anonymous publishing", cfg.anonymous.enabled ? `On: anonymous sites expire after ${Math.round(cfg.anonymous.ttlMs / 3600_000)} hours, ${cfg.anonymous.sitesPerHourPerIp} per IP per hour` : "Off (ANONYMOUS_PUBLISH)"],
     ["Largest file", formatBytes(lim.maxFileBytes)],
     ["Files per version", lim.maxFiles.toLocaleString("en-US")],

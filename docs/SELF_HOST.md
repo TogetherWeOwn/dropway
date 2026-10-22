@@ -96,7 +96,7 @@ Variables go in `vars` in `wrangler.jsonc`; secrets with `npx wrangler secret pu
 | `SITES_MODE` | `path` | `path` or `subdomain` (see below) |
 | `SITES_DOMAIN` | empty | Subdomain mode: sites at `https://<name>.<SITES_DOMAIN>/` |
 | `SITES_ORIGIN` | empty | Path mode: origin of a second, sites-only deployment of the same Worker |
-| `SITES_SANDBOX` | `false` | Sandbox sites on a separate origin too (always on when sites share the app origin) |
+| `SITES_SANDBOX` | `auto` | `auto`: on a separate sites origin, sandbox anonymous sites only. `true`: sandbox every site. `false`: none. Always on when sites share the app origin |
 | `ANONYMOUS_PUBLISH` | `false` | Allow publishing without a key (sites expire; a claim token is returned) |
 | `ANON_TTL_HOURS` | `24` | Lifetime of anonymous sites |
 | `ANON_SITES_PER_HOUR` | `60` | New anonymous sites per IP per hour |
@@ -113,14 +113,17 @@ Variables go in `vars` in `wrangler.jsonc`; secrets with `npx wrangler secret pu
 | Site URL | `https://<worker>/s/<name>/` | `https://<worker>-sites.<you>.workers.dev/<name>/` | `https://<name>.<your-sites-domain>/` |
 | Setup | none | one extra deploy | a domain on Cloudflare, one DNS record, one route |
 | Isolation | sites share the app origin, so they are always sandboxed | sites are separated from the app, not from each other | every site is its own origin |
-| Limits for pages | no cookies, `localStorage` or service workers (sandbox) | absolute URLs built in JavaScript may not resolve | none |
+| Limits for pages | no cookies, `localStorage` or service workers (sandbox); root-relative import specifiers and `location.href = "/x"` do not resolve | sites share one origin's storage (anonymous sites are sandboxed) | none |
 | Use when | trying it out, personal use | a team that trusts its publishers, before buying a domain | untrusted publishers, or as soon as you have a domain |
 
 ### A. Path mode
 
 Nothing to do. Sites are served under `/s/<name>/` on the same Worker with a CSP sandbox, so a page
 can never read the app's storage. Root-relative URLs in HTML and CSS (`/assets/app.js`) are rewritten
-to stay inside the site; URLs built in JavaScript at runtime should be relative.
+to stay inside the site, and a small script at the top of each page does the same for URLs built in
+JavaScript (`fetch("/data.json")`, `img.src = "/x.png"`, XHR, `innerHTML`). Import specifiers
+(`import "/x.js"`), `location.href = "/x"` and `history.pushState("/x")` are not rewritten: use
+relative URLs there, or subdomain mode.
 
 ### B. A second deployment for sites
 

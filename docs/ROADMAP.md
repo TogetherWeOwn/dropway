@@ -193,8 +193,9 @@ Delivers: AX-06. Depends: R-02. Parallel with R-10.
 
 ### R-12 Path-mode hardening and publish warnings (2 days)
 Delivers: SRV-02 (SPA fallback), PUB-12, ANON-04 (sandbox). Depends: R-04.
-- `SITES_SANDBOX` accepts `auto|true|false`; default `auto` sandboxes anonymous sites on a dedicated sites
-  origin and everything on the app origin (tests for each mode).
+- Done 2026-10-22: `SITES_SANDBOX` accepts `auto|true|false`; default `auto` sandboxes anonymous sites on
+  a dedicated sites origin and everything on the app origin (tests for each mode). Sandboxed path-mode
+  pages get the run-time URL shim (`path-shim.ts`).
 - A navigation with a same-origin `Referer` inside SPA site X to a path X lacks redirects to X (test).
 - Publish and finalize return warnings with `fix` text: `root_absolute_paths` (path mode),
   `spa_without_base`, `uses_browser_storage` (when the site will be sandboxed), `wasm_without_coi`,

@@ -105,7 +105,8 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
         404,
       );
     }
-    return c.html(htmlPage({ title: "Not found", body: `<main class="dw-system"><div class="dw-code">404</div><h1>Not found</h1><p><a href="/">Home</a></p></main>` }), 404);
+    // CORS-readable, so a sandboxed site (opaque origin) whose fetch() lands here sees a 404 instead of a network error.
+    return c.html(htmlPage({ title: "Not found", body: `<main class="dw-system"><div class="dw-code">404</div><h1>Not found</h1><p><a href="/">Home</a></p></main>` }), 404, { "Access-Control-Allow-Origin": "*" });
   });
   app.onError((err, c) => {
     if (c.req.path.startsWith("/api/")) return apiErrorResponse(c, err);

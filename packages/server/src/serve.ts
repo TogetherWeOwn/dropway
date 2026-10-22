@@ -21,6 +21,7 @@ import { escapeHtml, systemPage } from "./html";
 import { findViewer, toViewerFile, VIEWER_CSP, VIEWERS, type ViewMode, type Viewer } from "./viewers";
 import { renderListing } from "./viewers/listing";
 import { MAX_CSS_REWRITE_BYTES, rewriteCss, rewriteHtml, type PathRewrite } from "./path-rewrite";
+import { PATH_SHIM_VERSION, pathShimScript } from "./path-shim";
 
 /**
  * How a site is being served.
@@ -261,6 +262,8 @@ export async function serveSite(
 
   const live = await getLiveSite(dw, slug);
   if (!live) return systemResponse(dw, req, mode, null, 404, "404", "Nothing is published here", "There is no site at this address. It may have been deleted. See {app}.");
+  // Anonymous sites are untrusted: sandbox them even where other sites are not.
+  if (!mode.sandbox && live.tenantId === null && dw.config.sitesSandboxAnonymous) mode = { ...mode, sandbox: true };
   if (live.expiresAt && live.expiresAt < Date.now()) {
     return systemResponse(dw, req, mode, live, 410, "EXPIRED", "This site has expired", "Anonymous sites are temporary. Publish again, or claim a site with an API key to keep it. See {app}.");
   }
@@ -364,7 +367,9 @@ async function serveFile(
   // Path mode: HTML and CSS get root-relative URLs prefixed with the site base.
   const rewriteKind = mode.rewrite && !raw && !download && !precompressed(path) ? (isHtml(contentType) ? "html" : baseType(contentType) === "text/css" && size <= MAX_CSS_REWRITE_BYTES ? "css" : null) : null;
   if (rewriteKind && mode.rewrite) {
-    const etag = `W/"pm-${sha256}"`;
+    // Sandboxed pages send no Referer, so their HTML also carries the run-time shim (./path-shim).
+    const shim = rewriteKind === "html" && mode.sandbox;
+    const etag = shim ? `W/"pm-${sha256}-js${PATH_SHIM_VERSION}"` : `W/"pm-${sha256}"`;
     const h = new Headers({ "Content-Type": contentType, ETag: etag, "Cache-Control": cacheControlFor(path, live), "X-Dropway-Rewritten": "path-prefix" });
     securityHeaders(h, live, mode);
     if (etagMatches(req, etag)) return new Response(null, { status: 304, headers: h });
@@ -375,7 +380,7 @@ async function serveFile(
       const css = blob.body ? await new Response(blob.body).text() : "";
       return new Response(rewriteCss(css, mode.rewrite), { status, headers: h });
     }
-    return rewriteHtml(new Response(blob.body, { status, headers: h }), mode.rewrite);
+    return rewriteHtml(new Response(blob.body, { status, headers: h }), mode.rewrite, shim ? { inject: pathShimScript(mode.rewrite) } : {});
   }
 
   const etag = `"${sha256}"`;

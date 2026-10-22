@@ -90,7 +90,7 @@ fetch(request)
 | Mode | Site URL | Isolation |
 |---|---|---|
 | `subdomain` | `https://<slug>.<SITES_DOMAIN>/` | Each site its own origin. Recommended once a domain exists |
-| `path` + `SITES_ORIGIN` | `<SITES_ORIGIN>/<slug>/` (second Worker deployment, same code) | Sites share one origin, separate from the app. Not sandboxed by default (`SITES_SANDBOX=true` to sandbox) |
+| `path` + `SITES_ORIGIN` | `<SITES_ORIGIN>/<slug>/` (second Worker deployment, same code) | Sites share one origin, separate from the app. By default (`SITES_SANDBOX=auto`) only anonymous sites are sandboxed; `true` sandboxes every site, `false` none |
 | `path` (self-host default) | `<APP_ORIGIN>/s/<slug>/` | Shares the app origin, so always served with a CSP `sandbox` (opaque origin: no cookies, storage or service workers) |
 
 Path mode is interim. Root-relative URLs (`/assets/app.js`) would escape the
@@ -100,8 +100,16 @@ Path mode is interim. Root-relative URLs (`/assets/app.js`) would escape the
    `HTMLRewriter`): `/x` becomes `/s/<slug>/x`. `?raw=1` returns the stored bytes.
 2. Anything left (URLs built in JavaScript) is resolved by the `Referer`: if the
    referring page belongs to site X and X has the file, the request gets a 307
-   to X's URL. Browsers send no Referer from sandboxed pages, so on the shared
-   origin only (1) applies. Use relative URLs, or subdomain mode.
+   to X's URL.
+3. Sandboxed pages have an opaque origin and browsers send them no `Referer`
+   at all, whatever the `Referrer-Policy` (measured in Chrome 151), so (2) cannot
+   work there. Instead their HTML gets a small inline script at the top of
+   `<head>` (`path-shim.ts`) that applies the rule of (1) in the browser:
+   root-relative URLs passed to `fetch`, `Request`, `XMLHttpRequest`,
+   `EventSource`, `sendBeacon`, `window.open`, element URL properties,
+   `setAttribute` and elements inserted later get the site prefix. Not covered:
+   import specifiers, CSS set from JS, `location.href = "/x"` and
+   `history.pushState("/x")`. Use relative URLs there, or subdomain mode.
 
 ### Viewing files
 

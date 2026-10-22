@@ -9,12 +9,14 @@
  * are rewritten on the way out: root-relative URLs get the site prefix.
  * ?raw=1 always returns the stored bytes untouched. Subdomain mode never rewrites.
  *
- * Not covered (documented limitation of path mode): URLs built at runtime in
- * JavaScript, e.g. fetch("/data.json"). Use relative URLs, or subdomain mode.
+ * URLs built at run time in JavaScript (fetch("/data.json")) are handled in
+ * sandboxed pages by a small script injected at the top of the page, which
+ * applies the same rule in the browser (./path-shim). Unsandboxed path-mode
+ * pages send a Referer, so the server resolves those requests (./route-sites).
  */
 
-/** Element/attribute pairs that carry URLs. */
-const URL_ATTRS: Array<[selector: string, attr: string]> = [
+/** Element/attribute pairs that carry URLs (also drives the run-time half in ./path-shim). */
+export const URL_ATTRS: Array<[selector: string, attr: string]> = [
   ["a[href]", "href"],
   ["area[href]", "href"],
   ["link[href]", "href"],
@@ -63,9 +65,32 @@ function rewriteSrcset(value: string, rw: PathRewrite): string {
     .join(",");
 }
 
-/** Stream an HTML response through HTMLRewriter, prefixing root-relative URLs. */
-export function rewriteHtml(response: Response, rw: PathRewrite): Response {
+/**
+ * Stream an HTML response through HTMLRewriter, prefixing root-relative URLs.
+ * `inject` (trusted HTML, e.g. the run-time shim) goes in as the first child of
+ * <head>; in a page without a <head> tag, before its first <script>, CSP <meta>
+ * or into <body>, whichever comes first. Either way it runs before page scripts.
+ */
+export function rewriteHtml(response: Response, rw: PathRewrite, opts: { inject?: string } = {}): Response {
   let rewriter = new HTMLRewriter();
+  const inject = opts.inject;
+  if (inject) {
+    let done = false;
+    const once = (place: (html: string) => void) => {
+      if (done) return;
+      done = true;
+      place(inject);
+    };
+    rewriter = rewriter
+      .on("head", { element: (el) => once((h) => el.prepend(h, { html: true })) })
+      .on("script", { element: (el) => once((h) => el.before(h, { html: true })) })
+      .on("meta[http-equiv]", {
+        element(el) {
+          if ((el.getAttribute("http-equiv") ?? "").toLowerCase() === "content-security-policy") once((h) => el.before(h, { html: true }));
+        },
+      })
+      .on("body", { element: (el) => once((h) => el.prepend(h, { html: true })) });
+  }
   for (const [selector, attr] of URL_ATTRS) {
     rewriter = rewriter.on(selector, {
       element(el) {

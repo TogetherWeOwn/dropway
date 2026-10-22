@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { resolveConfig } from "@dropway/core";
 import { form, freshInstance, ORIGIN, type Instance } from "./helpers";
 
 const BROWSER_NAV = { Accept: "text/html,application/xhtml+xml,*/*;q=0.8", "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate" };
@@ -34,7 +35,8 @@ describe("serving", () => {
     const res = await dw.call(`/s/${slug}/`, { headers: BROWSER_NAV });
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
-    expect(res.headers.get("etag")).toMatch(/^W\/"pm-[a-f0-9]{64}"$/);
+    // Sandboxed HTML carries the run-time path shim; its version is part of the ETag.
+    expect(res.headers.get("etag")).toMatch(/^W\/"pm-[a-f0-9]{64}-js\d+"$/);
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     expect(res.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
     expect(res.headers.get("content-security-policy")).not.toContain("allow-same-origin");
@@ -143,6 +145,90 @@ describe("path mode: root-relative URLs", () => {
     expect(md).toContain(`href="/s/${s}/"`);
     expect(md).toContain('href="/s/other-site/"');
     expect(md).toContain('href="https://example.com/"');
+  });
+});
+
+describe("path mode: run-time shim for sandboxed pages (no Referer from an opaque origin)", () => {
+  const SHIM = '<script data-dropway="path-shim">';
+  const publish = (inst: Instance, files: Record<string, string>, fields: Record<string, string> = {}) =>
+    inst.json("/api/v1/publish", { method: "POST", key: inst.ownerKey, body: form(files, fields) });
+
+  it("goes in once, as the first child of <head>, with the site prefix and kept prefixes", async () => {
+    const pub = await publish(dw, { "index.html": '<!doctype html><html><head><meta charset="utf-8"><script src="/a.js"></script><script>fetch("/b")</script></head><body></body></html>' });
+    const s = pub.body.slug;
+    const html = await (await dw.call(`/s/${s}/`, { headers: BROWSER_NAV })).text();
+    expect(html.split(SHIM)).toHaveLength(2);
+    expect(html.indexOf(SHIM)).toBe(html.indexOf("<head>") + "<head>".length);
+    expect(html).toContain(`("/s/${s}/",["/s/"],`);
+    expect(html).toContain(`<script src="/s/${s}/a.js">`);
+  });
+
+  it("without a <head> tag it goes before the first script or CSP meta, so a page CSP cannot block it", async () => {
+    const pub = await publish(dw, {
+      "a.html": '<p>hi</p><script>fetch("/x")</script>',
+      "b.html": `<meta http-equiv="Content-Security-Policy" content="script-src 'self'"><script src="/app.js"></script>`,
+    });
+    const s = pub.body.slug;
+    const a = await (await dw.call(`/s/${s}/a.html`, { headers: BROWSER_NAV })).text();
+    expect(a.indexOf(SHIM)).toBeGreaterThan(a.indexOf("<p>hi</p>"));
+    expect(a.indexOf(SHIM)).toBeLessThan(a.indexOf('<script>fetch("/x")'));
+    const b = await (await dw.call(`/s/${s}/b.html`, { headers: BROWSER_NAV })).text();
+    expect(b.startsWith(SHIM)).toBe(true);
+  });
+
+  it("is not added to ?raw=1, rendered views, CSS or unsandboxed sites", async () => {
+    const pub = await publish(dw, { "index.html": "<head></head><p>x</p>", "readme.md": "# Hi", "s.css": "a{}" });
+    const s = pub.body.slug;
+    expect(await (await dw.call(`/s/${s}/index.html?raw=1`)).text()).toBe("<head></head><p>x</p>");
+    expect(await (await dw.call(`/s/${s}/readme.md`, { headers: BROWSER_NAV })).text()).not.toContain(SHIM);
+    expect(await (await dw.call(`/s/${s}/index.html?view=1`, { headers: BROWSER_NAV })).text()).not.toContain(SHIM);
+    expect(await (await dw.call(`/s/${s}/s.css`)).text()).toBe("a{}");
+
+    const two = await freshInstance({ appOrigin: ORIGIN, sitesOrigin: "https://sites.example" });
+    const keyed = await publish(two, { "index.html": "<head></head><script>fetch('/x')</script>" });
+    const page = await two.call(`https://sites.example/${keyed.body.slug}/`, { headers: BROWSER_NAV });
+    expect(page.headers.get("content-security-policy")).toBeNull();
+    expect(await page.text()).not.toContain(SHIM);
+
+    const sub = await freshInstance({ sitesMode: "subdomain", sitesDomain: "sites.test", sitesSandbox: true });
+    const own = await publish(sub, { "index.html": "<head></head><p>own origin</p>" });
+    expect(await (await sub.call(`https://${own.body.slug}.sites.test/`, { headers: BROWSER_NAV })).text()).toBe("<head></head><p>own origin</p>");
+  });
+
+  it("anonymous sites on a separate sites origin are sandboxed (with the shim) unless SITES_SANDBOX=false", async () => {
+    const two = await freshInstance({ appOrigin: ORIGIN, sitesOrigin: "https://sites.example", anonymous: { enabled: true } });
+    const anon = await two.json("/api/v1/publish", { method: "POST", body: form({ "index.html": "<head></head><script>fetch('/data.json')</script>", "data.json": "{}" }) });
+    const page = await two.call(`https://sites.example/${anon.body.slug}/`, { headers: BROWSER_NAV });
+    expect(page.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
+    expect(await page.text()).toContain(`${SHIM}(function`);
+    const data = await two.call(`https://sites.example/${anon.body.slug}/data.json`);
+    expect(data.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
+
+    const off = await freshInstance({ appOrigin: ORIGIN, sitesOrigin: "https://sites.example", anonymous: { enabled: true }, sitesSandboxAnonymous: false });
+    const anon2 = await off.json("/api/v1/publish", { method: "POST", body: form({ "index.html": "<head></head><p>x</p>" }) });
+    const page2 = await off.call(`https://sites.example/${anon2.body.slug}/`, { headers: BROWSER_NAV });
+    expect(page2.headers.get("content-security-policy")).toBeNull();
+    expect(await page2.text()).toBe(`<head></head><p>x</p>`);
+  });
+
+  it("SITES_SANDBOX: auto (default) sandboxes anonymous sites on a sites origin; true all; false none", () => {
+    const sitesOrigin = { APP_ORIGIN: ORIGIN, SITES_ORIGIN: "https://sites.example" };
+    const pick = (vars: Record<string, string>) => {
+      const c = resolveConfig(vars);
+      return [c.sitesSandbox, c.sitesSandboxAnonymous];
+    };
+    expect(pick(sitesOrigin)).toEqual([false, true]);
+    expect(pick({ ...sitesOrigin, SITES_SANDBOX: "auto" })).toEqual([false, true]);
+    expect(pick({ ...sitesOrigin, SITES_SANDBOX: "true" })).toEqual([true, false]);
+    expect(pick({ ...sitesOrigin, SITES_SANDBOX: "false" })).toEqual([false, false]);
+    expect(pick({})).toEqual([true, true]);
+    expect(pick({ SITES_MODE: "subdomain", SITES_DOMAIN: "sites.test" })).toEqual([false, false]);
+  });
+
+  it("an unresolved root-relative fetch on the shared origin gets a CORS-readable 404, not a network error", async () => {
+    const res = await dw.call("/data.json", { headers: { Origin: "null", "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "empty" } });
+    expect(res.status).toBe(404);
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
   });
 });
 
