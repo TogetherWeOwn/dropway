@@ -1,0 +1,45 @@
+// Dropway: single-tenant, self-hosted deployment.
+//
+// This file lives at the repository root on purpose: the Deploy to Cloudflare
+// button treats the chosen folder as the whole repository, so the Worker entry
+// (apps/worker) and the packages it imports (packages/*) must sit under it.
+//
+// Resource IDs are omitted on purpose. `npm run deploy` (and the Deploy to
+// Cloudflare button) create the D1 database, R2 bucket and KV namespace in your
+// own account the first time, then apply the D1 migrations.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dropway",
+  "main": "apps/worker/src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "vars": {
+    // Public origin of the app and API. Empty = the origin of each request.
+    "APP_ORIGIN": "",
+    // "path": sites are served sandboxed under /s/<slug>/ on this Worker (or on SITES_ORIGIN).
+    // "subdomain": each site gets its own origin at <slug>.<SITES_DOMAIN>.
+    "SITES_MODE": "path",
+    // Only for path mode with a second, sites-only Worker. Empty = this Worker.
+    "SITES_ORIGIN": "",
+    // Only for subdomain mode, e.g. "example-sites.com".
+    "SITES_DOMAIN": "",
+    // Anyone may publish without an API key (sites expire after 24 hours). Off by default.
+    "ANONYMOUS_PUBLISH": "false"
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "dropway", "migrations_dir": "packages/core/migrations" }
+  ],
+  "r2_buckets": [
+    { "binding": "FILES", "bucket_name": "dropway-files" }
+  ],
+  "kv_namespaces": [
+    { "binding": "CACHE" }
+  ],
+  "analytics_engine_datasets": [
+    { "binding": "ANALYTICS", "dataset": "dropway_hits" }
+  ],
+  // Hourly cleanup: expired anonymous sites, abandoned uploads, unreferenced files.
+  "triggers": { "crons": ["17 * * * *"] }
+}

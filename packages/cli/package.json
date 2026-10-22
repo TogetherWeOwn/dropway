@@ -1,0 +1,18 @@
+{
+  "name": "dropway",
+  "version": "0.0.1",
+  "description": "Dropway CLI (placeholder). Publish files and folders to a live URL.",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TogetherWeOwn/dropway.git",
+    "directory": "packages/cli"
+  },
+  "bin": {
+    "dropway": "bin/dropway.mjs"
+  },
+  "files": [
+    "bin"
+  ]
+}

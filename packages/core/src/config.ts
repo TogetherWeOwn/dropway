@@ -1,0 +1,169 @@
+/**
+ * Instance configuration. Resolved from Worker vars/secrets (see wrangler.jsonc),
+ * then overridden by whatever the embedding app passes to createDropway({ config }).
+ */
+
+const MB = 1024 * 1024;
+
+/** Size and count caps applied to a publish. A PolicyAdapter may return different values per caller. */
+export interface Limits {
+  /** Largest single file in bytes. Workers request bodies are capped at 100 MB on most plans. */
+  maxFileBytes: number;
+  /** Most files in one version. */
+  maxFiles: number;
+  /** Largest version (sum of file sizes) in bytes. */
+  maxSiteBytes: number;
+  /** Largest request body for one-shot POST /api/v1/publish (held in memory). */
+  oneShotMaxBytes: number;
+}
+
+export interface AnonymousConfig {
+  /** Allow publishing without an API key. Off by default. */
+  enabled: boolean;
+  /** Lifetime of an anonymous site. */
+  ttlMs: number;
+  /** New anonymous sites per IP per hour. */
+  sitesPerHourPerIp: number;
+  /** Caps for anonymous sites. */
+  limits: Limits;
+}
+
+export type SitesMode = "path" | "subdomain";
+
+export interface DropwayConfig {
+  /** Shown in pages and API responses. */
+  instanceName: string;
+  /** Public origin of the app + API, no trailing slash. null = the origin of each request. */
+  appOrigin: string | null;
+  /**
+   * subdomain: https://<slug>.<sitesDomain>/ (each site its own origin; recommended).
+   * path: <sitesOrigin>/<slug>/ when sitesOrigin is set, else <appOrigin><sitesPathPrefix>/<slug>/ (interim, sandboxed).
+   */
+  sitesMode: SitesMode;
+  sitesDomain: string | null;
+  /** Path mode only: origin of a sites-only deployment. null = serve sites from the app origin. */
+  sitesOrigin: string | null;
+  /** Path mode on the app origin: prefix in front of /<slug>/. */
+  sitesPathPrefix: string;
+  /**
+   * Serve user content with a CSP sandbox (opaque origin: no cookies, storage, workers or Referer).
+   * Always on when sites share the app origin. Off by default for a separate sites origin and for
+   * subdomain mode (SITES_SANDBOX=true turns it on there).
+   */
+  sitesSandbox: boolean;
+  /** false (open source): exactly one tenant, created by POST /api/v1/setup. */
+  multiTenant: boolean;
+  anonymous: AnonymousConfig;
+  /** Default caps for API-key publishes. */
+  limits: Limits;
+  /** Secret that may create the owner (first run) and mint recovery owner keys. */
+  adminBootstrapKey: string | null;
+  /** HMAC secret for cookies and IP hashing. */
+  signingSecret: string;
+  /** KV edge-cache TTL for live site manifests, seconds (KV minimum is 30). */
+  liveCacheTtlSeconds: number;
+}
+
+export type ConfigOverrides = Partial<Omit<DropwayConfig, "anonymous" | "limits">> & {
+  anonymous?: Partial<Omit<AnonymousConfig, "limits">> & { limits?: Partial<Limits> };
+  limits?: Partial<Limits>;
+};
+
+/** Worker vars and secrets read by resolveConfig. All optional strings. */
+export interface DropwayVars {
+  INSTANCE_NAME?: string;
+  APP_ORIGIN?: string;
+  SITES_MODE?: string;
+  SITES_DOMAIN?: string;
+  SITES_ORIGIN?: string;
+  SITES_SANDBOX?: string;
+  ANONYMOUS_PUBLISH?: string;
+  ANON_TTL_HOURS?: string;
+  ANON_SITES_PER_HOUR?: string;
+  ANON_MAX_FILE_BYTES?: string;
+  ANON_MAX_SITE_BYTES?: string;
+  MAX_FILE_BYTES?: string;
+  MAX_FILES?: string;
+  MAX_SITE_BYTES?: string;
+  ONESHOT_MAX_BYTES?: string;
+  ADMIN_BOOTSTRAP_KEY?: string;
+  SIGNING_SECRET?: string;
+}
+
+const num = (v: string | undefined, d: number) => {
+  if (v === undefined || v === "") return d;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : d;
+};
+
+const bool = (v: string | undefined, d: boolean) => {
+  if (v === undefined || v.trim() === "") return d;
+  return ["1", "true", "yes", "on"].includes(v.trim().toLowerCase());
+};
+
+export function normaliseOrigin(v: string | undefined | null): string | null {
+  const s = (v ?? "").trim();
+  if (!s) return null;
+  try {
+    return new URL(s).origin;
+  } catch {
+    return null;
+  }
+}
+
+function normaliseDomain(v: string | undefined | null): string | null {
+  const d = (v ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^\.+|\.+$/g, "");
+  return d || null;
+}
+
+export function resolveConfig(vars: DropwayVars, overrides: ConfigOverrides = {}): DropwayConfig {
+  const sitesDomain = overrides.sitesDomain !== undefined ? overrides.sitesDomain : normaliseDomain(vars.SITES_DOMAIN);
+  const requestedMode = (overrides.sitesMode ?? vars.SITES_MODE ?? "").trim().toLowerCase();
+  let sitesMode: SitesMode = requestedMode === "subdomain" || (!requestedMode && sitesDomain) ? "subdomain" : "path";
+  if (sitesMode === "subdomain" && !sitesDomain) {
+    console.warn(JSON.stringify({ event: "config_warning", message: "SITES_MODE=subdomain needs SITES_DOMAIN; falling back to path mode." }));
+    sitesMode = "path";
+  }
+  const appOrigin = overrides.appOrigin !== undefined ? overrides.appOrigin : normaliseOrigin(vars.APP_ORIGIN);
+  let sitesOrigin = overrides.sitesOrigin !== undefined ? overrides.sitesOrigin : normaliseOrigin(vars.SITES_ORIGIN);
+  if (sitesOrigin && appOrigin && sitesOrigin === appOrigin) sitesOrigin = null;
+  const sharedOrigin = sitesMode === "path" && !sitesOrigin;
+  const sandboxRequested = overrides.sitesSandbox ?? bool(vars.SITES_SANDBOX, false);
+  const limits: Limits = {
+    maxFileBytes: num(vars.MAX_FILE_BYTES, 100 * MB),
+    maxFiles: num(vars.MAX_FILES, 2500),
+    maxSiteBytes: num(vars.MAX_SITE_BYTES, 10 * 1024 * MB),
+    oneShotMaxBytes: num(vars.ONESHOT_MAX_BYTES, 25 * MB),
+    ...overrides.limits,
+  };
+  const anonymous: AnonymousConfig = {
+    enabled: bool(vars.ANONYMOUS_PUBLISH, false),
+    ttlMs: num(vars.ANON_TTL_HOURS, 24) * 3600_000,
+    sitesPerHourPerIp: num(vars.ANON_SITES_PER_HOUR, 60),
+    ...overrides.anonymous,
+    limits: {
+      maxFileBytes: num(vars.ANON_MAX_FILE_BYTES, 25 * MB),
+      maxFiles: limits.maxFiles,
+      maxSiteBytes: num(vars.ANON_MAX_SITE_BYTES, 250 * MB),
+      oneShotMaxBytes: limits.oneShotMaxBytes,
+      ...overrides.anonymous?.limits,
+    },
+  };
+  const adminBootstrapKey = overrides.adminBootstrapKey !== undefined ? overrides.adminBootstrapKey : vars.ADMIN_BOOTSTRAP_KEY?.trim() || null;
+  return {
+    instanceName: overrides.instanceName ?? (vars.INSTANCE_NAME?.trim() || "Dropway"),
+    appOrigin,
+    sitesMode,
+    sitesDomain: sitesMode === "subdomain" ? sitesDomain : null,
+    sitesOrigin: sitesMode === "path" ? sitesOrigin : null,
+    sitesPathPrefix: (overrides.sitesPathPrefix ?? "/s").replace(/\/+$/, ""),
+    // Sites that share the app origin are always sandboxed: they must never touch the app's storage.
+    sitesSandbox: sharedOrigin ? true : sandboxRequested,
+    multiTenant: overrides.multiTenant ?? false,
+    anonymous,
+    limits,
+    adminBootstrapKey,
+    signingSecret: overrides.signingSecret ?? (vars.SIGNING_SECRET?.trim() || adminBootstrapKey || "dropway-insecure-dev-secret"),
+    liveCacheTtlSeconds: Math.max(30, overrides.liveCacheTtlSeconds ?? 30),
+  };
+}

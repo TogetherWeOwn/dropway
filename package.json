@@ -1,0 +1,55 @@
+{
+  "name": "dropway-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Instant web hosting for AI agents and people, built entirely on Cloudflare. Self-hostable, single tenant, MIT.",
+  "repository": "github:TogetherWeOwn/dropway",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check": "npm run typecheck && npm test",
+    "db:migrate": "wrangler d1 migrations apply DB --remote",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "deploy": "(wrangler d1 migrations apply DB --remote || wrangler deploy) && wrangler d1 migrations apply DB --remote && wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.7",
+    "@cloudflare/workers-types": "^5.20261022.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.152.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "cloudflare": {
+    "bindings": {
+      "ADMIN_BOOTSTRAP_KEY": {
+        "description": "A long random string, used once to create the owner of this instance: `curl -X POST <your worker URL>/api/v1/setup -H \"Authorization: Bearer <ADMIN_BOOTSTRAP_KEY>\"`. Generate one with `openssl rand -hex 32`."
+      },
+      "APP_ORIGIN": {
+        "description": "Optional. Public origin of the app and API, for example `https://dropway.<you>.workers.dev`. Leave empty to use the origin of each request."
+      },
+      "SITES_MODE": {
+        "description": "`path` (default): sites are served sandboxed under `/s/<slug>/` on this Worker. `subdomain`: each site gets its own origin at `<slug>.<SITES_DOMAIN>` (needs a domain on your account)."
+      },
+      "SITES_DOMAIN": {
+        "description": "Only for SITES_MODE=subdomain. A domain on your Cloudflare account whose first-level subdomains serve sites, for example `example-sites.com`."
+      },
+      "SITES_ORIGIN": {
+        "description": "Optional, path mode only. Origin of a second Worker deployment that serves only sites, for example `https://dropway-sites.<you>.workers.dev`. Leave empty to serve sites from this Worker under `/s/`."
+      },
+      "ANONYMOUS_PUBLISH": {
+        "description": "`false` (default): only API keys can publish. `true`: anyone can publish without a key; those sites expire after 24 hours."
+      }
+    }
+  }
+}

@@ -1,0 +1,5 @@
+# Secret used to create the owner of this instance (first run) and to mint a
+# recovery owner key later:
+#   curl -X POST <worker URL>/api/v1/setup -H "Authorization: Bearer <ADMIN_BOOTSTRAP_KEY>"
+# Generate one with: openssl rand -hex 32
+ADMIN_BOOTSTRAP_KEY=

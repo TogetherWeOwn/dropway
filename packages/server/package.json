@@ -1,0 +1,23 @@
+{
+  "name": "@dropway/server",
+  "version": "0.1.0",
+  "description": "Dropway HTTP layer: createDropway() Hono app factory with extension points (adapters, hooks, routes, MCP tools, UI slots), site serving and viewers.",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TogetherWeOwn/dropway.git",
+    "directory": "packages/server"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@dropway/core": "^0.1.0",
+    "hono": "^4.13.13",
+    "marked": "^18.1.1"
+  }
+}

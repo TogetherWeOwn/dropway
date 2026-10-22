@@ -1,0 +1,116 @@
+import type { DropwayContext } from "../context";
+
+/**
+ * The "live manifest": everything the edge needs to serve a site, cached in KV
+ * under live:<slug>. D1 is the source of truth; KV is rewritten on every change
+ * (finalize, restore, settings, claim, delete) and rebuilt from D1 on a miss.
+ * Files are stored compactly as path -> [sha256, size, contentType].
+ */
+export interface LiveSite {
+  v: 2;
+  siteId: string;
+  slug: string;
+  tenantId: string | null;
+  versionId: string | null;
+  spa: boolean;
+  renderMarkdown: boolean;
+  crossOriginIsolation: boolean;
+  passwordHash: string | null;
+  expiresAt: number | null;
+  files: Record<string, [sha256: string, size: number, contentType: string]>;
+}
+
+export const liveKey = (slug: string) => `live:${slug}`;
+
+/** Per-isolate memory cache: one page load fetches many files from the same site. */
+const MEMORY_TTL_MS = 5_000;
+const MEMORY_MAX = 500;
+const memory = new Map<string, { at: number; live: LiveSite | null }>();
+
+function remember(slug: string, live: LiveSite | null) {
+  if (memory.size >= MEMORY_MAX) memory.delete(memory.keys().next().value!);
+  memory.set(slug, { at: Date.now(), live });
+}
+
+/** For tests. */
+export function clearLiveMemoryCache() {
+  memory.clear();
+}
+
+export async function getLiveSite(dc: DropwayContext, slug: string): Promise<LiveSite | null> {
+  const hit = memory.get(slug);
+  if (hit && Date.now() - hit.at < MEMORY_TTL_MS) return hit.live;
+  const cached = await dc.env.CACHE.get<LiveSite>(liveKey(slug), { type: "json", cacheTtl: dc.config.liveCacheTtlSeconds }).catch(() => null);
+  if (cached && cached.v === 2) {
+    remember(slug, cached);
+    return cached;
+  }
+  const live = await loadLiveSiteFromD1(dc, { slug });
+  remember(slug, live);
+  if (live) dc.waitUntil(putLive(dc, live).catch(() => {}));
+  return live;
+}
+
+export async function loadLiveSiteFromD1(dc: DropwayContext, by: { slug?: string; siteId?: string }): Promise<LiveSite | null> {
+  const site = await dc.env.DB.prepare(
+    `SELECT id, slug, tenant_id, current_version_id, spa, render_markdown, cross_origin_isolation, password_hash, expires_at
+       FROM sites WHERE ${by.siteId ? "id" : "slug"} = ? AND deleted_at IS NULL`,
+  )
+    .bind(by.siteId ?? by.slug)
+    .first<{
+      id: string;
+      slug: string;
+      tenant_id: string | null;
+      current_version_id: string | null;
+      spa: number;
+      render_markdown: number;
+      cross_origin_isolation: number;
+      password_hash: string | null;
+      expires_at: number | null;
+    }>();
+  if (!site) return null;
+  const files: LiveSite["files"] = {};
+  if (site.current_version_id) {
+    const { results } = await dc.env.DB.prepare("SELECT path, sha256, size, content_type FROM version_files WHERE version_id = ?")
+      .bind(site.current_version_id)
+      .all<{ path: string; sha256: string; size: number; content_type: string }>();
+    for (const f of results) files[f.path] = [f.sha256, f.size, f.content_type];
+  }
+  return {
+    v: 2,
+    siteId: site.id,
+    slug: site.slug,
+    tenantId: site.tenant_id,
+    versionId: site.current_version_id,
+    spa: site.spa === 1,
+    renderMarkdown: site.render_markdown === 1,
+    crossOriginIsolation: site.cross_origin_isolation === 1,
+    passwordHash: site.password_hash,
+    expiresAt: site.expires_at,
+    files,
+  };
+}
+
+async function putLive(dc: DropwayContext, live: LiveSite): Promise<void> {
+  const opts: KVNamespacePutOptions = {};
+  if (live.expiresAt) {
+    // Keep the key a little past expiry so visitors get a clear "expired" page, then let KV drop it.
+    opts.expirationTtl = Math.max(60, Math.ceil((live.expiresAt - Date.now()) / 1000) + 3600);
+  }
+  await dc.env.CACHE.put(liveKey(live.slug), JSON.stringify(live), opts);
+}
+
+/** Rebuild the KV entry for a site from D1. Call after any change that affects serving. */
+export async function refreshLive(dc: DropwayContext, siteId: string): Promise<LiveSite | null> {
+  const live = await loadLiveSiteFromD1(dc, { siteId });
+  if (live) {
+    remember(live.slug, live);
+    await putLive(dc, live);
+  }
+  return live;
+}
+
+export async function dropLive(dc: DropwayContext, slug: string): Promise<void> {
+  memory.delete(slug);
+  await dc.env.CACHE.delete(liveKey(slug));
+}

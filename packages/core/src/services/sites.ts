@@ -1,0 +1,379 @@
+import type { DropwayContext } from "../context";
+import { appOrigin, siteUrl } from "../context";
+import { ApiError, badRequest, conflict, forbidden, notFound, rateLimited, unauthorized } from "../errors";
+import { hashPassword, newId, newSecret, sha256Hex } from "../lib/crypto";
+import { generateSlug, validateSlug } from "../lib/slug";
+import { hasScope, type Principal, type Scope } from "../principal";
+import { CLAIM_TOKEN_PREFIX } from "./identity";
+import { dropLive, refreshLive } from "./live";
+import { emit, meter } from "./events";
+
+export interface SiteRow {
+  id: string;
+  slug: string;
+  tenant_id: string | null;
+  created_by: string | null;
+  folder_id: string | null;
+  title: string | null;
+  description: string | null;
+  spa: number;
+  render_markdown: number;
+  cross_origin_isolation: number;
+  password_hash: string | null;
+  current_version_id: string | null;
+  claim_token_hash: string | null;
+  creator_ip_hash: string | null;
+  expires_at: number | null;
+  created_at: number;
+  updated_at: number;
+  deleted_at: number | null;
+}
+
+export interface VersionRow {
+  id: string;
+  site_id: string;
+  number: number;
+  status: "pending" | "ready";
+  file_count: number;
+  total_bytes: number;
+  manifest_hash: string;
+  base_version_id: string | null;
+  source: string;
+  client: string | null;
+  message: string | null;
+  created_by: string | null;
+  created_at: number;
+  finalized_at: number | null;
+}
+
+export interface SiteSettingsInput {
+  title?: string | null;
+  description?: string | null;
+  spa?: boolean;
+  renderMarkdown?: boolean;
+  crossOriginIsolation?: boolean;
+  /** Set a visitor password; null removes it. */
+  password?: string | null;
+}
+
+const iso = (t: number | null | undefined) => (t ? new Date(t).toISOString() : null);
+
+/** May `p` read (sites:read) or change (sites:write) this site? */
+export function canAccess(p: Principal, site: Pick<SiteRow, "id" | "tenant_id">, scope: Scope): boolean {
+  if (p.kind === "member") return site.tenant_id === p.tenantId && hasScope(p, scope) && (!p.siteId || p.siteId === site.id);
+  if (p.kind === "claim") return site.id === p.siteId && site.tenant_id === null;
+  return false;
+}
+
+export async function findSite(dc: DropwayContext, slug: string): Promise<SiteRow | null> {
+  return dc.env.DB.prepare("SELECT * FROM sites WHERE slug = ? AND deleted_at IS NULL").bind(slug.toLowerCase()).first<SiteRow>();
+}
+
+/** Load a site the caller may access. Unknown and foreign sites both 404, so existence never leaks. */
+export async function getSiteFor(dc: DropwayContext, p: Principal, slug: string, scope: Scope = "sites:read"): Promise<SiteRow> {
+  if (p.kind === "anonymous") throw unauthorized("This needs the site owner's API key, or the claim token of an anonymous site.");
+  if (p.kind === "bootstrap") throw forbidden("The bootstrap key can only set up the instance.", "Use the owner API key from POST /api/v1/setup.");
+  const site = await findSite(dc, slug);
+  if (!site || !canAccess(p, site, "sites:read")) {
+    throw notFound("site_not_found", `No site "${slug}" that this key can access.`, "List your sites with GET /api/v1/sites.");
+  }
+  if (!canAccess(p, site, scope)) {
+    throw forbidden(`This key lacks the "${scope}" scope for "${slug}".`, "Use a key with that scope.", "insufficient_scope");
+  }
+  return site;
+}
+
+export async function getVersion(dc: DropwayContext, siteId: string, versionId: string): Promise<VersionRow | null> {
+  return dc.env.DB.prepare("SELECT * FROM versions WHERE id = ? AND site_id = ?").bind(versionId, siteId).first<VersionRow>();
+}
+
+export function serializeVersion(v: VersionRow, liveVersionId: string | null) {
+  return {
+    id: v.id,
+    number: v.number,
+    status: v.status,
+    live: v.id === liveVersionId,
+    fileCount: v.file_count,
+    totalBytes: v.total_bytes,
+    source: v.source,
+    client: v.client,
+    message: v.message,
+    createdAt: iso(v.created_at),
+    finalizedAt: iso(v.finalized_at),
+  };
+}
+
+export function serializeSite(dc: DropwayContext, site: SiteRow, current?: VersionRow | null) {
+  const api = `${appOrigin(dc)}/api/v1/sites/${site.slug}`;
+  return {
+    slug: site.slug,
+    url: siteUrl(dc, site.slug),
+    title: site.title,
+    description: site.description,
+    anonymous: site.tenant_id === null,
+    expiresAt: iso(site.expires_at),
+    settings: {
+      spa: site.spa === 1,
+      renderMarkdown: site.render_markdown === 1,
+      crossOriginIsolation: site.cross_origin_isolation === 1,
+      passwordProtected: !!site.password_hash,
+    },
+    currentVersionId: site.current_version_id,
+    currentVersion: current ? serializeVersion(current, site.current_version_id) : null,
+    createdAt: iso(site.created_at),
+    updatedAt: iso(site.updated_at),
+    links: { self: api, deploys: `${api}/deploys`, versions: `${api}/versions`, files: `${api}/files` },
+  };
+}
+
+/** serializeSite, loading the current version row. */
+export async function describeSite(dc: DropwayContext, site: SiteRow) {
+  const current = site.current_version_id ? await getVersion(dc, site.id, site.current_version_id) : null;
+  return serializeSite(dc, site, current);
+}
+
+function boolField(v: unknown, name: string): boolean | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v === "boolean") return v;
+  if (v === "true" || v === "1" || v === 1) return true;
+  if (v === "false" || v === "0" || v === 0) return false;
+  throw badRequest("invalid_field", `${name} must be true or false.`);
+}
+
+/** Parse the settings fields shared by create, publish and PATCH. */
+export function parseSettings(body: Record<string, unknown>): SiteSettingsInput {
+  const out: SiteSettingsInput = {};
+  if ("title" in body) out.title = body.title == null ? null : String(body.title).slice(0, 200);
+  if ("description" in body) out.description = body.description == null ? null : String(body.description).slice(0, 2000);
+  const spa = boolField(body.spa, "spa");
+  if (spa !== undefined) out.spa = spa;
+  const md = boolField(body.renderMarkdown, "renderMarkdown");
+  if (md !== undefined) out.renderMarkdown = md;
+  const coi = boolField(body.crossOriginIsolation, "crossOriginIsolation");
+  if (coi !== undefined) out.crossOriginIsolation = coi;
+  if ("password" in body) {
+    if (body.password === null || body.password === "") out.password = null;
+    else {
+      const pw = String(body.password);
+      if (pw.length < 4 || pw.length > 200) throw badRequest("invalid_password", "Passwords must be 4-200 characters.");
+      out.password = pw;
+    }
+  }
+  return out;
+}
+
+/** Salted hash of the caller IP, for anonymous rate limits without storing raw IPs. */
+export async function ipHash(dc: DropwayContext, ip: string): Promise<string> {
+  return (await sha256Hex(`${dc.config.signingSecret}:${ip}`)).slice(0, 32);
+}
+
+export function anonymousDisabled(): ApiError {
+  return unauthorized(
+    "This instance does not accept anonymous publishing.",
+    "Send `Authorization: Bearer dw_...` with an API key from the instance owner. (Self-hosters: set ANONYMOUS_PUBLISH=true to allow anonymous sites.)",
+    "anonymous_publish_disabled",
+  );
+}
+
+export async function createSite(
+  dc: DropwayContext,
+  p: Principal,
+  input: { slug?: string | null } & SiteSettingsInput,
+): Promise<{ site: SiteRow; claimToken: string | null }> {
+  if (p.kind === "bootstrap") throw forbidden("The bootstrap key cannot own sites.", "Use the owner API key returned by POST /api/v1/setup.");
+  if (p.kind === "claim") throw forbidden("A claim token controls exactly one anonymous site.", "Use an API key to create more sites.");
+  if (p.kind === "member") {
+    if (!hasScope(p, "sites:write")) throw forbidden('This key lacks the "sites:write" scope.', undefined, "insufficient_scope");
+    if (p.siteId) throw forbidden("This key is restricted to one site and cannot create others.", undefined, "key_site_restricted");
+  }
+  const anonymous = p.kind === "anonymous";
+  const now = Date.now();
+  let creatorIp: string | null = null;
+
+  if (anonymous) {
+    if (!dc.config.anonymous.enabled) throw anonymousDisabled();
+    if (input.slug) throw forbidden("Choosing a site name needs an API key.", "Omit slug to get a generated name.");
+    if (input.password) throw forbidden("Password protection needs an API key.");
+    creatorIp = await ipHash(dc, p.ip);
+    const recent = await dc.env.DB.prepare("SELECT COUNT(*) AS n FROM sites WHERE creator_ip_hash = ? AND created_at > ?")
+      .bind(creatorIp, now - 3600_000)
+      .first<{ n: number }>();
+    const cap = dc.config.anonymous.sitesPerHourPerIp;
+    if ((recent?.n ?? 0) >= cap) {
+      throw rateLimited(`Anonymous publishing is limited to ${cap} new sites per hour per IP.`, "Wait and retry, update your existing site with its claim token, or use an API key.", 3600);
+    }
+  }
+  const tenantId = p.kind === "member" ? p.tenantId : null;
+  const wanted = input.slug ? validateSlug(input.slug) : null;
+  await dc.adapters.policy.beforeCreateSite?.(p, { slug: wanted, tenantId }, dc);
+
+  const claimToken = anonymous ? newSecret(CLAIM_TOKEN_PREFIX) : null;
+  const claimHash = claimToken ? await sha256Hex(claimToken) : null;
+  const passwordHash = input.password ? await hashPassword(input.password) : null;
+
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const site: SiteRow = {
+      id: newId("site"),
+      slug: wanted ?? generateSlug(),
+      tenant_id: tenantId,
+      created_by: p.kind === "member" ? p.memberId : "anonymous",
+      folder_id: null,
+      title: input.title ?? null,
+      description: input.description ?? null,
+      spa: input.spa ? 1 : 0,
+      render_markdown: input.renderMarkdown === false ? 0 : 1,
+      cross_origin_isolation: input.crossOriginIsolation ? 1 : 0,
+      password_hash: passwordHash,
+      current_version_id: null,
+      claim_token_hash: claimHash,
+      creator_ip_hash: creatorIp,
+      expires_at: anonymous ? now + dc.config.anonymous.ttlMs : null,
+      created_at: now,
+      updated_at: now,
+      deleted_at: null,
+    };
+    try {
+      await dc.env.DB.prepare(
+        `INSERT INTO sites (id, slug, tenant_id, created_by, title, description, spa, render_markdown, cross_origin_isolation,
+           password_hash, claim_token_hash, creator_ip_hash, expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+        .bind(
+          site.id, site.slug, site.tenant_id, site.created_by, site.title, site.description, site.spa, site.render_markdown,
+          site.cross_origin_isolation, site.password_hash, site.claim_token_hash, site.creator_ip_hash, site.expires_at,
+          site.created_at, site.updated_at,
+        )
+        .run();
+      meter(dc, { type: "site_created", tenantId, siteId: site.id, anonymous, at: now });
+      return { site, claimToken };
+    } catch (e) {
+      if (!String(e).includes("UNIQUE")) throw e;
+      if (wanted) throw conflict("slug_taken", `The site name "${wanted}" is taken.`, "Pick another slug, or omit it to get a generated one.");
+    }
+  }
+  throw new ApiError(503, "slug_generation_failed", "Could not generate a free site name.", "Retry the request.");
+}
+
+export async function listSites(dc: DropwayContext, p: Principal, opts: { limit?: number; cursor?: string | null } = {}) {
+  if (p.kind !== "member") throw unauthorized("Listing sites needs an API key.");
+  if (!hasScope(p, "sites:read")) throw forbidden('This key lacks the "sites:read" scope.', undefined, "insufficient_scope");
+  const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
+  let before = Number.MAX_SAFE_INTEGER;
+  let beforeId = "~";
+  if (opts.cursor) {
+    let decoded = "";
+    try {
+      decoded = atob(opts.cursor);
+    } catch {
+      /* invalid below */
+    }
+    const [t, id] = decoded.split("|");
+    before = Number(t);
+    beforeId = id ?? "~";
+    if (!decoded || !Number.isFinite(before)) throw badRequest("invalid_cursor", "cursor is not valid.", "Pass the nextCursor value from the previous page.");
+  }
+  const { results } = await dc.env.DB.prepare(
+    `SELECT s.*, v.id AS v_id, v.number AS v_number, v.status AS v_status, v.file_count AS v_file_count, v.total_bytes AS v_total_bytes,
+            v.manifest_hash AS v_manifest_hash, v.base_version_id AS v_base_version_id, v.source AS v_source, v.client AS v_client,
+            v.message AS v_message, v.created_by AS v_created_by, v.created_at AS v_created_at, v.finalized_at AS v_finalized_at
+       FROM sites s LEFT JOIN versions v ON v.id = s.current_version_id
+      WHERE s.tenant_id = ? AND s.deleted_at IS NULL ${p.siteId ? "AND s.id = ?" : ""}
+        AND (s.created_at < ? OR (s.created_at = ? AND s.id < ?))
+      ORDER BY s.created_at DESC, s.id DESC LIMIT ?`,
+  )
+    .bind(...[p.tenantId, ...(p.siteId ? [p.siteId] : []), before, before, beforeId, limit + 1])
+    .all<SiteRow & Record<string, unknown>>();
+  const page = results.slice(0, limit);
+  const last = page[page.length - 1];
+  return {
+    sites: page.map((r) => {
+      const v: VersionRow | null = r.v_id
+        ? {
+            id: r.v_id as string,
+            site_id: r.id,
+            number: r.v_number as number,
+            status: r.v_status as VersionRow["status"],
+            file_count: r.v_file_count as number,
+            total_bytes: r.v_total_bytes as number,
+            manifest_hash: r.v_manifest_hash as string,
+            base_version_id: r.v_base_version_id as string | null,
+            source: r.v_source as string,
+            client: r.v_client as string | null,
+            message: r.v_message as string | null,
+            created_by: r.v_created_by as string | null,
+            created_at: r.v_created_at as number,
+            finalized_at: r.v_finalized_at as number | null,
+          }
+        : null;
+      return serializeSite(dc, r, v);
+    }),
+    nextCursor: results.length > limit && last ? btoa(`${last.created_at}|${last.id}`) : null,
+  };
+}
+
+export async function updateSite(dc: DropwayContext, p: Principal, slug: string, input: SiteSettingsInput): Promise<SiteRow> {
+  const site = await getSiteFor(dc, p, slug, "sites:write");
+  if (input.password && site.tenant_id === null) throw forbidden("Password protection needs an account. Claim the site first.");
+  const sets: string[] = [];
+  const binds: unknown[] = [];
+  const set = (col: string, val: unknown) => {
+    sets.push(`${col} = ?`);
+    binds.push(val);
+  };
+  if (input.title !== undefined) set("title", input.title);
+  if (input.description !== undefined) set("description", input.description);
+  if (input.spa !== undefined) set("spa", input.spa ? 1 : 0);
+  if (input.renderMarkdown !== undefined) set("render_markdown", input.renderMarkdown ? 1 : 0);
+  if (input.crossOriginIsolation !== undefined) set("cross_origin_isolation", input.crossOriginIsolation ? 1 : 0);
+  if (input.password !== undefined) set("password_hash", input.password ? await hashPassword(input.password) : null);
+  if (!sets.length) return site;
+  set("updated_at", Date.now());
+  await dc.env.DB.prepare(`UPDATE sites SET ${sets.join(", ")} WHERE id = ?`).bind(...binds, site.id).run();
+  await refreshLive(dc, site.id);
+  return (await dc.env.DB.prepare("SELECT * FROM sites WHERE id = ?").bind(site.id).first<SiteRow>())!;
+}
+
+/** Soft-delete: the slug is freed at once; rows and unreferenced files are removed by the hourly cleanup. */
+export async function deleteSite(dc: DropwayContext, p: Principal, slug: string): Promise<{ deleted: true; slug: string }> {
+  const site = await getSiteFor(dc, p, slug, "sites:write");
+  const now = Date.now();
+  await dc.env.DB.prepare("UPDATE sites SET deleted_at = ?, deleted_slug = slug, slug = ?, claim_token_hash = NULL WHERE id = ?")
+    .bind(now, `~deleted~${site.id}`, site.id)
+    .run();
+  await dropLive(dc, site.slug);
+  emit(dc, "onDelete", { site: { id: site.id, slug: site.slug, tenantId: site.tenant_id, url: siteUrl(dc, site.slug) }, principal: p, reason: "api", at: now });
+  meter(dc, { type: "site_deleted", tenantId: site.tenant_id, siteId: site.id, at: now });
+  return { deleted: true, slug: site.slug };
+}
+
+/** Move an anonymous site into the caller's tenant: it stops expiring and the claim token stops working. */
+export async function claimSite(dc: DropwayContext, p: Principal, slug: string, claimToken: unknown): Promise<SiteRow> {
+  if (p.kind !== "member") throw unauthorized("Claiming a site needs an API key of the tenant that should own it.");
+  if (!hasScope(p, "sites:write") || p.siteId) throw forbidden("This key cannot claim sites.", "Use a key with the sites:write scope.", "insufficient_scope");
+  if (typeof claimToken !== "string" || !claimToken.startsWith(CLAIM_TOKEN_PREFIX)) {
+    throw badRequest("claim_token_required", "Send the claimToken returned when the anonymous site was created.", 'Body: {"claimToken": "dwc_..."}');
+  }
+  const site = await findSite(dc, slug);
+  if (site && site.tenant_id === p.tenantId && site.claim_token_hash === null) return site; // retry-safe
+  if (!site || site.claim_token_hash !== (await sha256Hex(claimToken))) {
+    throw notFound("site_not_found", `No anonymous site "${slug}" matches this claim token.`);
+  }
+  if (site.tenant_id) throw conflict("already_claimed", "This site already belongs to an account.");
+  const now = Date.now();
+  await dc.env.DB.batch([
+    dc.env.DB.prepare("UPDATE sites SET tenant_id = ?, created_by = ?, claim_token_hash = NULL, expires_at = NULL, creator_ip_hash = NULL, updated_at = ? WHERE id = ?").bind(
+      p.tenantId,
+      p.memberId,
+      now,
+      site.id,
+    ),
+    // The tenant now owns the files the anonymous uploader proved it had.
+    dc.env.DB.prepare("INSERT OR IGNORE INTO blob_scopes (scope, sha256, created_at) SELECT ?, sha256, ? FROM blob_scopes WHERE scope = ?").bind(
+      `t:${p.tenantId}`,
+      now,
+      `s:${site.id}`,
+    ),
+  ]);
+  await refreshLive(dc, site.id);
+  return { ...site, tenant_id: p.tenantId, created_by: p.memberId, claim_token_hash: null, expires_at: null, creator_ip_hash: null, updated_at: now };
+}
