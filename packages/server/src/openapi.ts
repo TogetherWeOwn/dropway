@@ -76,15 +76,15 @@ const fileInput = {
   },
 };
 
-/** The OpenAPI document for an instance at `origin`. */
-export function buildOpenApi(origin: string, instanceName: string): Json {
+/** The OpenAPI document for an instance at `origin`; anonymous publishing defaults to disabled. */
+export function buildOpenApi(origin: string, instanceName: string, anonymousPublish = false): Json {
   return {
     openapi: "3.1.0",
     info: {
       title: `${instanceName} API`,
       version: "1.0.0",
       description:
-        "Publish files, folders and sites to live URLs. Authenticate with `Authorization: Bearer dw_...`. Errors always carry a stable `code` and a `hint` saying what to do next. Fastest path: POST /api/v1/publish with multipart files. Every operationId is also an MCP tool name at /mcp (see x-mcp-tool).",
+        "Publish files, folders and sites to live URLs. Authenticate with `Authorization: Bearer dw_...`. Errors always carry a stable `code` and a `hint` saying what to do next. Fastest path: POST /api/v1/publish with multipart files. See x-mcp-tool for available MCP twins at /mcp, or x-mcp-exclude for why an operation has none.",
       license: { name: "MIT", url: "https://github.com/TogetherWeOwn/dropway/blob/main/LICENSE" },
     },
     externalDocs: { description: "Agent docs (llms.txt)", url: `${origin}/llms.txt` },
@@ -173,6 +173,7 @@ export function buildOpenApi(origin: string, instanceName: string): Json {
       "/api/v1/sites/{slug}/claim": {
         post: op("claim_site", "Claim an anonymous site into your tenant", {
           tags: ["sites"],
+          ...(anonymousPublish ? {} : { mcpExclude: "anonymous publishing is disabled; previously issued sites can still be claimed through REST" }),
           params: [slugParam],
           requestBody: body({ type: "object", required: ["claimToken"], properties: { claimToken: { type: "string" } } }),
         }),
