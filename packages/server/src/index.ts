@@ -11,6 +11,7 @@ export type {
   NavItem,
   RouteExtension,
   UiPage,
+  UiSection,
   UiSlots,
 } from "./extensions";
 export type { DropwayEnv, ServerBindings } from "./env";
@@ -26,3 +27,4 @@ export { cachedRender } from "./viewers/cache";
 export { escapeHtml, htmlPage, systemPage, BASE_CSS, APP_PAGE_CSP, formatBytes } from "./html";
 export { buildOpenApi } from "./openapi";
 export { llmsTxt } from "./app";
+export { renderAppPage, appScriptCsp, APP_CSS, CORE_NAV, clientScriptUrl, type AppPageOptions } from "./ui";

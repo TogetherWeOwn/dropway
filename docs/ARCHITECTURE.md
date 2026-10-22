@@ -30,9 +30,10 @@ packages/server           @dropway/server: createDropway() Hono app factory
   src/route-sites.ts      Decides "site request" vs "app request" (modes, Referer)
   src/serve.ts            Serves site files (index resolution, ranges, ETags, password, headers)
   src/path-rewrite.ts     Path mode: prefixes root-relative URLs in HTML/CSS
-  src/viewers/            File viewers (markdown, listing); add more here
+  src/viewers/            File viewers, one per kind (code, markdown, json, csv, media, notebook, binary...)
+  src/ui/                 App-origin UI: home, sign-in, dashboard, file viewer, the dashboard script
   src/routes/api.ts       REST API v1 (thin)
-  src/app.ts              App-origin pages: landing, /openapi.json, /llms.txt, /claim, /mcp slot
+  src/app.ts              App-origin routes: home, /openapi.json, /llms.txt, /claim, /mcp slot, ./ui
   src/openapi.ts          OpenAPI 3.1 document
   src/extensions.ts       Types for routes, MCP tools, UI slots, createDropway options
 packages/cli              `dropway` CLI (placeholder)
@@ -95,18 +96,74 @@ Path mode is interim. Root-relative URLs (`/assets/app.js`) would escape the
 
 ### Viewing files
 
-`serveFile` picks a viewer from `packages/server/src/viewers` when a browser
-navigates to a file (`Sec-Fetch-Dest: document`, or `Accept: text/html`), or
-with `?view=1`. Sub-resource requests (`fetch`, `<img>`, `<script>`) always get
-raw bytes, so sites keep working. `?raw=1` returns raw bytes for any file (HTML
-and other text as `text/plain`, so it shows source). `?download=1` downloads it.
+`serveFile` asks `findViewer(file, live, viewers, mode)` (`packages/server/src/viewers`)
+for a rendered view. The mode comes from the request:
 
-**To add a viewer** (images, PDF, video, CSV, JSON, code, notebooks...): create
-`packages/server/src/viewers/<name>.ts` exporting a `Viewer`, match on
-`file.kind` (from `detectFileKind` in `@dropway/core`), and add it to `VIEWERS`
-in `viewers/index.ts`. Viewer pages get a no-script CSP by default
-(`VIEWER_CSP`); a viewer that needs scripts sets its own CSP header. Always link
-"View raw" to `vc.rawUrl`. Directory listings are in `viewers/listing.ts`.
+| Request | Mode | What it gets |
+|---|---|---|
+| Top-level navigation (`Sec-Fetch-Dest: document`, or `Accept: text/html`) | `document` | The view for the file's kind; HTML is served as the page itself; binaries download |
+| Navigation inside an `<iframe>` | `frame` | Same, except images, PDFs, video and audio get raw bytes, so a site embedding its own PDF keeps working |
+| `?view=1` | `view` | Always a view when one exists: HTML gets the viewer frame (bar + page in an iframe), binaries an info page |
+| `?view=source` | `source` | Highlighted source of any text file, HTML and SVG included |
+| `fetch()`, `<img>`, `<script>`... | none | Raw bytes, always |
+
+`?raw=1` returns the stored bytes (text types as `text/plain`), `?download=1`
+downloads, `&embed=1` drops the viewer bar (the app-origin viewer frames views
+and has its own toolbar).
+
+Every view shares one bar (`viewers/chrome.ts`: kind, path, size, type; view
+tabs; Download; Files) built from plain links, so it works with JavaScript off.
+View pages get `VIEWER_CSP` (no scripts). The code view adds one static inline
+script (Copy, `#L10-L20` ranges) allowed by its SHA-256 hash, which stays valid
+across 304 responses, unlike a nonce. User markup (Markdown, notebook HTML)
+goes through `viewers/sanitize.ts`, an allowlist sanitizer on `HTMLRewriter`.
+Expensive output (highlighting, Markdown, JSON trees, CSV tables) is cached by
+content in `viewers/cache.ts` (`render/<viewer>@<version>/<variant>/<sha256>`:
+isolate memory, then the Cache API).
+
+Syntax highlighting is highlight.js core plus about 80 languages registered in
+`viewers/hljs.js` (about 106 KB gzipped). That file is plain JavaScript with
+its own `hljs.d.ts` because highlight.js's types pull in the DOM lib.
+
+**To add a viewer:** create `packages/server/src/viewers/<name>.ts` exporting a
+`Viewer` (`id`, `version`, `maxBytes`, `matches(file, live, mode)`, `render(vc)`),
+match on `file.kind` (from `detectFileKind` in `@dropway/core`) and the mode,
+wrap the body with `viewerPage()` from `viewers/chrome.ts`, and add it to
+`VIEWERS` in `viewers/index.ts` before the code/binary fallbacks. Embedding apps
+pass extra viewers in `createDropway({ viewers })`; they run first.
+
+### App-origin UI (`packages/server/src/ui`)
+
+| Path | Page |
+|---|---|
+| `/` | Home: what this instance is, publish from the browser, curl/CLI/MCP snippets (`uiSlots.landing` replaces it) |
+| `/login` | Sign in with an API key; first-run setup and owner recovery with the bootstrap secret |
+| `/dashboard` | Sites |
+| `/dashboard/sites/:slug` | Versions (restore, delete), files of any version (view, download), settings, delete |
+| `/dashboard/publish` | Drag-and-drop publish: folder, files or a zip |
+| `/dashboard/keys` | Create and revoke scoped API keys |
+| `/dashboard/settings` | Account, members, instance configuration, `uiSlots.settingsSections` |
+| `/v/:slug/*path` (`/view/...` redirects) | File browser: tree, view tabs, and the file in a sandboxed iframe on the sites origin |
+
+Pages are server-rendered shells. One first-party script,
+`/__dropway/ui/app-<hash>.js`, fills in data from the public REST API, using the
+API key the person signed in with (sessionStorage, or localStorage when they tick
+"keep me signed in"; no cookies). The script is the source text of
+`dropwayClient()` in `ui/client.ts`, so there is no build step and nothing for an
+embedding app to configure. Keep that function self-contained and build DOM with
+its `h()` helper, never `innerHTML`.
+
+App pages use `appScriptCsp()`: scripts from `'self'` only, frames, images and
+`connect-src` limited to this origin and the sites origin, `frame-ancestors 'none'`.
+The dashboard never renders user content on the app origin: files open in an
+iframe on the sites origin (with `allow-same-origin` only when that origin is
+not the app origin), and downloads go through a forced-download blob.
+
+Drag-and-drop publishing hashes files in the browser (SHA-256), sends the
+manifest to `POST /api/v1/sites/:slug/deploys`, uploads only the blobs the
+server reports missing (4 at a time, retried on 429/5xx), then finalizes. A
+single `.zip` goes to `POST /api/v1/publish` instead. `.git/`, `node_modules/`,
+`.env*` and OS clutter are skipped and listed.
 
 ## Data model (D1, `packages/core/migrations`)
 
@@ -138,7 +195,7 @@ export default createDropway({
   routes: [({ api, app }) => { api.get("/extra", handler); }], // registered BEFORE core routes (can override)
   mcpTools: [/* McpToolDefinition: name, description, JSON Schema, scopes, handler(args, { dw, principal }) */],
   mcp: (tools) => (c) => handleMcp(c, tools),  // mounts at /mcp; without it /mcp answers 501
-  uiSlots: { navItems: [], pages: [{ path, title, handler }], landing, headHtml },
+  uiSlots: { navItems: [], pages: [{ path, title, nav, handler }], landing, headHtml, banner, settingsSections },
   viewers: [/* extra viewers, tried before core ones */],
   scheduled: async (dw, controller) => { /* extra cron work */ },
 });
@@ -158,8 +215,12 @@ consumers, scripts, tests). Inside routes, use `c.get("dw")` and
   `CORE_MCP_TOOLS` (`packages/server/src/create.ts`). Each tool handler calls
   services with `ctx.dw` and `ctx.principal`, which the MCP handler resolves with
   `dw.adapters.identity.resolve(request, dw)`. Then pass `mcp` in `apps/worker`.
-- **Dashboard pages:** register through `uiSlots.pages` / `uiSlots.landing`. Use
-  `APP_PAGE_CSP` or a stricter CSP. Never render user content on the app origin.
+- **Dashboard pages:** register through `uiSlots.pages` (with `nav: true` for a
+  navigation link) and render them with `renderAppPage(c, { title, page, body })`
+  from `@dropway/server`, which adds the dashboard frame, navigation, banner and
+  CSP. `uiSlots.banner` shows a notice above every app page;
+  `uiSlots.settingsSections` adds sections to `/dashboard/settings`. Never render
+  user content on the app origin.
 - **CLI:** `packages/cli` talks to the REST API (it runs on users' machines).
 
 ## Conventions

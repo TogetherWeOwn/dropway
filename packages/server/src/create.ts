@@ -19,6 +19,7 @@ import { escapeHtml, htmlPage } from "./html";
 import { apiErrorResponse, installApiMiddleware, installApiRoutes } from "./routes/api";
 import { redirectResponse, routeSiteRequest } from "./route-sites";
 import { SITE_SANDBOX, serveSite, systemResponse } from "./serve";
+import { bindUiSlots } from "./ui/shell";
 import { VIEWERS, type Viewer } from "./viewers";
 
 export interface Dropway {
@@ -87,6 +88,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
   app.use("*", async (c, next) => {
     c.set("dw", contexts.get(c.req.raw) ?? context(c.env, c.executionCtx, new URL(c.req.url)));
     c.set("requestId", c.req.header("cf-ray") ?? crypto.randomUUID());
+    bindUiSlots(c, uiSlots);
     await next();
   });
   app.route("/api/v1", api);

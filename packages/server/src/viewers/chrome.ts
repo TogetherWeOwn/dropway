@@ -90,6 +90,7 @@ export function viewerBar(vc: ViewerContext, tabs: ViewerTab[], extra = ""): str
 
 /** Shared viewer styles (on top of BASE_CSS). */
 export const VIEWER_CSS = `
+[hidden]{display:none!important}
 .dw-vbar{position:sticky;top:0;z-index:20;display:flex;flex-wrap:wrap;gap:.4rem .9rem;align-items:center;justify-content:space-between;padding:.45rem .9rem;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(8px);font-size:.82rem;line-height:1.3}
 .dw-vfile{display:flex;align-items:center;gap:.6rem;min-width:0;flex:1 1 18rem}
 .dw-kind{flex:none;font:600 .68rem/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.05em;text-transform:uppercase;color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);border-radius:4px;padding:.25rem .4rem}
