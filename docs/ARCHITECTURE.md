@@ -197,6 +197,11 @@ tables in their own migrations or their own D1 database.
 
 ## Extension points: `createDropway(options)`
 
+`@dropway/server` exports `EXTENSION_API_VERSION = 1` for this public embedding
+contract. Update it and the Extension API section in `CHANGELOG.md` when changing
+the contract. `test/extension-contract.test.ts` exercises every existing extension
+point with fake adapters and real emulated D1/R2/KV bindings; it runs in public CI.
+
 ```ts
 import { createDropway } from "@dropway/server";
 
