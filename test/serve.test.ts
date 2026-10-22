@@ -208,7 +208,17 @@ describe("path mode: run-time shim for sandboxed pages (no Referer from an opaqu
     const anon2 = await off.json("/api/v1/publish", { method: "POST", body: form({ "index.html": "<head></head><p>x</p>" }) });
     const page2 = await off.call(`https://sites.example/${anon2.body.slug}/`, { headers: BROWSER_NAV });
     expect(page2.headers.get("content-security-policy")).toBeNull();
-    expect(await page2.text()).toBe(`<head></head><p>x</p>`);
+    const html = await page2.text();
+    expect(html).not.toContain(SHIM);
+    expect(html).toContain("<head></head><p>x</p>");
+    expect(html.match(/<a\b[^>]*>Report abuse<\/a>/g)).toHaveLength(1);
+    expect(html).toMatch(/position\s*:\s*fixed\b/i);
+    // Disabling the sandbox omits the shim, not the anonymous report link; byte modes stay untouched.
+    for (const query of ["raw=1", "download=1"]) {
+      const original = await off.call(`https://sites.example/${anon2.body.slug}/?${query}`, { headers: BROWSER_NAV });
+      expect(original.status).toBe(200);
+      expect(await original.text()).toBe("<head></head><p>x</p>");
+    }
   });
 
   it("SITES_SANDBOX: auto (default) sandboxes anonymous sites on a sites origin; true all; false none", () => {
