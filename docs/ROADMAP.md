@@ -27,7 +27,7 @@ The first three feature branches are merged into `main` on top of the baseline b
 
 | Item | State | What landed |
 |---|---|---|
-| R-01 | Partial | `scripts/guard-open-core.mjs` with a self-test, in CI. Not yet: `EXTENSION_API_VERSION`, the extension contract test. |
+| R-01 | Done | Open-core guard and self-test in CI (npm, Yarn, pnpm and Bun text locks); `EXTENSION_API_VERSION = 1`, Extension API changelog and contract tests for every existing extension point. |
 | R-04 | Partial | File sources (`content`, `url`, `sha256` + upload link, `copyFrom`) and idempotency keys for agent writes. |
 | R-05 | Partial | Partial updates (`PATCH /api/v1/sites/:slug/files`), `GET` version status, rename. |
 | R-06 | Done | Remote MCP server at `/mcp` (Streamable HTTP) with a tool for every core capability, toolsets and read-only mode. |
@@ -36,7 +36,7 @@ The first three feature branches are merged into `main` on top of the baseline b
 | R-11 | Done | `/llms.txt`, `/llms-full.txt`, `/skill.md`, `/.well-known/agent-skills`, repo skill in `skills/dropway`. |
 | R-22 | Partial | Dashboard (sign-in with an API key, sites, versions, publish, keys, members, settings) and the app-origin file browser `/v/:slug/`. Sessions and login links are R-21. |
 
-Next: R-12 (path-mode hardening), R-13 (version preview URLs), R-14, R-15, R-16, then the rest of R-01.
+Next: R-02 (operation registry), R-12 (path-mode hardening), R-13 (version preview URLs), R-14, R-15, R-16.
 
 ## Baseline (in `main` at `866ca07`)
 

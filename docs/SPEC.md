@@ -275,7 +275,7 @@ Full matrix in section 10.
 | OPS-05 | Rate limits with `RateLimit-Policy` / `RateLimit` / `Retry-After` headers | P1 | R-36 |
 | OPS-06 | Abuse reports, owner takedown, blocked-hash list | P1 | R-37 |
 | OPS-07 | Upgrade by re-running the deploy (migrations first); restore D1 with Time Travel (30 days) | P0 | Done |
-| OPS-08 | Versioned extension API, contract tests and a testing kit for embedding apps | P0/P1 | R-01, R-18 |
+| OPS-08 | Versioned extension API, contract tests and a testing kit for embedding apps | P0/P1 | R-01 done: version 1 and existing-point contracts; testing kit and future-point contracts R-18 |
 
 ### 4.16 Not in this edition
 
@@ -686,12 +686,16 @@ Dashboard pages use `APP_PAGE_CSP` or stricter and never render user content on 
 `Viewer { id, maxBytes, matches(file, live), render(vc) }`; extra viewers passed in `options.viewers`
 run before core viewers. Section 10 lists core viewers.
 
-### 6.9 Testing kit and contract (R-01, R-18)
+### 6.9 Testing kit and contract (R-01 done, R-18 remaining)
 
-- `test/extension-contract.test.ts` builds `createDropway()` with fake adapters and exercises every point
-  above (identity, policy refusal, capability denial, quota, rate rule, metering events, every hook, a
-  route override, an operation, MCP tools, UI slots, a viewer, `scheduled`, `queue`, `beforeServe`,
-  `resolveHost`). Public CI catches breakage of the extension API without any private code.
+- `@dropway/server` exports `EXTENSION_API_VERSION = 1`; extension API changes update that value and
+  the Extension API section in `CHANGELOG.md`.
+- `test/extension-contract.test.ts` builds `createDropway()` with fake adapters and exercises every
+  existing point: identity and scopes, policy limits and refusals, all five metering event kinds,
+  all three hooks, API middleware, a route override, an app route, contexts, MCP tools and endpoint
+  replacement, UI slots, a viewer and `scheduled`. Public CI catches breakage without any private code.
+- Future contracts arrive with their features: operations (R-02), capability denial, quota and rate
+  rules (R-17/R-36), `queue`, `beforeServe`, `resolveHost` and the testing kit (R-18).
 - `@dropway/server/testing` exports `createTestDropway(options)`, `seedTenant()`, `seedSite()`,
   `publishFixture()`, and the Miniflare bindings needed by `@cloudflare/vitest-plugin`.
 
