@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Extension API
+
+- Export `EXTENSION_API_VERSION = 1` from `@dropway/server`, identifying the
+  current public embedding contract. Extension API changes must update this
+  version and this section.
+- Cover existing identity, policy limits and refusals, all five metering events,
+  all three hooks, API middleware, route overrides and app routes, contexts,
+  MCP tools and endpoint replacement, UI slots, viewers and scheduled work in
+  `test/extension-contract.test.ts`, using fake adapters and real emulated storage.
+
 ### Subdomain mode hardening
 
 - `LEGACY_SITES_ORIGINS` (config `legacySitesOrigins`): a former path-mode sites origin answers
@@ -17,16 +27,6 @@
   `Sec-Fetch-Site: same-site` or `cross-site` get 403. Public sites are unchanged.
 - New site names are at most 56 characters (`MAX_SLUG_LENGTH`), so `<slug>--v<N>` fits one DNS label.
   Existing longer names keep working.
-
-### Extension API
-
-- Export `EXTENSION_API_VERSION = 1` from `@dropway/server`, identifying the
-  current public embedding contract. Extension API changes must update this
-  version and this section.
-- Cover existing identity, policy limits and refusals, all five metering events,
-  all three hooks, API middleware, route overrides and app routes, contexts,
-  MCP tools and endpoint replacement, UI slots, viewers and scheduled work in
-  `test/extension-contract.test.ts`, using fake adapters and real emulated storage.
 
 ### Open-core guard
 
