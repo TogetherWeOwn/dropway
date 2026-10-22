@@ -18,7 +18,7 @@ import {
   type LiveSite,
 } from "@dropway/core";
 import { escapeHtml, systemPage } from "./html";
-import { findViewer, toViewerFile, VIEWER_CSP, VIEWERS, type Viewer } from "./viewers";
+import { findViewer, toViewerFile, VIEWER_CSP, VIEWERS, type ViewMode, type Viewer } from "./viewers";
 import { renderListing } from "./viewers/listing";
 import { MAX_CSS_REWRITE_BYTES, rewriteCss, rewriteHtml, type PathRewrite } from "./path-rewrite";
 
@@ -224,6 +224,16 @@ function etagMatches(req: Request, etag: string): boolean {
 
 const flag = (sp: URLSearchParams, name: string) => sp.has(name) && sp.get(name) !== "0" && sp.get(name) !== "false";
 
+/** Which view a request asks for: ?view=source, ?view=1, or a browser navigation (top level or iframe). null = raw bytes. */
+export function requestedViewMode(req: Request, sp: URLSearchParams): ViewMode | null {
+  const view = sp.get("view");
+  if (view === "source") return "source";
+  if (flag(sp, "view")) return "view";
+  if (!isNavigation(req)) return null;
+  const dest = req.headers.get("sec-fetch-dest");
+  return dest === "iframe" || dest === "frame" ? "frame" : "document";
+}
+
 /**
  * Serve one request for a published site. `pathname` is relative to the site
  * root (the URL path in subdomain mode; the part after /<prefix>/<slug> in path mode).
@@ -272,7 +282,7 @@ export async function serveSite(
   } else if (resolved.kind === "not_found") {
     response = systemResponse(dw, req, mode, live, 404, "404", "Page not found", `There is no file at <code>/${escapeHtml(filePath)}</code> on this site.`);
   } else if (resolved.kind === "listing") {
-    response = renderListing(live, resolved.dir, mode);
+    response = renderListing(live, resolved.dir, mode, `${appOrigin(dw)}/v/${live.slug}/${encodePath(resolved.dir)}`);
     securityHeaders(response.headers, live, mode);
   } else {
     response = await serveFile(req, dw, url, live, mode, resolved.path, resolved.status, viewers);
@@ -298,27 +308,42 @@ async function serveFile(
   const raw = flag(sp, "raw");
   const download = flag(sp, "download");
   const head = req.method === "HEAD";
-  const viewer = findViewer(file, live, viewers);
+  const viewMode = raw || download ? null : requestedViewMode(req, sp);
+  const viewer = viewMode ? findViewer(file, live, viewers, viewMode) : null;
 
-  // Rendered views (Markdown today; more viewers plug into ./viewers).
-  if (viewer && !raw && !download && (isNavigation(req) || flag(sp, "view"))) {
-    const etag = `W/"${viewer.id}-${sha256}"`;
+  // Rendered views: see ./viewers (one per file kind, plus ?view=source).
+  if (viewer && viewMode) {
+    const embed = flag(sp, "embed");
+    const etag = `W/"${viewer.id}@${viewer.version ?? 1}-${sha256}${embed ? "-e" : ""}"`;
     const h = new Headers();
     if (etagMatches(req, etag)) {
       h.set("ETag", etag);
       securityHeaders(h, live, mode);
       return new Response(null, { status: 304, headers: h });
     }
-    const rawUrl = `${url.pathname}?raw=1`;
-    const downloadUrl = `${url.pathname}?download=1`;
+    const fileUrl = url.pathname;
+    const readBytes = async (offset = 0, length = size - offset): Promise<Uint8Array> => {
+      const len = Math.max(0, Math.min(length, size - offset));
+      if (len === 0) return new Uint8Array(0);
+      const body = offset === 0 && len === size ? (await readBlob(dw, sha256, size))?.body : await readBlobRange(dw, sha256, { offset, length: len });
+      return body ? new Uint8Array(await new Response(body).arrayBuffer()) : new Uint8Array(0);
+    };
     const rendered = await viewer.render({
       dw,
       request: req,
       url,
       live,
       file,
-      rawUrl,
-      downloadUrl,
+      mode: viewMode,
+      embed,
+      fileUrl,
+      viewUrl: `${fileUrl}?view=1`,
+      sourceUrl: `${fileUrl}?view=source`,
+      rawUrl: `${fileUrl}?raw=1`,
+      downloadUrl: `${fileUrl}?download=1`,
+      siteBase: mode.base,
+      appViewerUrl: `${appOrigin(dw)}/v/${live.slug}/${encodePath(path)}`,
+      readBytes,
       readText: async () => {
         const b = await readBlob(dw, sha256, size);
         return b?.body ? new Response(b.body).text() : "";
@@ -358,7 +383,7 @@ async function serveFile(
   h.set("ETag", etag);
   h.set("Accept-Ranges", "bytes");
   h.set("Cache-Control", cacheControlFor(path, live));
-  if (viewer) h.set("Vary", "Accept, Sec-Fetch-Dest");
+  if (findViewer(file, live, viewers, "document") || findViewer(file, live, viewers, "frame")) h.set("Vary", "Accept, Sec-Fetch-Dest");
   const pre = !raw && !download ? precompressed(path) : null;
   if (raw && (isTextual(contentType) || isHtml(contentType))) {
     // ?raw=1 shows the source: never let the browser render it.

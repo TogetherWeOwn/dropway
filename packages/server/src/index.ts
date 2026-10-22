@@ -11,15 +11,21 @@ export type {
   NavItem,
   RouteExtension,
   UiPage,
+  UiSection,
   UiSlots,
 } from "./extensions";
 export type { DropwayEnv, ServerBindings } from "./env";
 export { readJson, apiErrorResponse } from "./routes/api";
 export { routeSiteRequest, type SiteRoute } from "./route-sites";
-export { serveSite, resolvePath, isNavigation, securityHeaders, systemResponse, SITE_SANDBOX, type ServeMode } from "./serve";
-export { VIEWERS, VIEWER_CSP, findViewer, toViewerFile, type Viewer, type ViewerContext, type ViewerFile } from "./viewers";
+export { serveSite, resolvePath, isNavigation, requestedViewMode, securityHeaders, systemResponse, SITE_SANDBOX, type ServeMode } from "./serve";
+export { VIEWERS, VIEWER_CSP, viewerCsp, findViewer, toViewerFile, type Viewer, type ViewerContext, type ViewerFile, type ViewMode } from "./viewers";
+export { viewerPage, standardTabs, VIEWER_CSS, type ViewerTab } from "./viewers/chrome";
 export { renderMarkdown } from "./viewers/markdown";
+export { sanitizeHtml } from "./viewers/sanitize";
+export { highlight, hljsLanguage } from "./viewers/highlight";
+export { cachedRender } from "./viewers/cache";
 export { escapeHtml, htmlPage, systemPage, BASE_CSS, APP_PAGE_CSP, formatBytes } from "./html";
 export { buildOpenApi } from "./openapi";
 export { llmsTxt, llmsFullTxt, skillMarkdown, skillInstance, agentSkillsIndex, SKILL_NAME, SKILL_DESCRIPTION, type SkillInstance } from "./discovery";
 export { createMcpEndpoint, mcpInstructions, selectTools, MCP_SERVER_VERSION, type McpEndpointOptions } from "./mcp";
+export { renderAppPage, appScriptCsp, APP_CSS, CORE_NAV, clientScriptUrl, type AppPageOptions } from "./ui";

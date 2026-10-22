@@ -10,7 +10,11 @@ beforeEach(async () => {
 });
 
 /** "/api/v1/sites/:slug/files/:path{.+}" and "/api/v1/sites/{slug}/files/{path}" both become "/api/v1/sites/{}/files/{}". */
-const shape = (p: string) => p.replace(/:[A-Za-z0-9_]+(\{[^}]*\})?/g, "{}").replace(/\{[A-Za-z0-9_]+\}/g, "{}");
+const shape = (p: string) =>
+  p
+    .replace(/:[A-Za-z0-9_]+(\{[^}]*\})?/g, "{}")
+    .replace(/\{[A-Za-z0-9_]+\}/g, "{}")
+    .replace(/\/\*$/, "/{}"); // a trailing wildcard ("/v/:slug/*") is documented as a {path} parameter
 
 describe("/openapi.json", () => {
   it("documents every route the app serves", async () => {

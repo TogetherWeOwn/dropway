@@ -13,6 +13,11 @@ const TYPES: Record<string, string> = {
   jsonld: "application/ld+json",
   map: "application/json",
   webmanifest: "application/manifest+json",
+  geojson: "application/geo+json",
+  jsonl: "application/x-ndjson",
+  ndjson: "application/x-ndjson",
+  diff: "text/x-diff",
+  patch: "text/x-diff",
   txt: "text/plain",
   text: "text/plain",
   log: "text/plain",
@@ -117,6 +122,8 @@ export function isTextual(contentType: string): boolean {
     t === "application/json" ||
     t === "application/ld+json" ||
     t === "application/manifest+json" ||
+    t === "application/geo+json" ||
+    t === "application/x-ndjson" ||
     t === "application/xml" ||
     t === "application/xhtml+xml" ||
     t === "application/rss+xml" ||

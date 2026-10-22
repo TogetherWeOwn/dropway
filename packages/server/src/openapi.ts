@@ -99,6 +99,7 @@ export function buildOpenApi(origin: string, instanceName: string): Json {
       { name: "members", description: "Members of this instance" },
       { name: "setup", description: "First run (bootstrap key)" },
       { name: "agents", description: "MCP server and agent discovery documents" },
+      { name: "pages", description: "Browser pages on the app origin (dashboard and file browser). Agents use the API or MCP instead." },
     ],
     paths: {
       // ------------------------------------------------------------------ discovery + identity
@@ -324,6 +325,19 @@ export function buildOpenApi(origin: string, instanceName: string): Json {
         get: op("health", "Health check", { tags: ["agents"], security: false, responses: { 200: json({ type: "object", properties: { ok: { type: "boolean" }, service: { type: "string" } } }) }, mcpExclude: "monitoring" }),
       },
       "/claim": { get: op("claim_page", "Claim page for anonymous sites (token in the URL fragment)", { tags: ["agents"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use claim_site" }) },
+      "/login": { get: op("login_page", "Sign-in page (API key; first-run setup)", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page" }) },
+      "/dashboard": { get: op("dashboard_page", "Dashboard: sites list", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use list_sites" }) },
+      "/dashboard/": { get: op("dashboard_page_slash", "Redirects to /dashboard", { tags: ["pages"], security: false, responses: { 301: { description: "Redirect" } }, mcpExclude: "redirect" }) },
+      "/dashboard/sites/{slug}": { get: op("dashboard_site_page", "Dashboard: one site (versions, files, settings)", { tags: ["pages"], security: false, params: [slugParam], responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use get_site" }) },
+      "/dashboard/publish": { get: op("dashboard_publish_page", "Dashboard: drag-and-drop publish", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use publish_site" }) },
+      "/dashboard/keys": { get: op("dashboard_keys_page", "Dashboard: API keys and members", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use list_api_keys" }) },
+      "/dashboard/settings": { get: op("dashboard_settings_page", "Dashboard: instance settings", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page" }) },
+      "/v/{slug}": { get: op("file_browser_root", "Redirects to /v/{slug}/", { tags: ["pages"], security: false, params: [slugParam], responses: { 301: { description: "Redirect" } }, mcpExclude: "redirect" }) },
+      "/v/{slug}/{path}": {
+        get: op("file_browser_page", "File browser: file tree plus a rendered, source or raw view of one file (rendered in a sandboxed frame on the sites origin)", { tags: ["pages"], security: false, params: [slugParam, pathParam("path", "File path inside the site (may be empty or contain slashes)")], responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use read_file" }),
+      },
+      "/view/{slug}/{path}": { get: op("file_browser_legacy", "Redirects to /v/{slug}/{path}", { tags: ["pages"], security: false, params: [slugParam, pathParam("path", "File path")], responses: { 301: { description: "Redirect" } }, mcpExclude: "redirect" }) },
+      "/__dropway/ui/{file}": { get: op("dashboard_script", "Dashboard script (content-hashed name, cached immutable)", { tags: ["pages"], security: false, params: [pathParam("file", "Script file name")], responses: { 200: text("JavaScript", "text/javascript") }, mcpExclude: "static asset" }) },
       "/openapi.json": { get: op("openapi", "This document", { tags: ["agents"], security: false, mcpExclude: "discovery document" }) },
       "/llms.txt": { get: op("llms_txt", "Agent quick reference (llms.txt)", { tags: ["agents"], security: false, responses: { 200: text("Markdown", "text/markdown") }, mcpExclude: "discovery document" }) },
       "/llms-full.txt": {

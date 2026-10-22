@@ -1,0 +1,159 @@
+import { extname } from "@dropway/core";
+import { escapeHtml, formatBytes } from "../html";
+import { cachedRender } from "./cache";
+import { decodeText, standardTabs, viewerPage } from "./chrome";
+import type { Viewer } from "./index";
+
+/**
+ * CSV and TSV: a table with a sticky header, row numbers, right-aligned
+ * numeric columns, and row/column counts. Shows the first 2,000 rows; reads at
+ * most the first 4 MB of the file, so even very large files open fast.
+ */
+const CSV_VERSION = 1;
+export const MAX_ROWS = 2_000;
+const READ_MAX_BYTES = 4 * 1024 * 1024;
+const MAX_CELL = 1_000;
+
+const CSV_CSS = `
+.dw-csv{padding:.6rem .9rem 3rem}
+.dw-csvmeta{font-size:.82rem;color:var(--muted);margin:.2rem 0 .6rem}
+.dw-table{overflow:auto;max-height:calc(100vh - 7.5rem);border:1px solid var(--line);border-radius:9px;background:var(--card)}
+.dw-table table{border-collapse:separate;border-spacing:0;font-size:.84rem;min-width:100%}
+.dw-table th,.dw-table td{padding:.32rem .7rem;border-bottom:1px solid var(--line);border-right:1px solid var(--line);white-space:nowrap;max-width:28rem;overflow:hidden;text-overflow:ellipsis;vertical-align:top;text-align:left}
+.dw-table thead th{position:sticky;top:0;background:var(--code);font-weight:600;z-index:1}
+.dw-table td.n{text-align:right;font-variant-numeric:tabular-nums}
+.dw-table th.rn,.dw-table td.rn{position:sticky;left:0;background:var(--code);color:var(--muted);text-align:right;font-weight:400;font-variant-numeric:tabular-nums;user-select:none}
+.dw-table thead th.rn{z-index:2}
+.dw-table tbody tr:hover td{background:color-mix(in srgb,var(--accent) 6%,transparent)}
+`;
+
+/** Pick the delimiter that splits the first line most consistently. */
+export function detectDelimiter(sample: string, path: string): string {
+  if (extname(path) === "tsv") return "\t";
+  const firstLines = sample.split(/\r?\n/, 5).filter(Boolean);
+  let best = ",";
+  let bestScore = 0;
+  for (const d of [",", "\t", ";", "|"]) {
+    const counts = firstLines.map((l) => l.split(d).length - 1);
+    const min = Math.min(...counts);
+    const score = min > 0 && counts.every((c) => c === counts[0]) ? min + 1000 : min;
+    if (score > bestScore) {
+      best = d;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+/** RFC 4180 parser (quoted fields, doubled quotes, CRLF), stopping after `maxRows` rows. */
+export function parseCsv(text: string, delimiter: string, maxRows: number): { rows: string[][]; complete: boolean } {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const ch = text[i]!;
+    if (quoted) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i += 2;
+          continue;
+        }
+        quoted = false;
+        i++;
+        continue;
+      }
+      field += ch;
+      i++;
+      continue;
+    }
+    if (ch === '"' && field === "") {
+      quoted = true;
+      i++;
+    } else if (ch === delimiter) {
+      row.push(field);
+      field = "";
+      i++;
+    } else if (ch === "\n" || ch === "\r") {
+      row.push(field);
+      field = "";
+      rows.push(row);
+      row = [];
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      i++;
+      if (rows.length >= maxRows) return { rows, complete: i >= n };
+    } else {
+      field += ch;
+      i++;
+    }
+  }
+  if (field !== "" || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+  return { rows, complete: true };
+}
+
+const NUMERIC = /^\s*[-+]?(\d{1,3}(,\d{3})+|\d+)?(\.\d+)?([eE][-+]?\d+)?%?\s*$/;
+
+function cell(v: string): string {
+  return escapeHtml(v.length > MAX_CELL ? `${v.slice(0, MAX_CELL)}…` : v);
+}
+
+/** The table HTML and counts (exported for tests). */
+export function renderCsvTable(rows: string[][]): { html: string; columns: number } {
+  if (!rows.length) return { html: '<p class="dw-note">This file has no rows.</p>', columns: 0 };
+  const columns = Math.max(...rows.map((r) => r.length));
+  const [header, ...body] = rows;
+  const numeric = Array.from({ length: columns }, (_, c) => {
+    let seen = 0;
+    for (const r of body) {
+      const v = r[c] ?? "";
+      if (v.trim() === "") continue;
+      if (!NUMERIC.test(v)) return false;
+      seen++;
+    }
+    return seen > 0;
+  });
+  const head = `<thead><tr><th class="rn" scope="col">#</th>${Array.from({ length: columns }, (_, c) => `<th scope="col" title="${cell(header![c] ?? "")}">${cell(header![c] ?? "")}</th>`).join("")}</tr></thead>`;
+  const rowsHtml = body
+    .map((r, i) => `<tr><td class="rn">${i + 1}</td>${Array.from({ length: columns }, (_, c) => `<td${numeric[c] ? ' class="n"' : ""}>${cell(r[c] ?? "")}</td>`).join("")}</tr>`)
+    .join("");
+  return { html: `<table>${head}<tbody>${rowsHtml}</tbody></table>`, columns };
+}
+
+export const csvViewer: Viewer = {
+  id: "csv",
+  version: CSV_VERSION,
+  maxBytes: Number.MAX_SAFE_INTEGER,
+  matches: (file, _live, mode) => file.kind === "csv" && mode !== "source",
+  async render(vc) {
+    const partial = vc.file.size > READ_MAX_BYTES;
+    let meta = "";
+    const r = await cachedRender(vc.dw, `csv@${CSV_VERSION}/${extname(vc.file.path)}/${vc.file.sha256}`, async () => {
+      const text = decodeText(await vc.readBytes(0, partial ? READ_MAX_BYTES : vc.file.size));
+      const delimiter = detectDelimiter(text.slice(0, 64 * 1024), vc.file.path);
+      const parsed = parseCsv(text, delimiter, MAX_ROWS + 1);
+      // A partial read can end mid-row.
+      if (partial && parsed.complete && parsed.rows.length > 1) parsed.rows.pop();
+      const { html, columns } = renderCsvTable(parsed.rows);
+      const dataRows = Math.max(parsed.rows.length - 1, 0);
+      const more = !parsed.complete || partial;
+      const delim = delimiter === "\t" ? "tab" : delimiter === "," ? "comma" : delimiter === ";" ? "semicolon" : "pipe";
+      return `<!--meta-->${dataRows.toLocaleString("en-US")}${more ? "+" : ""} rows · ${columns} columns · ${delim}-separated${
+        more ? ` · showing the first ${Math.min(dataRows, MAX_ROWS).toLocaleString("en-US")} rows of ${formatBytes(vc.file.size)}` : ""
+      }<!--/meta--><div class="dw-table">${html}</div>`;
+    });
+    const m = /^<!--meta-->(.*?)<!--\/meta-->/.exec(r.html);
+    if (m) meta = m[1]!;
+    return viewerPage(vc, {
+      tabs: standardTabs(vc, { rendered: "Table", source: true }),
+      css: CSV_CSS,
+      body: `<main class="dw-csv"><p class="dw-csvmeta">${meta}</p>${m ? r.html.slice(m[0].length) : r.html}</main>`,
+      headers: { "X-Dropway-Render-Cache": r.cache },
+    });
+  },
+};

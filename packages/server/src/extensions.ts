@@ -86,14 +86,33 @@ export interface UiPage {
   handler(c: Context<DropwayEnv>): Response | Promise<Response>;
 }
 
-/** Dashboard/UI extension slots. The dashboard reads these to build its navigation and pages. */
+/** An extra section on the dashboard settings page (/dashboard/settings). */
+export interface UiSection {
+  /** Element id of the section (anchor links). */
+  id: string;
+  title: string;
+  /** Trusted HTML for the section body. Escape anything that came from users. */
+  render(c: Context<DropwayEnv>): string | Promise<string>;
+}
+
+/**
+ * Dashboard/UI extension slots. The dashboard reads these to build its
+ * navigation and pages. Extension pages can share the dashboard frame by
+ * rendering with renderAppPage() from @dropway/server.
+ */
 export interface UiSlots {
+  /** Extra links in the dashboard navigation. */
   navItems: NavItem[];
+  /** Extra app-origin pages; registered before core pages, so the same path replaces a core page. */
   pages: UiPage[];
-  /** Replace the app-origin landing page (GET /). */
+  /** Replace the app-origin home page (GET /). */
   landing?: (c: Context<DropwayEnv>) => Response | Promise<Response>;
   /** Extra HTML injected into <head> of Dropway-rendered app pages. */
   headHtml?: string;
+  /** Extra sections at the end of /dashboard/settings. */
+  settingsSections?: UiSection[];
+  /** One-line notice (trusted HTML) above every app page, or null for none. */
+  banner?: (c: Context<DropwayEnv>) => string | null | Promise<string | null>;
 }
 
 export interface CreateDropwayOptions {
