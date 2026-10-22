@@ -39,6 +39,7 @@ const MARKER_RE = new RegExp(["LicenseRef", "Dropway", "(?:Cloud-)?Proprietary"]
 const FORBIDDEN_PACKAGES = new Set(["stripe", "chargebee", "chargebee-typescript", "recurly", "braintree", "paddle-sdk", "@paddle/paddle-node-sdk", PRIVATE_REPO]);
 const FORBIDDEN_SCOPES = ["@stripe/", "@paddle/", "@lemonsqueezy/", "@chargebee/", "@recurly/", PRIVATE_SCOPE];
 const isForbiddenPackage = (name) => FORBIDDEN_PACKAGES.has(name) || FORBIDDEN_SCOPES.some((s) => name.startsWith(s));
+const aliasPackage = (spec) => typeof spec === "string" ? spec.match(/^npm:((?:@[\w.-]+\/)?[\w.-]+)(?:@|$)/)?.[1] : undefined;
 
 const CODE_EXT = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
 const CONFIG_EXT = new Set([".json", ".jsonc", ".toml", ".yml", ".yaml", ".sql"]);
@@ -212,8 +213,10 @@ export function scan(files, allowlist = []) {
         /* reported by npm, not here */
       }
       for (const field of ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]) {
-        for (const name of Object.keys(pkg?.[field] ?? {})) {
-          if (isForbiddenPackage(name)) add(path, 0, "forbidden-dependency", `"${name}" in ${field}: payment SDKs and hosted-layer packages never belong to the open-source product.`);
+        for (const [name, spec] of Object.entries(pkg?.[field] ?? {})) {
+          for (const candidate of new Set([name, aliasPackage(spec)].filter(Boolean))) {
+            if (isForbiddenPackage(candidate)) add(path, 0, "forbidden-dependency", `"${candidate}" in ${field}: payment SDKs and hosted-layer packages never belong to the open-source product.`);
+          }
         }
       }
       if (pkg?.name && isForbiddenPackage(pkg.name)) add(path, 0, "forbidden-dependency", `Package name "${pkg.name}" belongs to the hosted layer.`);
@@ -228,6 +231,8 @@ export function scan(files, allowlist = []) {
           const name = key.split("node_modules/").pop();
           if (isForbiddenPackage(name)) names.add(name);
           if (key === "name" && typeof child === "string" && isForbiddenPackage(child)) names.add(child);
+          const alias = aliasPackage(child);
+          if (alias && isForbiddenPackage(alias)) names.add(alias);
           visit(child);
         }
       };
@@ -243,9 +248,10 @@ export function scan(files, allowlist = []) {
       // Read package keys/selectors, not substrings in URLs or similarly named packages.
       // Bun's text format is JSONC; matching selectors also handles its trailing commas.
       const text = lines.filter((line) => !isCommentLine(line)).join("\n");
-      const selectors = /(?:^|[\s"'`,\[{]|npm:)((?:@[\w.-]+\/)?[\w.-]+)(?=@|:|["'\s,}\]])/gm;
+      const selectors = /(?:^|[\s"'`,\[{])((?:@[\w.-]+\/)?[\w.-]+)(?=@|:|["'\s,}\]])/gm;
+      const aliases = /\bnpm:((?:@[\w.-]+\/)?[\w.-]+)(?=@)/g;
       const legacyPnpm = /^\s*["']?\/((?:@[\w.-]+\/)?[\w.-]+)[/@]/gm;
-      const names = new Set([...text.matchAll(selectors), ...text.matchAll(legacyPnpm)].map((m) => m[1]).filter(isForbiddenPackage));
+      const names = new Set([...text.matchAll(selectors), ...text.matchAll(aliases), ...text.matchAll(legacyPnpm)].map((m) => m[1]).filter(isForbiddenPackage));
       for (const name of names) add(path, 0, "forbidden-dependency", `"${name}" is in the lockfile.`);
       continue;
     }
@@ -304,6 +310,10 @@ const SELF_TESTS = [
   { name: "pnpm lockfile", files: [{ path: "pnpm-lock.yaml", content: "packages:\n  stripe@1.0.0: {}\n" }], rules: ["forbidden-dependency"] },
   { name: "legacy pnpm lockfile", files: [{ path: "pnpm-lock.yaml", content: "packages:\n  /@stripe/stripe-js/1.0.0: {}\n" }], rules: ["forbidden-dependency"] },
   { name: "bun text lockfile", files: [{ path: "bun.lock", content: '{ "packages": { "alias": ["stripe@1.0.0", "", {}, "sha512-test"], }, }' }], rules: ["forbidden-dependency"] },
+  { name: "manifest npm alias", files: [{ path: "package.json", content: JSON.stringify({ dependencies: { alias: "npm:stripe@^1" } }) }], rules: ["forbidden-dependency"] },
+  { name: "npm lockfile alias", files: [{ path: "package-lock.json", content: JSON.stringify({ dependencies: { alias: { version: "npm:stripe@1.0.0" } } }) }], rules: ["forbidden-dependency"] },
+  { name: "bun npm alias", files: [{ path: "bun.lock", content: '{ "packages": { "alias": ["npm:stripe@1.0.0", "", {}, "sha512-test"] } }' }], rules: ["forbidden-dependency"] },
+  { name: "scoped text lockfile alias", files: [{ path: "yarn.lock", content: '"alias@npm:@stripe/stripe-js@^1":\n  version: 1.0.0\n' }], rules: ["forbidden-dependency"] },
   { name: "binary lockfile requires text", files: [{ path: "bun.lockb", content: null }], rules: ["unsupported-lockfile"] },
   { name: "ordinary text lockfiles", files: ["yarn.lock", "pnpm-lock.yaml", "bun.lock"].map((path) => ({ path, content: '# stripe in a comment is not a dependency\n"striped@1.0.0": { "resolved": "https://example.test/stripe/example.tgz" }\n' })), rules: [] },
   { name: "sdk import", files: [{ path: "apps/worker/src/index.ts", content: 'import Stripe from "stripe";\n' }], rules: ["forbidden-import", "saas-term"] },

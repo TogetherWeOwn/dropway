@@ -15,5 +15,6 @@
 ### Open-core guard
 
 - Scan npm shrinkwrap and legacy nested npm dependencies, Yarn, pnpm and Bun
-  text lockfiles for excluded SDKs, in addition to modern npm lockfiles.
+  text lockfiles for excluded SDKs, in addition to modern npm lockfiles. Check
+  `npm:` alias targets in manifests and lockfiles as well as dependency names.
   Reject binary `bun.lockb` with instructions to regenerate an auditable text lockfile.
