@@ -163,7 +163,7 @@ function unzipFiles(bytes: Uint8Array, maxBytes: number): InlineFile[] {
 }
 
 /** Which site a one-shot publish targets: the claim token's site, an existing site by slug, or a new one. */
-async function resolvePublishTarget(dc: DropwayContext, p: Principal, fields: Record<string, unknown>) {
+export async function resolvePublishTarget(dc: DropwayContext, p: Principal, fields: Record<string, unknown>) {
   const settings = parseSettings(fields);
   const slug = fields.slug ? String(fields.slug).trim().toLowerCase() : null;
   if (p.kind === "claim") {

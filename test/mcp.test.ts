@@ -1,0 +1,469 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { env } from "cloudflare:test";
+import { mcpInstructions } from "@dropway/server";
+import { sha256Hex } from "@dropway/core";
+import { BOOTSTRAP, freshInstance, jsonBody, type Instance } from "./helpers";
+import { b64, connectLegacyMcp, connectMcp, type McpTestClient } from "./mcp-helpers";
+
+let dw: Instance;
+let mcp: McpTestClient;
+
+beforeEach(async () => {
+  dw = await freshInstance();
+  mcp = await connectMcp(dw, dw.ownerKey);
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+const CORE_TOOLS = [
+  "whoami",
+  "publish_site",
+  "update_site_files",
+  "finalize_version",
+  "get_site",
+  "list_sites",
+  "list_files",
+  "read_file",
+  "list_versions",
+  "restore_version",
+  "update_site_settings",
+  "set_site_access",
+  "delete_site",
+];
+const OTHER_TOOLS = ["create_site", "rename_site", "get_version", "delete_version", "list_api_keys", "create_api_key", "revoke_api_key", "list_members", "add_member", "update_member", "remove_member"];
+
+describe("MCP endpoint: transport and auth", () => {
+  it("refuses calls without a credential with 401 and WWW-Authenticate", async () => {
+    const res = await dw.call("/mcp", { method: "POST", ...jsonBody({ jsonrpc: "2.0", id: 1, method: "tools/list" }) });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toMatch(/^Bearer /);
+    const body = (await res.json()) as any;
+    expect(body.error.code).toBe("unauthorized");
+    expect(body.error.hint).toContain("/mcp");
+  });
+
+  it("refuses bad keys and the bootstrap key", async () => {
+    expect((await dw.call("/mcp", { method: "POST", key: "dw_nope", ...jsonBody({}) })).status).toBe(401);
+    const boot = await dw.call("/mcp", { method: "POST", key: BOOTSTRAP, ...jsonBody({}) });
+    expect(boot.status).toBe(403);
+  });
+
+  it("answers CORS preflight without a credential", async () => {
+    const res = await dw.call("/mcp", { method: "OPTIONS", headers: { Origin: "http://localhost:6274", "Access-Control-Request-Method": "POST" } });
+    expect(res.status).toBeLessThan(300);
+    expect(res.headers.get("access-control-allow-headers")).toContain("Authorization");
+  });
+
+  it("lists every tool with annotations, output schemas and short descriptions", async () => {
+    const tools = await mcp.tools();
+    const names = tools.map((t) => t.name);
+    for (const n of [...CORE_TOOLS, ...OTHER_TOOLS]) expect(names).toContain(n);
+    expect(names).not.toContain("claim_site"); // anonymous publishing is off by default
+    for (const t of tools) {
+      expect(t.description.length).toBeLessThan(4096);
+      expect(t.inputSchema.type).toBe("object");
+      expect(t.outputSchema?.type).toBe("object");
+      expect(t.annotations).toBeTruthy();
+    }
+    const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
+    expect(byName.whoami._meta?.["anthropic/alwaysLoad"]).toBe(true);
+    expect(byName.publish_site._meta?.["anthropic/alwaysLoad"]).toBe(true);
+    expect(byName.delete_site.annotations.destructiveHint).toBe(true);
+    expect(byName.list_sites.annotations.readOnlyHint).toBe(true);
+    expect(byName.publish_site.inputSchema.properties.idempotencyKey).toBeTruthy();
+    // Stable order: core tools first, in spec order.
+    expect(names.slice(0, CORE_TOOLS.length)).toEqual(CORE_TOOLS);
+  });
+
+  it("server instructions stay under 4,096 characters", () => {
+    const text = mcpInstructions(dw.dropway.context(env as never, { waitUntil() {} }, new URL("https://dropway.test/mcp")));
+    expect(text.length).toBeLessThan(4096);
+    expect(text).toContain("publish_site");
+  });
+
+  it("narrows tools with ?toolsets= and ?read_only=1", async () => {
+    const core = await connectMcp(dw, dw.ownerKey, { path: "/mcp?toolsets=core" });
+    expect((await core.tools()).map((t) => t.name)).toEqual(CORE_TOOLS);
+    const ro = await connectMcp(dw, dw.ownerKey, { path: "/mcp?read_only=1" });
+    const roTools = await ro.tools();
+    expect(roTools.length).toBeGreaterThan(5);
+    expect(roTools.every((t) => t.annotations.readOnlyHint)).toBe(true);
+    const header = await connectMcp(dw, dw.ownerKey, { headers: { "X-Dropway-Toolsets": "keys" } });
+    expect((await header.tools()).map((t) => t.name)).toEqual(["list_api_keys", "create_api_key", "revoke_api_key"]);
+  });
+
+  it("works with a 2025-era (SDK v1) client through the stateless legacy lane", async () => {
+    const legacy = await connectLegacyMcp(dw, dw.ownerKey, { headers: { "X-Dropway-Client": "codex/1.2" } });
+    expect((await legacy.tools()).length).toBeGreaterThan(20);
+    const r = await legacy.call("publish_site", { files: [{ path: "index.html", content: "<h1>legacy</h1>" }] });
+    expect(r.isError).toBe(false);
+    expect(r.data.status).toBe("live");
+    expect(r.data.version.client).toBe("codex/1.2");
+  });
+});
+
+describe("MCP tools: publish, read back, edit, roll back", () => {
+  it("whoami describes the caller, the instance and the limits", async () => {
+    const r = await mcp.call("whoami");
+    expect(r.isError).toBe(false);
+    expect(r.data.principal.kind).toBe("member");
+    expect(r.data.principal.role).toBe("owner");
+    expect(r.data.instance.mcp).toBe("https://dropway.test/mcp");
+    expect(r.data.instance.anonymousPublish).toBe(false);
+    expect(r.data.limits.maxFileBytes).toBeGreaterThan(0);
+    expect(r.text.split("\n")[0]).toContain("owner");
+  });
+
+  it("publishes text and base64 files, serves them, and records the MCP client", async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    const r = await mcp.call("publish_site", {
+      site: "agent-notes",
+      title: "Agent notes",
+      files: [
+        { path: "index.html", content: "<h1>Hello from MCP</h1>" },
+        { path: "notes.md", content: "# Notes\n\nHi." },
+        { path: "img/dot.png", content: b64(png), encoding: "base64" },
+      ],
+      message: "first",
+    });
+    expect(r.isError).toBe(false);
+    expect(r.data.status).toBe("live");
+    expect(r.data.created).toBe(true);
+    expect(r.data.slug).toBe("agent-notes");
+    expect(r.data.files).toMatchObject({ total: 3, stored: 3, reused: 0, pending: 0 });
+    expect(r.data.version.number).toBe(1);
+    expect(r.data.version.client).toBe("dropway-test/1.0.0");
+    expect(r.data.version.source).toBe("mcp");
+    expect(r.data.site.title).toBe("Agent notes");
+    expect(r.text.split("\n")[0]).toMatch(/^Created agent-notes v1 \(3 files/);
+    expect(r.content.some((c) => c.type === "resource_link" && c.uri === r.data.url)).toBe(true);
+
+    const page = await dw.call(new URL("index.html", r.data.url).href);
+    expect(await page.text()).toContain("Hello from MCP");
+    const img = await dw.call(new URL("img/dot.png", r.data.url).href);
+    expect(new Uint8Array(await img.arrayBuffer())).toEqual(png);
+
+    const again = await mcp.call("publish_site", { site: "agent-notes", files: [{ path: "index.html", content: "<h1>Hello from MCP</h1>" }, { path: "notes.md", content: "# Notes\n\nHi." }, { path: "img/dot.png", content: b64(png), encoding: "base64" }] });
+    expect(again.data.status).toBe("unchanged");
+    expect(again.data.version.number).toBe(1);
+  });
+
+  it("returns agent-actionable validation errors for every bad field at once", async () => {
+    const r = await mcp.call("publish_site", { files: [{ path: "a.html" }, { path: "b.html", content: "x", url: "https://example.com/x" }, { path: "../c", content: "x" }] });
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/^invalid_request: /);
+    expect(r.text).toContain("Fix: ");
+    expect(r.data.error.details.fields.map((f: any) => f.field)).toEqual(["files[0]", "files[1]", "files[2].path"]);
+  });
+
+  it("fetches url sources server-side and refuses private or non-https URLs", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url === "https://assets.example.com/logo.svg") return new Response('<svg xmlns="http://www.w3.org/2000/svg"/>', { headers: { "Content-Type": "image/svg+xml" } });
+      if (url === "https://assets.example.com/moved") return new Response(null, { status: 302, headers: { Location: "https://assets.example.com/logo.svg" } });
+      if (url === "https://assets.example.com/evil") return new Response(null, { status: 302, headers: { Location: "https://127.0.0.1/admin" } });
+      return new Response("nope", { status: 404 });
+    });
+    const ok = await mcp.call("publish_site", {
+      files: [
+        { path: "index.html", content: '<img src="logo.svg">' },
+        { path: "logo.svg", url: "https://assets.example.com/logo.svg" },
+        { path: "copy.svg", url: "https://assets.example.com/moved" },
+      ],
+    });
+    expect(ok.isError).toBe(false);
+    expect(ok.data.files.fetched).toBe(2);
+    expect(ok.data.files.total).toBe(3);
+    const svg = await mcp.call("read_file", { site: ok.data.slug, path: "copy.svg" });
+    expect(svg.data.contentType).toContain("image/svg+xml");
+    expect(svg.data.content).toContain("<svg");
+
+    for (const [url, why] of [
+      ["http://assets.example.com/logo.svg", "https"],
+      ["https://127.0.0.1/x", "private"],
+      ["https://10.1.2.3/x", "private"],
+      ["https://169.254.169.254/latest/meta-data", "private"],
+      ["https://[::1]/x", "IPv6"],
+      ["https://localhost/x", "internal"],
+      ["https://printer.local/x", "internal"],
+      ["https://assets.example.com/evil", "private"],
+    ] as const) {
+      const r = await mcp.call("publish_site", { files: [{ path: "x.txt", url }] });
+      expect(r.isError, url).toBe(true);
+      expect(r.data.error.code, url).toBe("fetch_blocked");
+      expect(r.data.error.message, url).toContain(why);
+    }
+    const missing = await mcp.call("publish_site", { files: [{ path: "x.txt", url: "https://assets.example.com/404" }] });
+    expect(missing.data.error.code).toBe("fetch_failed");
+    expect(missing.data.error.details.status).toBe(404);
+    expect(spy).toHaveBeenCalled();
+    // A failed source never leaves an empty site behind.
+    const sites = await mcp.call("list_sites");
+    expect(sites.data.sites.length).toBe(1);
+  });
+
+  it("sha256 sources: reuse stored bytes, or return upload links and finalize after the upload", async () => {
+    const big = "x".repeat(5000);
+    const sha = await sha256Hex(big);
+    const r = await mcp.call("publish_site", { site: "upload-flow", files: [{ path: "index.html", content: "<p>hi</p>" }, { path: "data.txt", sha256: sha, size: big.length }] });
+    expect(r.isError).toBe(false);
+    expect(r.data.status).toBe("awaiting_upload");
+    expect(r.data.files.pending).toBe(1);
+    const item = r.data.upload.items[0];
+    expect(item).toMatchObject({ path: "data.txt", sha256: sha, size: 5000, method: "PUT", url: `https://dropway.test/api/v1/blobs/${sha}` });
+    expect(item.curl).toContain("--data-binary @'data.txt'");
+    expect(r.data.next[0].tool).toBe("finalize_version");
+
+    const early = await mcp.call("finalize_version", { site: "upload-flow", versionId: r.data.upload.versionId });
+    expect(early.isError).toBe(true);
+    expect(early.data.error.code).toBe("missing_blobs");
+    expect(early.data.error.details.uploads[0].sha256).toBe(sha);
+
+    const put = await dw.call(item.url, { method: "PUT", key: dw.ownerKey, body: new TextEncoder().encode(big), headers: { "Content-Type": "text/plain", "Content-Length": String(big.length) } });
+    expect(put.status).toBe(201);
+    const fin = await mcp.call("finalize_version", { site: "upload-flow", versionId: r.data.upload.versionId });
+    expect(fin.isError).toBe(false);
+    expect(fin.data.status).toBe("live");
+    expect(await (await dw.call(new URL("data.txt", fin.data.url).href)).text()).toBe(big);
+
+    // The same sha256 is now stored: a second site reuses it without any upload.
+    const reuse = await mcp.call("publish_site", { files: [{ path: "copy.txt", sha256: sha }] });
+    expect(reuse.data.status).toBe("live");
+    expect(reuse.data.files).toMatchObject({ stored: 0, reused: 1, pending: 0 });
+  });
+
+  it("update_site_files writes, deletes and moves while carrying everything else over", async () => {
+    const first = await mcp.call("publish_site", {
+      site: "partial",
+      files: [
+        { path: "index.html", content: "<h1>v1</h1>" },
+        { path: "a.txt", content: "a" },
+        { path: "drafts/one.md", content: "1" },
+        { path: "drafts/two.md", content: "2" },
+        { path: "old-name.css", content: "body{}" },
+      ],
+    });
+    const base = first.data.version.id;
+    const r = await mcp.call("update_site_files", {
+      site: "partial",
+      baseVersionId: base,
+      files: [{ path: "index.html", content: "<h1>v2</h1>" }, { path: "b.txt", copyFrom: { path: "a.txt" } }],
+      delete: ["drafts/", "ghost.txt"],
+      move: [{ from: "old-name.css", to: "style.css" }],
+      message: "edit",
+    });
+    expect(r.isError).toBe(false);
+    expect(r.data.status).toBe("live");
+    expect(r.data.version.number).toBe(2);
+    expect(r.data.changes.deleted.sort()).toEqual(["drafts/one.md", "drafts/two.md"]);
+    expect(r.data.warnings.map((w: any) => w.code)).toContain("delete_missing");
+    const files = await mcp.call("list_files", { site: "partial" });
+    expect(files.data.files.map((f: any) => f.path)).toEqual(["a.txt", "b.txt", "index.html", "style.css"]);
+    expect((await mcp.call("read_file", { site: "partial", path: "index.html" })).data.content).toBe("<h1>v2</h1>");
+    expect((await mcp.call("read_file", { site: "partial", path: "b.txt" })).data.content).toBe("a");
+
+    // A stale base version fails instead of overwriting the newer publish.
+    const stale = await mcp.call("update_site_files", { site: "partial", baseVersionId: base, files: [{ path: "a.txt", content: "lost" }] });
+    expect(stale.isError).toBe(true);
+    expect(stale.data.error.code).toBe("version_conflict");
+    expect(stale.data.error.details.liveVersionNumber).toBe(2);
+    expect(stale.text).toContain("Fix: ");
+
+    const empty = await mcp.call("update_site_files", { site: "partial" });
+    expect(empty.data.error.code).toBe("invalid_request");
+  });
+
+  it("read_file pages through large files and returns base64 for binaries", async () => {
+    const text = "0123456789".repeat(10_000);
+    await mcp.call("publish_site", { site: "paging", files: [{ path: "big.txt", content: text }, { path: "bin.dat", content: b64(new Uint8Array([0, 1, 2, 255])), encoding: "base64" }] });
+    const p1 = await mcp.call("read_file", { site: "paging", path: "big.txt", length: 40_000 });
+    expect(p1.data).toMatchObject({ offset: 0, length: 40_000, truncated: true, nextOffset: 40_000, encoding: "text", size: 100_000 });
+    const p3 = await mcp.call("read_file", { site: "paging", path: "big.txt", offset: 80_000, length: 40_000 });
+    expect(p3.data).toMatchObject({ length: 20_000, truncated: false, nextOffset: null });
+    expect(p1.data.content + (await mcp.call("read_file", { site: "paging", path: "big.txt", offset: 40_000, length: 40_000 })).data.content + p3.data.content).toBe(text);
+    const bin = await mcp.call("read_file", { site: "paging", path: "bin.dat" });
+    expect(bin.data.encoding).toBe("base64");
+    expect(bin.data.content).toBe(b64(new Uint8Array([0, 1, 2, 255])));
+    const missing = await mcp.call("read_file", { site: "paging", path: "nope.txt" });
+    expect(missing.data.error.code).toBe("file_not_found");
+  });
+
+  it("versions: list, get by number, restore by number, delete with confirm", async () => {
+    await mcp.call("publish_site", { site: "history", files: [{ path: "index.html", content: "one" }] });
+    await mcp.call("publish_site", { site: "history", files: [{ path: "index.html", content: "two" }] });
+    const list = await mcp.call("list_versions", { site: "history" });
+    expect(list.data.versions.map((v: any) => [v.number, v.live])).toEqual([
+      [2, true],
+      [1, false],
+    ]);
+    const v1 = await mcp.call("get_version", { site: "history", version: "v1" });
+    expect(v1.data.version).toMatchObject({ number: 1, status: "ready", live: false });
+    const restored = await mcp.call("restore_version", { site: "history", version: "1" });
+    expect(restored.data).toMatchObject({ restored: true, version: { number: 1, live: true } });
+    expect(await (await dw.call(restored.data.url)).text()).toBe("one");
+    const again = await mcp.call("restore_version", { site: "history", version: "v1" });
+    expect(again.data.alreadyLive).toBe(true);
+    const live = await mcp.call("delete_version", { site: "history", version: "live", confirm: "history" });
+    expect(live.data.error.code).toBe("version_is_live");
+    const wrong = await mcp.call("delete_version", { site: "history", version: "v2", confirm: "nope" });
+    expect(wrong.data.error.code).toBe("confirm_mismatch");
+    expect(wrong.data.error.details.expected).toBe("history");
+    const del = await mcp.call("delete_version", { site: "history", version: "v2", confirm: "history" });
+    expect(del.data.deleted).toBe(true);
+    expect((await mcp.call("get_version", { site: "history", version: "v2" })).data.error.code).toBe("version_not_found");
+  });
+
+  it("settings, access, rename and delete", async () => {
+    const pub = await mcp.call("publish_site", { site: "lifecycle", files: [{ path: "index.html", content: "<p>app</p>" }] });
+    const spa = await mcp.call("update_site_settings", { site: pub.data.url, spa: true, title: "App" });
+    expect(spa.data.site.settings.spa).toBe(true);
+    expect(spa.data.site.title).toBe("App");
+    expect(await (await dw.call(new URL("deep/route", pub.data.url).href, { headers: { Accept: "text/html" } })).text()).toContain("app");
+
+    const pw = await mcp.call("set_site_access", { site: "lifecycle", mode: "password", password: "hunter22" });
+    expect(pw.data.access.mode).toBe("password");
+    expect((await dw.call(pub.data.url, { headers: { Accept: "text/html" } })).status).toBe(401);
+    const noPw = await mcp.call("set_site_access", { site: "lifecycle", mode: "password" });
+    expect(noPw.data.error.code).toBe("password_required");
+    const priv = await mcp.call("set_site_access", { site: "lifecycle", mode: "private" });
+    expect(priv.data.error.code).toBe("feature_unavailable");
+    expect((await mcp.call("set_site_access", { site: "lifecycle", mode: "public" })).data.access.mode).toBe("public");
+    expect((await dw.call(pub.data.url)).status).toBe(200);
+
+    const renamed = await mcp.call("rename_site", { site: "lifecycle", newSlug: "lifecycle-two" });
+    expect(renamed.data).toMatchObject({ renamed: true, oldSlug: "lifecycle", slug: "lifecycle-two" });
+    expect(await (await dw.call(renamed.data.url)).text()).toContain("app");
+    expect((await dw.call(pub.data.url)).status).toBe(404);
+    const taken = await mcp.call("publish_site", { site: "taken-name", files: [{ path: "index.html", content: "x" }] });
+    expect((await mcp.call("rename_site", { site: "lifecycle-two", newSlug: taken.data.slug })).data.error.code).toBe("slug_taken");
+
+    const noConfirm = await mcp.call("delete_site", { site: "lifecycle-two", confirm: "lifecycle" });
+    expect(noConfirm.data.error.code).toBe("confirm_mismatch");
+    const del = await mcp.call("delete_site", { site: "lifecycle-two", confirm: "lifecycle-two" });
+    expect(del.data).toEqual({ deleted: true, slug: "lifecycle-two" });
+    expect((await mcp.call("get_site", { site: "lifecycle-two" })).data.error.code).toBe("site_not_found");
+  });
+
+  it("accepts a site id or URL wherever a site is expected", async () => {
+    const pub = await mcp.call("publish_site", { files: [{ path: "index.html", content: "x" }] });
+    const row = await env.DB.prepare("SELECT id FROM sites WHERE slug = ?").bind(pub.data.slug).first<{ id: string }>();
+    expect((await mcp.call("get_site", { site: row!.id })).data.site.slug).toBe(pub.data.slug);
+    expect((await mcp.call("get_site", { site: `${pub.data.url}index.html` })).data.site.slug).toBe(pub.data.slug);
+    expect((await mcp.call("get_site", { site: `https://dropway.test/api/v1/sites/${pub.data.slug}` })).data.site.slug).toBe(pub.data.slug);
+  });
+});
+
+describe("MCP tools: keys, members, scopes, idempotency", () => {
+  it("create_api_key mints a scoped key that MCP enforces; revoke_api_key kills it", async () => {
+    const k = await mcp.call("create_api_key", { name: "reader", scopes: ["sites:read"] });
+    expect(k.isError).toBe(false);
+    expect(k.data.key).toMatch(/^dw_/);
+    const reader = await connectMcp(dw, k.data.key);
+    expect((await reader.call("list_sites")).isError).toBe(false);
+    const denied = await reader.call("publish_site", { files: [{ path: "index.html", content: "x" }] });
+    expect(denied.isError).toBe(true);
+    expect(denied.data.error.code).toBe("insufficient_scope");
+    expect(denied.data.error.details.required).toBe("sites:write");
+    const keys = await mcp.call("list_api_keys");
+    expect(keys.data.keys.some((x: any) => x.id === k.data.id)).toBe(true);
+    expect((await mcp.call("revoke_api_key", { id: k.data.id })).data.revoked).toBe(true);
+    const res = await dw.call("/mcp", { method: "POST", key: k.data.key, ...jsonBody({ jsonrpc: "2.0", id: 1, method: "tools/list" }) });
+    expect(res.status).toBe(401);
+  });
+
+  it("a site-restricted key only sees its own site", async () => {
+    const a = await mcp.call("publish_site", { site: "only-this", files: [{ path: "index.html", content: "a" }] });
+    await mcp.call("publish_site", { site: "not-that", files: [{ path: "index.html", content: "b" }] });
+    const k = await mcp.call("create_api_key", { name: "one-site", scopes: ["sites:read", "sites:write"], site: a.data.url });
+    const scoped = await connectMcp(dw, k.data.key);
+    expect((await scoped.call("list_sites")).data.sites.map((s: any) => s.slug)).toEqual(["only-this"]);
+    expect((await scoped.call("get_site", { site: "not-that" })).data.error.code).toBe("site_not_found");
+    expect((await scoped.call("update_site_files", { site: "only-this", files: [{ path: "x.txt", content: "ok" }] })).data.status).toBe("live");
+  });
+
+  it("idempotencyKey replays the first result and rejects a reused key with other arguments", async () => {
+    const args = { site: "idem", files: [{ path: "index.html", content: "once" }], idempotencyKey: "op-123" };
+    const first = await mcp.call("publish_site", args);
+    const second = await mcp.call("publish_site", args);
+    expect(second.data.replayed).toBe(true);
+    expect(second.data.version.id).toBe(first.data.version.id);
+    expect(second.text).toMatch(/^Replayed/);
+    const versions = await mcp.call("list_versions", { site: "idem" });
+    expect(versions.data.versions.length).toBe(1);
+    const reused = await mcp.call("publish_site", { ...args, files: [{ path: "index.html", content: "twice" }] });
+    expect(reused.data.error.code).toBe("idempotency_key_reused");
+
+    const k1 = await mcp.call("create_api_key", { name: "ci", scopes: ["sites:read"], idempotencyKey: "key-1" });
+    const k2 = await mcp.call("create_api_key", { name: "ci", scopes: ["sites:read"], idempotencyKey: "key-1" });
+    expect(k1.data.key).toMatch(/^dw_/);
+    expect(k2.data).toMatchObject({ id: k1.data.id, key: null, replayed: true });
+  });
+
+  it("members: add, list, change role, remove with confirm", async () => {
+    const added = await mcp.call("add_member", { email: "agent@example.com", name: "Agent", role: "member" });
+    expect(added.data.apiKey.key).toMatch(/^dw_/);
+    const id = added.data.member.id;
+    expect((await mcp.call("list_members")).data.members.map((m: any) => m.email)).toContain("agent@example.com");
+    expect((await mcp.call("update_member", { id, role: "admin" })).data.member.role).toBe("admin");
+    expect((await mcp.call("remove_member", { id, confirm: "someone@else" })).data.error.code).toBe("confirm_mismatch");
+    expect((await mcp.call("remove_member", { id, confirm: "agent@example.com" })).data.removed).toBe(true);
+  });
+
+  it("extensions add tools through createDropway({ mcpTools }) and can replace a core tool", async () => {
+    const ext = await freshInstance(
+      {},
+      {
+        mcpTools: [
+          {
+            name: "hello_extension",
+            toolset: "extra",
+            description: "Says hello with the caller's tenant.",
+            inputSchema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+            outputSchema: { type: "object", properties: { greeting: { type: "string" } }, required: ["greeting"] },
+            annotations: { readOnlyHint: true },
+            scopes: ["sites:read"],
+            async handler(args, ctx) {
+              return { greeting: `hello ${args.name} from ${ctx.principal.kind}`, client: ctx.client };
+            },
+            summarize: (r) => r.greeting,
+          },
+          {
+            name: "whoami",
+            description: "Replaced by an extension.",
+            inputSchema: { type: "object", properties: {} },
+            async handler() {
+              return { replaced: true };
+            },
+          },
+        ],
+      },
+    );
+    const c = await connectMcp(ext, ext.ownerKey);
+    const tools = await c.tools();
+    expect(tools.map((t) => t.name)).toContain("hello_extension");
+    expect(tools.filter((t) => t.name === "whoami").length).toBe(1);
+    const r = await c.call("hello_extension", { name: "ext" });
+    expect(r.data.greeting).toBe("hello ext from member");
+    expect(r.text.split("\n")[0]).toBe("hello ext from member");
+    expect((await c.call("whoami")).data.replaced).toBe(true);
+    const invalid = await c.call("hello_extension", {});
+    expect(invalid.isError).toBe(true);
+  });
+});
+
+describe("MCP with anonymous publishing on", () => {
+  it("lists claim_site and claims an anonymous site", async () => {
+    const anon = await freshInstance({ anonymous: { enabled: true } });
+    const pub = await anon.json("/api/v1/publish", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: [{ path: "index.html", content: "anon" }] }) });
+    expect(pub.status).toBe(201);
+    const c = await connectMcp(anon, anon.ownerKey);
+    expect((await c.tools()).map((t) => t.name)).toContain("claim_site");
+    const r = await c.call("claim_site", { site: pub.body.slug, claimToken: pub.body.claimToken });
+    expect(r.data.claimed).toBe(true);
+    expect(r.data.site.anonymous).toBe(false);
+    // A claim token is a credential too: it can drive its own (now claimed) site no more.
+    const asClaim = await anon.call("/mcp", { method: "POST", key: pub.body.claimToken, ...jsonBody({ jsonrpc: "2.0", id: 1, method: "tools/list" }) });
+    expect(asClaim.status).toBe(401);
+  });
+});

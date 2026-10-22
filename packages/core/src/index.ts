@@ -27,3 +27,6 @@ export * from "./services/sites";
 export * from "./services/deploys";
 export * from "./services/publish";
 export * from "./services/cleanup";
+export * from "./services/idempotency";
+export * from "./services/site-ops";
+export * from "./services/sources";

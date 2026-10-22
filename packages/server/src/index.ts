@@ -22,3 +22,4 @@ export { renderMarkdown } from "./viewers/markdown";
 export { escapeHtml, htmlPage, systemPage, BASE_CSS, APP_PAGE_CSP, formatBytes } from "./html";
 export { buildOpenApi } from "./openapi";
 export { llmsTxt } from "./app";
+export { createMcpEndpoint, mcpInstructions, selectTools, MCP_SERVER_VERSION, type McpEndpointOptions } from "./mcp";

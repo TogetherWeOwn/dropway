@@ -20,6 +20,9 @@ import { apiErrorResponse, installApiMiddleware, installApiRoutes } from "./rout
 import { redirectResponse, routeSiteRequest } from "./route-sites";
 import { SITE_SANDBOX, serveSite, systemResponse } from "./serve";
 import { VIEWERS, type Viewer } from "./viewers";
+import { createMcpEndpoint } from "./mcp";
+import { CORE_MCP_TOOLS } from "./mcp/tools";
+import { installAgentApiRoutes } from "./routes/api-agent";
 
 export interface Dropway {
   /** Worker fetch handler: export default { fetch: dropway.fetch, scheduled: dropway.scheduled }. */
@@ -37,8 +40,8 @@ export interface Dropway {
   context(env: ServerBindings, ctx: Pick<ExecutionContext, "waitUntil">, requestUrl?: URL | null): DropwayContext;
 }
 
-/** Core MCP tools. Filled in by the MCP module; extensions append theirs. */
-export const CORE_MCP_TOOLS: McpToolDefinition[] = [];
+/** Core MCP tools (packages/server/src/mcp/tools.ts); extensions append theirs or replace one by name. */
+export { CORE_MCP_TOOLS };
 
 const contexts = new WeakMap<Request, DropwayContext>();
 
@@ -54,7 +57,8 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
     metering: opts.adapters?.metering ?? noopMetering,
   };
   const uiSlots: UiSlots = { navItems: [], pages: [], ...opts.uiSlots };
-  const mcpTools: readonly McpToolDefinition[] = [...CORE_MCP_TOOLS, ...(opts.mcpTools ?? [])];
+  // Extension tools come after core tools; one with a core tool's name replaces it.
+  const mcpTools: readonly McpToolDefinition[] = [...new Map([...CORE_MCP_TOOLS, ...(opts.mcpTools ?? [])].map((t) => [t.name, t] as const)).values()];
   const viewers: readonly Viewer[] = [...(opts.viewers ?? []), ...VIEWERS];
 
   const configs = new WeakMap<object, DropwayConfig>();
@@ -83,6 +87,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
   const appRoutes = new Hono<DropwayEnv>();
   for (const extend of opts.routes ?? []) extend({ api, app: appRoutes });
   installApiRoutes(api);
+  installAgentApiRoutes(api);
   const app = new Hono<DropwayEnv>();
   app.use("*", async (c, next) => {
     c.set("dw", contexts.get(c.req.raw) ?? context(c.env, c.executionCtx, new URL(c.req.url)));
@@ -90,7 +95,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
     await next();
   });
   app.route("/api/v1", api);
-  app.route("/", createAppRouter({ app: appRoutes, uiSlots, mcp: opts.mcp, mcpTools }));
+  app.route("/", createAppRouter({ app: appRoutes, uiSlots, mcp: opts.mcp ?? createMcpEndpoint(), mcpTools }));
   app.notFound((c) => {
     if (c.req.path.startsWith("/api/")) {
       return c.json(

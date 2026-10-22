@@ -1,0 +1,160 @@
+/**
+ * JSON Schemas shared by the MCP tools (inputs) and their results (outputs).
+ * Inputs are flat (no oneOf) because several model APIs mishandle unions.
+ */
+
+type Schema = Record<string, unknown>;
+
+export const SITE_REF: Schema = {
+  type: "string",
+  minLength: 1,
+  description: "The site: its slug (e.g. bright-otter-x7k2), its id (site_...), or any URL of it.",
+};
+
+export const VERSION_REF: Schema = {
+  type: "string",
+  minLength: 1,
+  description: 'A version: "live", "v3" or "3" (version number 3), or a version id (ver_...).',
+};
+
+const COPY_FROM: Schema = {
+  type: "object",
+  description: "Copy a file you already published: from a site you can read (default: this site), a version (default: live) and a path (default: the same path).",
+  properties: { site: SITE_REF, version: VERSION_REF, path: { type: "string" } },
+  additionalProperties: false,
+};
+
+export const FILE_INPUT: Schema = {
+  type: "object",
+  description: "One file: a path plus exactly one source (content, url, sha256 or copyFrom).",
+  properties: {
+    path: { type: "string", minLength: 1, description: 'Path inside the site, e.g. "index.html", "docs/guide.md", "assets/app.js".' },
+    content: {
+      type: "string",
+      description: 'The file itself: text (encoding "utf8", up to 1 MB) or base64 bytes (encoding "base64", up to 256 KB). For bigger or binary files prefer url or sha256.',
+    },
+    encoding: { type: "string", enum: ["utf8", "base64"], description: 'How content is encoded. Default "utf8".' },
+    url: { type: "string", description: "A public https URL the server downloads (up to 25 MB, 3 redirects). Best for files that are already online." },
+    headers: { type: "object", additionalProperties: { type: "string" }, description: "Request headers for the url download, e.g. Authorization. Used once, never stored." },
+    sha256: {
+      type: "string",
+      pattern: "^[a-fA-F0-9]{64}$",
+      description: "Hex SHA-256 of the bytes. Already stored: reused at once. Not stored: the result lists an upload link (PUT the bytes, then finalize_version).",
+    },
+    size: { type: "integer", minimum: 0, description: "Size in bytes. Required with sha256 when the bytes are not stored yet." },
+    copyFrom: COPY_FROM,
+    contentType: { type: "string", description: "MIME type. Default: from the file extension." },
+  },
+  required: ["path"],
+  additionalProperties: false,
+};
+
+export const SETTINGS_INPUT = {
+  title: { type: ["string", "null"], maxLength: 200, description: "Title shown in lists." },
+  description: { type: ["string", "null"], maxLength: 2000, description: "One or two sentences about the site." },
+  spa: { type: "boolean", description: "Single-page app: unknown paths serve index.html instead of a 404." },
+  renderMarkdown: { type: "boolean", description: "Browsers see .md files rendered as pages (default true); false serves them raw." },
+  crossOriginIsolation: { type: "boolean", description: "Send COOP/COEP headers (needed for SharedArrayBuffer and threaded WebAssembly)." },
+} satisfies Record<string, Schema>;
+
+export const IDEMPOTENCY_KEY: Schema = {
+  type: "string",
+  minLength: 1,
+  maxLength: 255,
+  description: "Optional unique id for this operation (e.g. a UUID). Retrying with the same key and arguments within 24 h returns the first result instead of acting twice.",
+};
+
+export const CONFIRM_SLUG: Schema = { type: "string", description: "Must equal the site's slug. Destructive actions need this explicit confirmation." };
+
+// ---------------------------------------------------------------- outputs (permissive: extra fields allowed)
+
+const nullable = (s: Schema): Schema => ({ anyOf: [s, { type: "null" }] });
+
+export const VERSION_OUT: Schema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    number: { type: "integer" },
+    status: { type: "string", enum: ["pending", "ready"] },
+    live: { type: "boolean" },
+    fileCount: { type: "integer" },
+    totalBytes: { type: "integer" },
+    source: { type: "string" },
+    client: { type: ["string", "null"] },
+    message: { type: ["string", "null"] },
+    createdAt: { type: ["string", "null"] },
+    finalizedAt: { type: ["string", "null"] },
+  },
+  required: ["id", "number", "status", "live"],
+};
+
+export const SITE_OUT: Schema = {
+  type: "object",
+  properties: {
+    slug: { type: "string" },
+    url: { type: "string", description: "Live URL. Share it exactly as returned." },
+    title: { type: ["string", "null"] },
+    description: { type: ["string", "null"] },
+    anonymous: { type: "boolean" },
+    expiresAt: { type: ["string", "null"] },
+    settings: { type: "object" },
+    access: { type: "object", properties: { mode: { type: "string" } } },
+    currentVersionId: { type: ["string", "null"] },
+    currentVersion: nullable(VERSION_OUT),
+    createdAt: { type: ["string", "null"] },
+    updatedAt: { type: ["string", "null"] },
+    links: { type: "object" },
+  },
+  required: ["slug", "url"],
+};
+
+const WARNINGS: Schema = { type: "array", items: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } }, required: ["code", "message"] } };
+const NEXT: Schema = { type: "array", items: { type: "object", properties: { tool: { type: "string" }, args: { type: "object" }, why: { type: "string" } }, required: ["tool", "why"] } };
+
+export const PUBLISH_OUT: Schema = {
+  type: "object",
+  properties: {
+    status: { type: "string", enum: ["live", "unchanged", "awaiting_upload"] },
+    url: { type: "string", description: "Live URL. Share it exactly as returned." },
+    slug: { type: "string" },
+    created: { type: "boolean" },
+    site: SITE_OUT,
+    version: nullable(VERSION_OUT),
+    files: {
+      type: "object",
+      properties: { total: { type: "integer" }, stored: { type: "integer" }, reused: { type: "integer" }, fetched: { type: "integer" }, pending: { type: "integer" } },
+    },
+    upload: {
+      type: "object",
+      properties: {
+        versionId: { type: "string" },
+        expiresAt: { type: "string" },
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              path: { type: "string" },
+              paths: { type: "array", items: { type: "string" } },
+              sha256: { type: "string" },
+              size: { type: "integer" },
+              method: { type: "string" },
+              url: { type: "string" },
+              headers: { type: "object" },
+              curl: { type: "string" },
+            },
+          },
+        },
+        finalize: { type: "object" },
+      },
+    },
+    claim: { type: "object" },
+    changes: { type: "object" },
+    warnings: WARNINGS,
+    next: NEXT,
+    replayed: { type: "boolean" },
+  },
+  required: ["status", "url", "slug"],
+};
+
+export const obj = (properties: Record<string, Schema>, required: string[] = []): Schema => ({ type: "object", properties, required });

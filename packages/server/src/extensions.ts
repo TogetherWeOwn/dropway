@@ -17,22 +17,50 @@ export interface McpToolContext {
   dw: DropwayContext;
   principal: Principal;
   request: Request;
+  /** Who is calling, for attribution: MCP clientInfo ("claude-code/2.1"), X-Dropway-Client or User-Agent. */
+  client: string | null;
+  /** The idempotencyKey argument, when the tool takes one (already applied by the server). */
+  idempotencyKey: string | null;
 }
 
 /**
- * An MCP tool contributed by core or an extension. The MCP server (packages/server
- * MCP module, built on the Cloudflare Agents SDK) registers every tool in
- * dropway.mcpTools. Handlers must call @dropway/core services, never fetch the REST API.
+ * An MCP tool contributed by core or an extension. The MCP server (packages/server/src/mcp,
+ * built on the Cloudflare Agents SDK) registers every tool in dropway.mcpTools.
+ * Handlers must call @dropway/core services, never fetch the REST API.
+ *
+ * Handlers return a plain JSON object. The server sends it as `structuredContent`,
+ * plus a text block (one plain-English line from `summarize`, then the compact JSON)
+ * and a `resource_link` when the result has a `url`. Throw an ApiError for business
+ * errors; the server turns it into an `isError: true` result with code, message and hint.
  */
 export interface McpToolDefinition {
+  /** snake_case; the same name as the REST operationId when there is one. */
   name: string;
   title?: string;
+  /** Written for models: when to use it, what it returns, the common mistake. Under 4,096 characters. */
   description: string;
-  /** JSON Schema (type: "object") for the arguments. */
+  /** JSON Schema (type: "object") for the arguments. Keep it flat (no oneOf) for model compatibility. */
   inputSchema: Record<string, unknown>;
+  /** JSON Schema (type: "object") of the result. Recommended; clients validate structuredContent against it. */
+  outputSchema?: Record<string, unknown>;
   annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean; openWorldHint?: boolean };
   /** Scopes the caller must hold (checked before the handler runs). */
   scopes?: Scope[];
+  /** Group used by ?toolsets= narrowing ("core", "sites", "versions", "keys", "members", or your own). Default "extra". */
+  toolset?: string;
+  /** Ask clients that defer tool loading to always load this tool (`_meta["anthropic/alwaysLoad"]`). */
+  alwaysLoad?: boolean;
+  /**
+   * Accept an `idempotencyKey` argument: a repeat call with the same key and arguments
+   * replays the first result instead of running again (24 hours).
+   */
+  idempotent?: boolean;
+  /** Remove secrets from a result before it is stored for idempotent replay. */
+  redactForReplay?(result: unknown): unknown;
+  /** Only list the tool when this returns true (e.g. a feature switched on in config). */
+  enabled?(dw: DropwayContext): boolean;
+  /** One plain-English line describing a successful result. */
+  summarize?(result: any, args: Record<string, unknown>): string;
   handler(args: Record<string, unknown>, ctx: McpToolContext): Promise<unknown>;
 }
 
