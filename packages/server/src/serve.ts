@@ -104,7 +104,8 @@ export function securityHeaders(h: Headers, live: LiveSite | null, mode: ServeMo
   h.set("X-Content-Type-Options", "nosniff");
   h.set("Referrer-Policy", "strict-origin-when-cross-origin");
   h.set("Strict-Transport-Security", "max-age=31536000");
-  h.set("Access-Control-Allow-Origin", "*");
+  if (live?.passwordHash) h.delete("Access-Control-Allow-Origin");
+  else h.set("Access-Control-Allow-Origin", "*");
   h.set("X-Robots-Tag", live?.expiresAt ? "noindex" : "all");
   if (live) {
     h.set("X-Dropway-Site", live.slug);
@@ -114,7 +115,7 @@ export function securityHeaders(h: Headers, live: LiveSite | null, mode: ServeMo
       h.set("Cross-Origin-Embedder-Policy", "require-corp");
       h.set("Cross-Origin-Resource-Policy", "same-origin");
     } else {
-      h.set("Cross-Origin-Resource-Policy", "cross-origin");
+      h.set("Cross-Origin-Resource-Policy", live.passwordHash ? "same-origin" : "cross-origin");
     }
   }
   if (mode.sandbox) {
@@ -176,6 +177,7 @@ async function handlePassword(dw: DropwayContext, req: Request, live: LiveSite, 
       // Sandboxed pages have an opaque origin, so their sub-resource requests count as cross-site.
       const sameSite = mode.sandbox ? "None" : "Lax";
       h.append("Set-Cookie", `${cookieName(live)}=${expected}; Path=${mode.base}; Max-Age=604800; HttpOnly; Secure; SameSite=${sameSite}`);
+      securityHeaders(h, live, mode);
       return new Response(null, { status: 303, headers: h });
     }
     return passwordForm(dw, req, live, mode, safeNext, true);
@@ -250,20 +252,27 @@ export async function serveSite(
   const started = Date.now();
   const url = new URL(req.url);
   const method = req.method.toUpperCase();
+  const live = await getLiveSite(dw, slug);
+  // Anonymous sites are untrusted: sandbox them even where other sites are not.
+  if (!mode.sandbox && live && live.tenantId === null && dw.config.sitesSandboxAnonymous) mode = { ...mode, sandbox: true };
+  const fetchSite = req.headers.get("sec-fetch-site");
+  // Accept is a viewer hint, not proof of navigation. Opaque sandbox origins also fail closed.
+  if (live?.passwordHash && (fetchSite === "same-site" || fetchSite === "cross-site") && req.headers.get("sec-fetch-mode") !== "navigate") {
+    return systemResponse(dw, req, mode, live, 403, "403", "Forbidden", "Password-protected resources must be loaded from this site's origin.");
+  }
   if (method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS", "Access-Control-Max-Age": "86400" },
-    });
+    const h = new Headers({ "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS", "Access-Control-Max-Age": "86400" });
+    if (live?.passwordHash) {
+      securityHeaders(h, live, mode);
+      h.set("Cache-Control", "private, no-store");
+    }
+    return new Response(null, { status: 204, headers: h });
   }
 
   const filePath = requestPathToFilePath(pathname);
-  if (filePath === null) return systemResponse(dw, req, mode, null, 400, "400", "Bad request", "That address could not be decoded.");
+  if (filePath === null) return systemResponse(dw, req, mode, live, 400, "400", "Bad request", "That address could not be decoded.");
 
-  const live = await getLiveSite(dw, slug);
   if (!live) return systemResponse(dw, req, mode, null, 404, "404", "Nothing is published here", "There is no site at this address. It may have been deleted. See {app}.");
-  // Anonymous sites are untrusted: sandbox them even where other sites are not.
-  if (!mode.sandbox && live.tenantId === null && dw.config.sitesSandboxAnonymous) mode = { ...mode, sandbox: true };
   if (live.expiresAt && live.expiresAt < Date.now()) {
     return systemResponse(dw, req, mode, live, 410, "EXPIRED", "This site has expired", "Anonymous sites are temporary. Publish again, or claim a site with an API key to keep it. See {app}.");
   }
@@ -272,7 +281,9 @@ export async function serveSite(
   if (gate) return gate;
 
   if (method !== "GET" && method !== "HEAD") {
-    return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD, OPTIONS" } });
+    const h = new Headers({ Allow: "GET, HEAD, OPTIONS" });
+    securityHeaders(h, live, mode);
+    return new Response("Method not allowed", { status: 405, headers: h });
   }
   if (!live.versionId) return systemResponse(dw, req, mode, live, 404, "EMPTY", "Nothing published yet", "This site exists but has no live version yet.");
 
