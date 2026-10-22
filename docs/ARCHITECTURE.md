@@ -204,7 +204,7 @@ export default createDropway({
   routes: [({ api, app }) => { api.get("/extra", handler); }], // registered BEFORE core routes (can override)
   mcpTools: [/* McpToolDefinition: name, description, JSON Schema in/out, scopes, toolset, handler(args, { dw, principal, client }) */],
   mcp: createMcpEndpoint({ name, instructions }), // optional: the default endpoint is mounted at /mcp already
-  uiSlots: { navItems: [], pages: [{ path, title, nav, handler }], landing, headHtml, banner, settingsSections },
+  uiSlots: { navItems: [], pages: [{ path, title, nav, handler }], landing, headHtml, banner, settingsSections, session },
   viewers: [/* extra viewers, tried before core ones */],
   scheduled: async (dw, controller) => { /* extra cron work */ },
 });
@@ -234,8 +234,11 @@ consumers, scripts, tests). Inside routes, use `c.get("dw")` and
   navigation link) and render them with `renderAppPage(c, { title, page, body })`
   from `@dropway/server`, which adds the dashboard frame, navigation, banner and
   CSP. `uiSlots.banner` shows a notice above every app page;
-  `uiSlots.settingsSections` adds sections to `/dashboard/settings`. Never render
-  user content on the app origin.
+  `uiSlots.settingsSections` adds sections to `/dashboard/settings`.
+  `uiSlots.session = { signInPath, signOutPath }` tells the dashboard that the
+  embedding app signs people in with cookie sessions (its identity adapter must
+  resolve them for `/api/v1` and refuse cross-origin writes); API-key sign-in at
+  `/login` keeps working. Never render user content on the app origin.
 - **CLI:** `packages/cli` talks to the REST API (it runs on users' machines). The upload protocol
   (`src/publish.ts`, `src/client.ts`) uses only `fetch`, so `test/cli-publish.test.ts` runs it against
   the real Worker inside workerd; `packages/cli/test` covers the rest, end to end against a local Worker.

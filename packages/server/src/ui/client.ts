@@ -23,6 +23,9 @@ export function dropwayClient() {
   var P = boot.page || {};
   var KEY = "dropway.key";
   var ME = "dropway.me";
+  // Cookie sessions from an embedding app (uiSlots.session): { signIn, signOut } or null.
+  var SESSION = boot.session || null;
+  var sessionOk = false;
   var TEXT_KINDS = ["html", "markdown", "svg", "json", "csv", "code", "text", "notebook"];
 
   // ------------------------------------------------------------------ storage
@@ -59,6 +62,31 @@ export function dropwayClient() {
       s.removeItem(ME);
     }
     if (l) l.removeItem(KEY);
+  }
+
+  /** Signed in: an API key in this browser, or (with uiSlots.session) a live cookie session. */
+  function authed() {
+    return !!getKey() || sessionOk;
+  }
+
+  /** Where to send people to sign in, coming back to `next` afterwards. */
+  function signInHref(next, extra) {
+    var base = SESSION ? SESSION.signIn : "/login";
+    var q = (next ? "next=" + encodeURIComponent(next) : "") + (extra ? (next ? "&" : "") + extra : "");
+    return q ? base + (base.indexOf("?") >= 0 ? "&" : "?") + q : base;
+  }
+
+  /** End the session: forget the key, and with cookie sessions POST to the embedding app's sign-out path. */
+  function signOut() {
+    var hadKey = !!getKey();
+    clearKey();
+    if (SESSION && (sessionOk || !hadKey)) {
+      var f = h("form", { method: "post", action: SESSION.signOut, hidden: true });
+      d.body.appendChild(f);
+      f.submit();
+      return;
+    }
+    location.href = "/login?signedout=1";
   }
 
   // ------------------------------------------------------------------ API
@@ -123,6 +151,9 @@ export function dropwayClient() {
       if (res.status === 401 && key && opts.key === undefined && ["invalid_api_key", "key_expired", "unauthorized"].indexOf(err.code) >= 0) {
         clearKey();
         location.href = "/login?next=" + encodeURIComponent(location.pathname + location.search) + "&expired=1";
+      } else if (res.status === 401 && !key && sessionOk && opts.key === undefined) {
+        sessionOk = false;
+        location.href = signInHref(location.pathname + location.search, "expired=1");
       }
       throw err;
     }
@@ -320,7 +351,7 @@ export function dropwayClient() {
 
   async function me() {
     var s = store("session");
-    var cached = s && s.getItem(ME);
+    var cached = getKey() && s && s.getItem(ME);
     if (cached) {
       try {
         var c = JSON.parse(cached);
@@ -328,7 +359,7 @@ export function dropwayClient() {
       } catch (e) {}
     }
     var m = await api("/me");
-    if (s) s.setItem(ME, JSON.stringify({ key: getKey(), at: Date.now(), me: m }));
+    if (s && getKey()) s.setItem(ME, JSON.stringify({ key: getKey(), at: Date.now(), me: m }));
     return m;
   }
 
@@ -339,7 +370,7 @@ export function dropwayClient() {
   async function renderAccount() {
     var box = d.getElementById("dw-account");
     if (!box) return null;
-    if (!getKey()) return null;
+    if (!authed()) return null;
     try {
       var m = await me();
       if (m.principal !== "member") return null;
@@ -352,10 +383,7 @@ export function dropwayClient() {
           type: "button",
           class: "dw-btn small",
           text: "Sign out",
-          onclick: function () {
-            clearKey();
-            location.href = "/login?signedout=1";
-          },
+          onclick: signOut,
         }),
       );
       return m;
@@ -365,8 +393,8 @@ export function dropwayClient() {
   }
 
   function requireAuth() {
-    if (getKey()) return true;
-    location.replace("/login?next=" + encodeURIComponent(location.pathname + location.search));
+    if (authed()) return true;
+    location.replace(signInHref(location.pathname + location.search));
     return false;
   }
 
@@ -535,7 +563,7 @@ export function dropwayClient() {
       try {
         res = await fetch(localPath(item.url), {
           method: "PUT",
-          headers: { Authorization: "Bearer " + key, "Content-Type": (item.headers && item.headers["Content-Type"]) || "application/octet-stream", "X-Dropway-Client": "dashboard/1" },
+          headers: Object.assign(key ? { Authorization: "Bearer " + key } : {}, { "Content-Type": (item.headers && item.headers["Content-Type"]) || "application/octet-stream", "X-Dropway-Client": "dashboard/1" }),
           body: file,
         });
       } catch (e) {
@@ -566,9 +594,9 @@ export function dropwayClient() {
   function mountPublisher(root, opts) {
     opts = opts || {};
     var key = getKey();
-    var anonymous = !key && boot.anonymousPublish;
+    var anonymous = !authed() && boot.anonymousPublish;
     clear(root);
-    if (!key && !anonymous) {
+    if (!authed() && !anonymous) {
       add(
         root,
         h(
@@ -576,7 +604,7 @@ export function dropwayClient() {
           { class: "dw-drop" },
           h("strong", { text: "Sign in to publish from the browser" }),
           h("p", { class: "dw-muted dw-small", text: "This instance publishes with API keys. Agents use the API, CLI or MCP below." }),
-          h("a", { class: "dw-btn primary", href: "/login?next=" + encodeURIComponent(location.pathname), text: "Sign in" }),
+          h("a", { class: "dw-btn primary", href: signInHref(location.pathname), text: "Sign in" }),
         ),
       );
       return;
@@ -1604,7 +1632,7 @@ export function dropwayClient() {
         h(
           "div",
           { class: "dw-row" },
-          !isDir && f && getKey() ? h("button", { type: "button", class: "dw-btn small", text: "Download", onclick: function (ev) { downloadFile(slug, p, null, ev.currentTarget); } }) : !isDir ? h("a", { class: "dw-btn small", href: url + "?download=1", text: "Download" }) : null,
+          !isDir && f && authed() ? h("button", { type: "button", class: "dw-btn small", text: "Download", onclick: function (ev) { downloadFile(slug, p, null, ev.currentTarget); } }) : !isDir ? h("a", { class: "dw-btn small", href: url + "?download=1", text: "Download" }) : null,
           !isDir && f && TEXT_KINDS.indexOf(f.kind) >= 0 && f.size <= 5 * 1024 * 1024
             ? h("button", {
                 type: "button",
@@ -1613,7 +1641,7 @@ export function dropwayClient() {
                 onclick: async function (ev) {
                   var btn = ev.currentTarget;
                   try {
-                    var res = getKey() ? await api("/sites/" + encodeURIComponent(slug) + "/files/" + encodePath(p), { raw: true }) : await fetch(url + "?raw=1");
+                    var res = authed() ? await api("/sites/" + encodeURIComponent(slug) + "/files/" + encodePath(p), { raw: true }) : await fetch(url + "?raw=1");
                     copyText(await res.text(), btn);
                   } catch (e) {
                     toast(e.message, true);
@@ -1713,9 +1741,9 @@ export function dropwayClient() {
 
     var mode = new URLSearchParams(location.search).get("mode") || "view";
     renderTools(current, mode);
-    if (!getKey()) {
+    if (!authed()) {
       clear(tree);
-      add(tree, h("div", { class: "dw-tree-note" }, h("p", { text: "Sign in to browse every file of this site." }), h("a", { class: "dw-btn small primary", href: "/login?next=" + encodeURIComponent(location.pathname + location.search), text: "Sign in" })));
+      add(tree, h("div", { class: "dw-tree-note" }, h("p", { text: "Sign in to browse every file of this site." }), h("a", { class: "dw-btn small primary", href: signInHref(location.pathname + location.search), text: "Sign in" })));
       return;
     }
     try {
@@ -1751,7 +1779,20 @@ export function dropwayClient() {
 
   wireCopyButtons(d);
   var start = pages[d.body.getAttribute("data-page")];
-  if (start) start();
-  else renderAccount();
+  /** With uiSlots.session and no key in this browser, ask the API whether a cookie session is live first. */
+  async function probeSession() {
+    if (!SESSION || getKey()) return;
+    try {
+      var res = await fetch(boot.api + "/me", { headers: { "X-Dropway-Client": "dashboard/1" } });
+      if (res.ok) {
+        var m = await res.json();
+        sessionOk = !!m && m.principal === "member";
+      }
+    } catch (e) {}
+  }
+  probeSession().then(function () {
+    if (start) start();
+    else renderAccount();
+  });
 
 }

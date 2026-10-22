@@ -113,6 +113,22 @@ export interface UiSlots {
   settingsSections?: UiSection[];
   /** One-line notice (trusted HTML) above every app page, or null for none. */
   banner?: (c: Context<DropwayEnv>) => string | null | Promise<string | null>;
+  /**
+   * Browser sessions provided by the embedding app (for example cookie sessions
+   * after an email sign-in). When set, the dashboard also treats a request the
+   * identity adapter resolves from the browser's cookies as signed in, sends
+   * people to `signInPath` instead of /login, and signs out with a POST form to
+   * `signOutPath`. API-key sign-in at /login keeps working. The identity adapter
+   * must resolve the session for /api/v1 requests and refuse cross-origin writes.
+   */
+  session?: UiSession;
+}
+
+export interface UiSession {
+  /** App-origin page where people sign in, e.g. "/signin". `?next=<path>` is appended. */
+  signInPath: string;
+  /** App-origin path that ends the session when POSTed to (a same-origin form post). */
+  signOutPath: string;
 }
 
 export interface CreateDropwayOptions {

@@ -167,6 +167,21 @@ describe("UI slots for embedding apps", () => {
     expect(await (await dw.call("/")).text()).toBe("custom home");
   });
 
+  it("uiSlots.session: the dashboard learns about the embedding app's cookie sessions", async () => {
+    const dw = await freshInstance({}, { uiSlots: { session: { signInPath: "/signin", signOutPath: "/auth/signout" } } });
+    const html = await (await dw.call("/dashboard")).text();
+    expect(boot(html).session).toEqual({ signIn: "/signin", signOut: "/auth/signout" });
+    expect(html).toContain('<div class="dw-account" id="dw-account"><a class="dw-btn-link" href="/signin">Sign in</a></div>');
+    const login = await (await dw.call("/login?next=/dashboard/publish")).text();
+    expect(login).toContain('href="/signin?next=%2Fdashboard%2Fpublish">Sign in with your account</a>');
+    // Without the slot nothing changes.
+    const plain = await freshInstance();
+    const plainHtml = await (await plain.call("/dashboard")).text();
+    expect(boot(plainHtml).session).toBeNull();
+    expect(plainHtml).toContain('href="/login">Sign in</a>');
+    expect(await (await plain.call("/login")).text()).not.toContain("Sign in with your account");
+  });
+
   it("an extension page can replace a core dashboard page", async () => {
     const dw = await freshInstance({}, { uiSlots: { pages: [{ path: "/dashboard/keys", title: "Keys", handler: (c) => c.text("replaced") }] } });
     expect(await (await dw.call("/dashboard/keys")).text()).toBe("replaced");

@@ -3,7 +3,7 @@ import { appOrigin, encodePath, isSetUp, looksLikeSlug, requestPathToFilePath, s
 import type { DropwayEnv } from "../env";
 import type { UiSlots } from "../extensions";
 import { escapeHtml, formatBytes } from "../html";
-import { renderAppPage, sitesCspSource } from "./shell";
+import { renderAppPage, sitesCspSource, uiSlotsOf } from "./shell";
 
 const e = escapeHtml;
 
@@ -129,6 +129,11 @@ const AUTH_CSS = `.dw-auth{max-width:30rem;margin:4vh auto 0}.dw-auth h1{margin-
 
 export async function loginPage(c: Context<DropwayEnv>): Promise<Response> {
   const dw = c.get("dw");
+  const session = uiSlotsOf(c).session;
+  const next = c.req.query("next");
+  const sessionNote = session
+    ? `<p class="dw-callout">People sign in with their account: <a class="dw-btn primary small" href="${e(session.signInPath + (next && next.startsWith("/") && !next.startsWith("//") ? `${session.signInPath.includes("?") ? "&" : "?"}next=${encodeURIComponent(next)}` : ""))}">Sign in with your account</a> Agents and scripts can also sign in here with an API key.</p>`
+    : "";
   const setUp = await isSetUp(dw).catch(() => true);
   const bootstrapField = `<div class="dw-field"><label class="dw-label" for="%ID%">Bootstrap secret (ADMIN_BOOTSTRAP_KEY)</label><input class="dw-input" id="%ID%" name="secret" type="password" autocomplete="off" required><p class="dw-help">Sent once to this instance's API, never stored in the browser.</p></div>`;
   const setup = setUp
@@ -141,7 +146,7 @@ ${bootstrapField.replaceAll("%ID%", "dw-setup-secret")}
   const body = `<div class="dw-auth">
 <h1 class="dw-h1">Sign in to ${e(dw.config.instanceName)}</h1>
 <div id="dw-login-note"></div>
-${setup}
+${sessionNote}${setup}
 <section class="dw-section"><header><h2>API key</h2></header><form class="dw-pad" id="dw-signin">
 <div class="dw-field"><label class="dw-label" for="dw-key">API key</label><input class="dw-input dw-mono" id="dw-key" name="key" type="password" autocomplete="current-password" placeholder="dw_…" required spellcheck="false"></div>
 <label class="dw-check"><input type="checkbox" name="remember"><span>Keep me signed in on this browser<span class="dw-sub">Otherwise the key is forgotten when this tab closes.</span></span></label>

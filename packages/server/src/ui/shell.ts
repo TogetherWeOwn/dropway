@@ -24,6 +24,11 @@ export function bindUiSlots(c: Context<DropwayEnv>, slots: UiSlots) {
   slotsByRequest.set(c.req.raw, slots);
 }
 
+/** The UI slots bound to this request (empty slots outside createDropway). */
+export function uiSlotsOf(c: Context<DropwayEnv>): UiSlots {
+  return slotsByRequest.get(c.req.raw) ?? { navItems: [], pages: [] };
+}
+
 /** CSP source for wherever sites are served, for frame-src/img-src/connect-src. */
 export function sitesCspSource(dw: DropwayContext): string {
   const c = dw.config;
@@ -107,7 +112,7 @@ export interface AppPageOptions {
  */
 export async function renderAppPage(c: Context<DropwayEnv>, opts: AppPageOptions): Promise<Response> {
   const dw = c.get("dw");
-  const slots = slotsByRequest.get(c.req.raw) ?? { navItems: [], pages: [] };
+  const slots = uiSlotsOf(c);
   const name = dw.config.instanceName;
   const showNav = opts.nav !== false;
   const nav = showNav
@@ -123,13 +128,14 @@ export async function renderAppPage(c: Context<DropwayEnv>, opts: AppPageOptions
     api: "/api/v1",
     sitesMode: dw.config.sitesMode,
     anonymousPublish: dw.config.anonymous.enabled,
+    session: slots.session ? { signIn: slots.session.signInPath, signOut: slots.session.signOutPath } : null,
     page: { name: opts.page, ...opts.data },
   };
   const scripts = [clientScriptUrl(), ...(opts.scripts ?? [])].map((s) => `<script src="${escapeHtml(s)}" defer></script>`).join("");
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(opts.title === name ? name : `${opts.title} · ${name}`)}</title><style>${BASE_CSS}${APP_CSS}${opts.css ?? ""}</style>${slots.headHtml ?? ""}<script type="application/json" id="dw-boot">${jsonForScript(boot)}</script>${scripts}</head>
 <body data-page="${escapeHtml(opts.page)}" class="${opts.wide ? "dw-wide" : ""}">
 <a class="dw-skip" href="#dw-main">Skip to content</a>
-<header class="dw-top"><a class="dw-brand" href="/">${escapeHtml(name)}</a>${showNav ? `<nav class="dw-nav" aria-label="Dashboard">${nav}</nav>` : '<span class="dw-nav"></span>'}<div class="dw-account" id="dw-account"><a class="dw-btn-link" href="/login">Sign in</a></div></header>
+<header class="dw-top"><a class="dw-brand" href="/">${escapeHtml(name)}</a>${showNav ? `<nav class="dw-nav" aria-label="Dashboard">${nav}</nav>` : '<span class="dw-nav"></span>'}<div class="dw-account" id="dw-account"><a class="dw-btn-link" href="${escapeHtml(slots.session?.signInPath ?? "/login")}">Sign in</a></div></header>
 ${banner ? `<div class="dw-banner" role="status">${banner}</div>` : ""}
 <main id="dw-main" class="${opts.wide ? "dw-main-wide" : "dw-main"}">${opts.body}</main>
 <div class="dw-toasts" id="dw-toasts" role="status" aria-live="polite"></div>

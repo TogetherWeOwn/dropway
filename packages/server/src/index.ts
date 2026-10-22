@@ -13,6 +13,7 @@ export type {
   UiPage,
   UiSection,
   UiSlots,
+  UiSession,
 } from "./extensions";
 export type { DropwayEnv, ServerBindings } from "./env";
 export { readJson, apiErrorResponse } from "./routes/api";
