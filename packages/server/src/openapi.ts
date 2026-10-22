@@ -1,6 +1,7 @@
 import { createOperationRegistry } from "./operations/registry";
 import { schemaJson, type OperationDefinition } from "./operations";
 import { PAGE_PATHS } from "./page-openapi";
+import { resolveConfig, type DropwayContext } from "@dropway/core";
 
 type Json = Record<string, any>;
 const json = (schema: Json, example: unknown, description = "OK") => ({
@@ -8,8 +9,17 @@ const json = (schema: Json, example: unknown, description = "OK") => ({
   content: { "application/json": { schema, example } },
 });
 
-/** Generated from the same definitions that mount REST and register MCP tools. */
-export function buildOpenApi(origin: string, instanceName: string, operations: readonly OperationDefinition[] = createOperationRegistry()): Json {
+function toolAvailable(op: OperationDefinition, context: DropwayContext): boolean {
+  if (!op.tool?.enabled) return true;
+  try { return op.tool.enabled(context); } catch { return true; }
+}
+
+/** The boolean third argument remains supported; a definition array is also accepted. */
+export function buildOpenApi(origin: string, instanceName: string, anonymousOrOperations: boolean | readonly OperationDefinition[] = false, registry?: readonly OperationDefinition[], availableTools?: ReadonlySet<string>): Json {
+  const anonymousPublish = typeof anonymousOrOperations === "boolean" ? anonymousOrOperations : false;
+  const operations = typeof anonymousOrOperations === "boolean" ? registry ?? createOperationRegistry() : anonymousOrOperations;
+  // Static callers have configuration only. Request routes pass the actual visible inventory.
+  const discoveryContext = { config: resolveConfig({ ANONYMOUS_PUBLISH: String(anonymousPublish) }, { instanceName }) } as DropwayContext;
   const paths: Json = Object.create(null);
   for (const [path, item] of Object.entries(PAGE_PATHS)) paths[path] = Object.assign(Object.create(null), structuredClone(item));
   for (const item of Object.values<Json>(paths))
@@ -21,6 +31,8 @@ export function buildOpenApi(origin: string, instanceName: string, operations: r
     const input = schemaJson(op.http?.input ?? op.input);
     const output = schemaJson(op.http?.output ?? op.output, "output");
     const example = op.http?.examples?.[0] ?? op.examples?.[0];
+    const enabled = availableTools?.has(op.id) ?? toolAvailable(op, discoveryContext);
+    const excluded = op.mcp && "exclude" in op.mcp ? op.mcp.exclude : !enabled ? op.tool?.unavailableReason ?? "This MCP tool is not enabled for the instance; the REST operation remains available." : undefined;
     for (const [index, route] of [{ method: op.method, path: op.path }, ...(op.aliases ?? [])].entries()) {
       const parameters: Json[] = [];
       const names = [...route.path.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!);
@@ -119,7 +131,7 @@ export function buildOpenApi(origin: string, instanceName: string, operations: r
         ...(op.anonymous ? { security: [] } : {}),
         ...(parameters.length ? { parameters } : {}),
         ...(requestBody ? { requestBody } : {}),
-        ...(op.mcp && "exclude" in op.mcp ? { "x-mcp-exclude": op.mcp.exclude } : { "x-mcp-tool": op.id }),
+        ...(excluded ? { "x-mcp-exclude": excluded } : { "x-mcp-tool": op.id }),
         responses,
       };
     }

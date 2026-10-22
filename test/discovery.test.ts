@@ -3,6 +3,7 @@ import { sha256Hex } from "@dropway/core";
 import { CORE_MCP_TOOLS, skillMarkdown } from "@dropway/server";
 import repoSkill from "../skills/dropway/SKILL.md?raw";
 import { freshInstance, jsonBody, type Instance } from "./helpers";
+import { connectMcp } from "./mcp-helpers";
 
 let dw: Instance;
 beforeEach(async () => {
@@ -16,7 +17,14 @@ const shape = (p: string) =>
     .replace(/\{[A-Za-z0-9_]+\}/g, "{}")
     .replace(/\/\*$/, "/{}"); // a trailing wildcard ("/v/:slug/*") is documented as a {path} parameter
 
-describe("/openapi.json", () => {
+describe.each([
+  { mode: "default", config: {}, claimEnabled: false },
+  { mode: "anonymous disabled", config: { anonymous: { enabled: false } }, claimEnabled: false },
+  { mode: "anonymous enabled", config: { anonymous: { enabled: true } }, claimEnabled: true },
+])("/openapi.json ($mode)", ({ config, claimEnabled }) => {
+  beforeEach(async () => {
+    dw = await freshInstance(config);
+  });
   it("documents every route the app serves", async () => {
     const doc = (await dw.json("/openapi.json")).body;
     const documented = new Set<string>();
@@ -36,7 +44,15 @@ describe("/openapi.json", () => {
     const doc = (await dw.json("/openapi.json")).body;
     expect(doc.openapi).toBe("3.1.0");
     expect(doc.servers[0].url).toBe("https://dropway.test");
-    const toolNames = new Set(CORE_MCP_TOOLS.map((t) => t.name));
+    const mcp = await connectMcp(dw, dw.ownerKey);
+    let tools;
+    try {
+      tools = await mcp.tools();
+    } finally {
+      await mcp.client.close();
+    }
+    const toolNames = new Set(tools.map((t) => t.name));
+    expect([...toolNames].sort()).toEqual(CORE_MCP_TOOLS.filter((t) => claimEnabled || t.name !== "claim_site").map((t) => t.name).sort());
     const ids = new Set<string>();
     for (const item of Object.values<Record<string, any>>(doc.paths)) {
       for (const op of Object.values<any>(item)) {
@@ -49,7 +65,7 @@ describe("/openapi.json", () => {
     }
     // Every MCP tool except instance-only conveniences has a REST twin.
     const restTools = new Set([...Object.values<Record<string, any>>(doc.paths)].flatMap((item) => Object.values<any>(item).map((op) => op["x-mcp-tool"]).filter(Boolean)));
-    expect(CORE_MCP_TOOLS.map((t) => t.name).filter((n) => !restTools.has(n))).toEqual([]);
+    expect([...toolNames].filter((n) => !restTools.has(n))).toEqual([]);
   });
 });
 

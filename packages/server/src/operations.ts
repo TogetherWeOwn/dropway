@@ -62,7 +62,7 @@ export interface OperationDefinition<I extends z.ZodType = z.ZodType, O extends 
     examples?: { input: unknown; output: unknown }[];
   };
   /** Existing tool presentation and retry behavior; schemas and handler come from this operation. */
-  tool?: Pick<McpToolDefinition, "idempotent" | "redactForReplay" | "enabled" | "summarize">;
+  tool?: Pick<McpToolDefinition, "idempotent" | "redactForReplay" | "enabled" | "summarize"> & { unavailableReason?: string };
 }
 
 export function defineOperation<I extends z.ZodType, O extends z.ZodType, S extends Scope>(

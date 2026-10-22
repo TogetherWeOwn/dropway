@@ -1117,6 +1117,7 @@ export const CORE_API_OPERATIONS = [
     },
     tool: {
       enabled: (dw) => dw.config.anonymous.enabled,
+      unavailableReason: "anonymous publishing is disabled; previously issued sites can still be claimed through REST",
       summarize: (r) => `Claimed ${r.site.slug}; it no longer expires: ${r.site.url}`,
     },
     examples: [

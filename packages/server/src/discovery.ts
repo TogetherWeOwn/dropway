@@ -118,8 +118,8 @@ export function legacySkillsIndex() {
 
 type OpenApiOp = { operationId?: string; summary?: string; description?: string; deprecated?: boolean; parameters?: Array<Record<string, unknown>>; requestBody?: Record<string, any>; "x-mcp-tool"?: string; "x-mcp-exclude"?: string };
 
-function operations(origin: string, instanceName: string, registry?: readonly OperationDefinition[]) {
-  const doc = buildOpenApi(origin, instanceName, registry) as { paths: Record<string, Record<string, OpenApiOp>> };
+function operations(origin: string, config: DropwayConfig, registry?: readonly OperationDefinition[], availableTools?: ReadonlySet<string>) {
+  const doc = buildOpenApi(origin, config.instanceName, config.anonymous.enabled, registry, availableTools) as { paths: Record<string, Record<string, OpenApiOp>> };
   const out: Array<{ method: string; path: string; op: OpenApiOp }> = [];
   for (const [path, item] of Object.entries(doc.paths)) {
     for (const [method, op] of Object.entries(item)) out.push({ method: method.toUpperCase(), path, op });
@@ -151,9 +151,10 @@ function mcpLines(origin: string): string {
 }
 
 /** /llms.txt: what this is, how to connect, every endpoint and tool in one line each. */
-export function llmsTxt(origin: string, config: DropwayConfig, tools: readonly McpToolDefinition[] = [], registry?: readonly OperationDefinition[]): string {
-  const ops = operations(origin, config.instanceName, registry).filter((o) => o.path.startsWith("/api/") && !o.op.deprecated);
-  const visibleTools = tools.filter((t) => toolEnabled(t, config));
+export function llmsTxt(origin: string, config: DropwayConfig, tools: readonly McpToolDefinition[] = [], registry?: readonly OperationDefinition[], availableTools?: ReadonlySet<string>): string {
+  const visibleTools = tools.filter((tool) => availableTools ? availableTools.has(tool.name) : toolEnabled(tool, config));
+  const available = availableTools ?? (tools.length ? new Set(visibleTools.map((tool) => tool.name)) : undefined);
+  const ops = operations(origin, config, registry, available).filter((o) => o.path.startsWith("/api/") && !o.op.deprecated);
   return `# ${config.instanceName}
 
 > Instant web hosting for AI agents (Dropway, open source, on Cloudflare). Publish a file, folder or site to a live URL with one call; every publish is an immutable version you can roll back. Use the REST API, the remote MCP server or the Agent Skill.
@@ -180,7 +181,7 @@ ${mcpLines(origin)}
 ## Docs
 
 - [Full reference](${origin}/llms-full.txt): every endpoint, every MCP tool with its input schema, error codes
-- [OpenAPI 3.1](${origin}/openapi.json): operationId = MCP tool name
+- [OpenAPI 3.1](${origin}/openapi.json): x-mcp-tool names available MCP twins; x-mcp-exclude explains REST-only operations
 - [Agent Skill](${origin}/skill.md): install with \`npx skills add ${origin}\` or \`npx skills add TogetherWeOwn/dropway\`
 - [Source (MIT)](https://github.com/TogetherWeOwn/dropway)
 
@@ -213,9 +214,10 @@ const ERROR_CODES: Array<[string, string]> = [
 ];
 
 /** /llms-full.txt: the complete agent reference. */
-export function llmsFullTxt(origin: string, config: DropwayConfig, tools: readonly McpToolDefinition[], registry?: readonly OperationDefinition[]): string {
-  const ops = operations(origin, config.instanceName, registry);
-  const visibleTools = tools.filter((t) => toolEnabled(t, config));
+export function llmsFullTxt(origin: string, config: DropwayConfig, tools: readonly McpToolDefinition[], registry?: readonly OperationDefinition[], availableTools?: ReadonlySet<string>): string {
+  const visibleTools = tools.filter((tool) => availableTools ? availableTools.has(tool.name) : toolEnabled(tool, config));
+  const available = availableTools ?? (tools.length ? new Set(visibleTools.map((tool) => tool.name)) : undefined);
+  const ops = operations(origin, config, registry, available);
   const opBlock = (o: (typeof ops)[number]) => {
     const lines = [`### ${o.method} ${o.path}`, "", `operationId \`${o.op.operationId}\`${o.op.deprecated ? " (deprecated alias)" : ""}. ${o.op.summary ?? ""}`];
     if (o.op["x-mcp-tool"]) lines.push(`MCP tool: \`${o.op["x-mcp-tool"]}\`.`);
