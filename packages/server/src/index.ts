@@ -3,9 +3,10 @@
  * handler that serves the app, the REST API, the MCP slot and every published site.
  */
 /** Version of the public embedding contract; changes are recorded in CHANGELOG.md. */
-export const EXTENSION_API_VERSION = 1;
+export const EXTENSION_API_VERSION = 2;
 
 export { createDropway, CORE_MCP_TOOLS, type Dropway } from "./create";
+export { defineOperation, type OperationDefinition, type OperationContext } from "./operations";
 export type {
   CreateDropwayOptions,
   McpHandlerFactory,

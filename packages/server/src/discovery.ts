@@ -1,6 +1,7 @@
 import { appOrigin, sha256Hex, siteUrl, type DropwayConfig, type DropwayContext } from "@dropway/core";
 import type { McpToolDefinition } from "./extensions";
 import { buildOpenApi } from "./openapi";
+import type { OperationDefinition } from "./operations";
 
 /**
  * Agent discovery documents, all generated from the same sources so they cannot drift:
@@ -117,8 +118,8 @@ export function legacySkillsIndex() {
 
 type OpenApiOp = { operationId?: string; summary?: string; description?: string; deprecated?: boolean; parameters?: Array<Record<string, unknown>>; requestBody?: Record<string, any>; "x-mcp-tool"?: string; "x-mcp-exclude"?: string };
 
-function operations(origin: string, instanceName: string) {
-  const doc = buildOpenApi(origin, instanceName) as { paths: Record<string, Record<string, OpenApiOp>> };
+function operations(origin: string, instanceName: string, registry?: readonly OperationDefinition[]) {
+  const doc = buildOpenApi(origin, instanceName, registry) as { paths: Record<string, Record<string, OpenApiOp>> };
   const out: Array<{ method: string; path: string; op: OpenApiOp }> = [];
   for (const [path, item] of Object.entries(doc.paths)) {
     for (const [method, op] of Object.entries(item)) out.push({ method: method.toUpperCase(), path, op });
@@ -150,8 +151,8 @@ function mcpLines(origin: string): string {
 }
 
 /** /llms.txt: what this is, how to connect, every endpoint and tool in one line each. */
-export function llmsTxt(origin: string, config: DropwayConfig, tools: readonly McpToolDefinition[] = []): string {
-  const ops = operations(origin, config.instanceName).filter((o) => o.path.startsWith("/api/") && !o.op.deprecated);
+export function llmsTxt(origin: string, config: DropwayConfig, tools: readonly McpToolDefinition[] = [], registry?: readonly OperationDefinition[]): string {
+  const ops = operations(origin, config.instanceName, registry).filter((o) => o.path.startsWith("/api/") && !o.op.deprecated);
   const visibleTools = tools.filter((t) => toolEnabled(t, config));
   return `# ${config.instanceName}
 
@@ -212,8 +213,8 @@ const ERROR_CODES: Array<[string, string]> = [
 ];
 
 /** /llms-full.txt: the complete agent reference. */
-export function llmsFullTxt(origin: string, config: DropwayConfig, tools: readonly McpToolDefinition[]): string {
-  const ops = operations(origin, config.instanceName);
+export function llmsFullTxt(origin: string, config: DropwayConfig, tools: readonly McpToolDefinition[], registry?: readonly OperationDefinition[]): string {
+  const ops = operations(origin, config.instanceName, registry);
   const visibleTools = tools.filter((t) => toolEnabled(t, config));
   const opBlock = (o: (typeof ops)[number]) => {
     const lines = [`### ${o.method} ${o.path}`, "", `operationId \`${o.op.operationId}\`${o.op.deprecated ? " (deprecated alias)" : ""}. ${o.op.summary ?? ""}`];

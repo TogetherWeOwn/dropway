@@ -19,6 +19,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/cli/tsconfig.json && tsc --noEmit -p packages/server/test/tsconfig.json",
     "guard": "node scripts/guard-open-core.mjs --self-test && node scripts/guard-open-core.mjs",
     "check": "npm run guard && npm run typecheck && npm test",
+    "openapi:generate": "node scripts/openapi.mjs",
+    "openapi:lint": "node scripts/openapi.mjs > .openapi.generated.json && redocly lint --config redocly.yaml .openapi.generated.json",
     "db:migrate": "wrangler d1 migrations apply DB --remote",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "deploy": "(wrangler d1 migrations apply DB --remote || wrangler deploy) && wrangler d1 migrations apply DB --remote && wrangler deploy",
@@ -29,6 +31,7 @@
     "@cloudflare/workers-types": "^5.20261022.1",
     "@modelcontextprotocol/client": "2.3.1",
     "@modelcontextprotocol/sdk": "1.32.1",
+    "@redocly/cli": "2.69.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.0",
     "wrangler": "^4.152.0"

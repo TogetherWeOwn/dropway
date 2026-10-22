@@ -4,6 +4,7 @@ import type { DropwayEnv } from "./env";
 import type { McpHandlerFactory, McpToolDefinition, UiSlots } from "./extensions";
 import { APP_PAGE_CSP, escapeHtml, htmlPage } from "./html";
 import { buildOpenApi } from "./openapi";
+import type { OperationDefinition } from "./operations";
 import { agentSkillsIndex, legacySkillsIndex, llmsFullTxt, llmsTxt, skillInstance, skillMarkdown, SKILL_NAME } from "./discovery";
 import { homePage, installUi } from "./ui";
 
@@ -22,7 +23,7 @@ function pageHeaders(): Record<string, string> {
 export { llmsTxt } from "./discovery";
 
 /** Install the core app-origin routes on `app` (which may already hold extension routes). */
-export function createAppRouter(opts: { app: Hono<DropwayEnv>; uiSlots: UiSlots; mcp?: McpHandlerFactory | undefined; mcpTools: readonly McpToolDefinition[] }) {
+export function createAppRouter(opts: { app: Hono<DropwayEnv>; uiSlots: UiSlots; mcp?: McpHandlerFactory | undefined; mcpTools: readonly McpToolDefinition[]; operations: readonly OperationDefinition[] }) {
   const app = opts.app;
 
   for (const page of opts.uiSlots.pages) app.get(page.path, (c) => page.handler(c));
@@ -32,18 +33,18 @@ export function createAppRouter(opts: { app: Hono<DropwayEnv>; uiSlots: UiSlots;
   app.get("/health", (c) => c.json({ ok: true, service: "dropway" }));
   app.get("/openapi.json", (c) => {
     const dw = c.get("dw");
-    return c.json(buildOpenApi(appOrigin(dw), dw.config.instanceName), 200, { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300" });
+    return c.json(buildOpenApi(appOrigin(dw), dw.config.instanceName, opts.operations), 200, { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300" });
   });
   // Agent discovery (./discovery): llms.txt, llms-full.txt, the skill and its well-known indexes.
   const markdown = { "Content-Type": "text/markdown; charset=utf-8", "Cache-Control": "public, max-age=300", "Access-Control-Allow-Origin": "*", "X-Content-Type-Options": "nosniff" };
   const describedBy = (o: string) => ({ Link: `<${o}/llms.txt>; rel="describedby"; type="text/markdown", <${o}/openapi.json>; rel="service-desc"` });
   app.get("/llms.txt", (c) => {
     const dw = c.get("dw");
-    return c.body(llmsTxt(appOrigin(dw), dw.config, opts.mcpTools), 200, markdown);
+    return c.body(llmsTxt(appOrigin(dw), dw.config, opts.mcpTools, opts.operations), 200, markdown);
   });
   app.get("/llms-full.txt", (c) => {
     const dw = c.get("dw");
-    return c.body(llmsFullTxt(appOrigin(dw), dw.config, opts.mcpTools), 200, markdown);
+    return c.body(llmsFullTxt(appOrigin(dw), dw.config, opts.mcpTools, opts.operations), 200, markdown);
   });
   const skill = (c: Context<DropwayEnv>) => {
     const name = c.req.param("name");
