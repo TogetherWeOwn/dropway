@@ -49,17 +49,18 @@ describe("serving", () => {
     expect(await res.text()).toBe("<p>about</p>");
   });
 
-  it("renders Markdown for browsers with a View raw link; raw for fetch/curl and ?raw=1", async () => {
+  it("renders Markdown for browsers with a Raw link; raw for fetch/curl and ?raw=1", async () => {
     const page = await dw.call(`/s/${slug}/docs/guide.md`, { headers: BROWSER_NAV });
     expect(page.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(page.headers.get("x-dropway-viewer")).toBe("markdown");
     // Scripts inside Markdown can never run on the rendered page.
     expect(page.headers.get("content-security-policy")).toMatch(/default-src 'none'/);
     const html = await page.text();
-    expect(html).toContain("<h1>Guide</h1>");
+    expect(html).toMatch(/<h1 id="guide">Guide<a class="dw-anchor"/);
     expect(html).toContain("<em>markdown</em>");
+    expect(html).not.toContain("<script>alert(1)</script>");
     expect(html).toContain(`href="/s/${slug}/docs/guide.md?raw=1"`);
-    expect(html).toContain("View raw");
+    expect(html).toContain(">Raw</a>");
 
     const curl = await dw.call(`/s/${slug}/docs/guide.md`);
     expect(curl.headers.get("content-type")).toBe("text/markdown; charset=utf-8");

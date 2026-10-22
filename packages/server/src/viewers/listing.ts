@@ -1,48 +1,86 @@
-import { encodePath, type LiveSite } from "@dropway/core";
+import { detectFileKind, encodePath, KIND_LABELS, type LiveSite } from "@dropway/core";
 import { escapeHtml, formatBytes, htmlPage } from "../html";
 import type { ServeMode } from "../serve";
 
 const LISTING_CSS = `
-.dw-ls{max-width:52rem;margin:0 auto;padding:2rem 1.25rem 4rem}
-.dw-ls h1{font-size:1.2rem;font-family:ui-monospace,monospace;margin:0 0 1rem;word-break:break-all}
+.dw-ls{max-width:56rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+.dw-ls header{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:baseline;justify-content:space-between;margin:0 0 1rem}
+.dw-ls h1{font-size:1.15rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin:0;word-break:break-all;font-weight:600}
+.dw-ls h1 a{color:var(--muted);text-decoration:none}.dw-ls h1 a:hover{color:var(--accent)}
+.dw-ls .sum{color:var(--muted);font-size:.85rem}
+.dw-ls .sum a{margin-left:.6rem}
 .dw-ls ul{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.dw-ls li{display:flex;justify-content:space-between;gap:1rem;padding:.55rem .9rem;border-top:1px solid var(--line);background:var(--card)}
-.dw-ls li:first-child{border-top:0}.dw-ls a{text-decoration:none}.dw-ls span{color:var(--muted);font-size:.85rem;white-space:nowrap}
+.dw-ls li{display:grid;grid-template-columns:1fr auto auto;gap:1rem;align-items:baseline;padding:.5rem .9rem;border-top:1px solid var(--line);background:var(--card)}
+.dw-ls li:first-child{border-top:0}.dw-ls li a{text-decoration:none;word-break:break-all}.dw-ls li a:hover{text-decoration:underline}
+.dw-ls li span{color:var(--muted);font-size:.8rem;white-space:nowrap}
+.dw-ls li .k{font:600 .65rem/1 ui-monospace,monospace;letter-spacing:.04em;text-transform:uppercase}
+.dw-ls .dir a{font-weight:600}
+.dw-gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(9rem,1fr));gap:.6rem;margin:1.5rem 0 0}
+.dw-gal a{display:block;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--card);text-decoration:none}
+.dw-gal img{display:block;width:100%;aspect-ratio:1;object-fit:cover;background:var(--code)}
+.dw-gal span{display:block;padding:.3rem .5rem;font-size:.75rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 `;
 
+const GALLERY_MAX = 60;
+
 /**
- * Directory listing for a folder (or site root) without an index file.
- * Minimal on purpose: the viewer work can replace it with a richer file browser.
+ * Directory listing for a folder (or site root) without an index file:
+ * folders first, then files with their kind and size, then a gallery of the
+ * folder's images. `appViewerUrl` links to the app-origin file browser.
  */
-export function renderListing(live: LiveSite, dir: string, mode: ServeMode): Response {
+export function renderListing(live: LiveSite, dir: string, mode: ServeMode, appViewerUrl?: string): Response {
   const dirs = new Map<string, number>();
-  const files: Array<{ name: string; size: number }> = [];
-  for (const [path, [, size]] of Object.entries(live.files)) {
+  const files: Array<{ name: string; size: number; kind: ReturnType<typeof detectFileKind> }> = [];
+  let total = 0;
+  for (const [path, [, size, type]] of Object.entries(live.files)) {
     if (!path.startsWith(dir)) continue;
     const rest = path.slice(dir.length);
     const slash = rest.indexOf("/");
-    if (slash === -1) files.push({ name: rest, size });
-    else {
+    if (slash === -1) {
+      files.push({ name: rest, size, kind: detectFileKind(path, type) });
+      total += size;
+    } else {
       const d = rest.slice(0, slash);
       dirs.set(d, (dirs.get(d) ?? 0) + 1);
     }
   }
   const base = mode.base + encodePath(dir);
+  files.sort((a, b) => a.name.localeCompare(b.name));
   const items = [
-    ...(dir ? [`<li><a href="../">../</a><span></span></li>`] : []),
-    ...[...dirs.entries()].sort().map(([d, n]) => `<li><a href="${escapeHtml(base + encodeURIComponent(d))}/">${escapeHtml(d)}/</a><span>${n} file${n === 1 ? "" : "s"}</span></li>`),
-    ...files
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map((f) => `<li><a href="${escapeHtml(base + encodeURIComponent(f.name))}">${escapeHtml(f.name)}</a><span>${formatBytes(f.size)}</span></li>`),
+    ...(dir ? [`<li class="dir"><a href="../">../</a><span></span><span></span></li>`] : []),
+    ...[...dirs.entries()]
+      .sort()
+      .map(([d, n]) => `<li class="dir"><a href="${escapeHtml(base + encodeURIComponent(d))}/">${escapeHtml(d)}/</a><span class="k">Folder</span><span>${n} file${n === 1 ? "" : "s"}</span></li>`),
+    ...files.map(
+      (f) =>
+        `<li><a href="${escapeHtml(base + encodeURIComponent(f.name))}">${escapeHtml(f.name)}</a><span class="k">${escapeHtml(KIND_LABELS[f.kind])}</span><span>${formatBytes(f.size)}</span></li>`,
+    ),
   ];
-  const title = `/${dir}`;
-  const page = htmlPage({ title: `${live.slug}${title}`, css: LISTING_CSS, body: `<main class="dw-ls"><h1>${escapeHtml(title)}</h1><ul>${items.join("")}</ul></main>` });
+  const images = files.filter((f) => f.kind === "image" || f.kind === "svg").slice(0, GALLERY_MAX);
+  const gallery = images.length
+    ? `<div class="dw-gal" aria-label="Images in this folder">${images
+        .map((f) => `<a href="${escapeHtml(base + encodeURIComponent(f.name))}"><img src="${escapeHtml(base + encodeURIComponent(f.name))}" alt="" loading="lazy" decoding="async"><span>${escapeHtml(f.name)}</span></a>`)
+        .join("")}</div>`
+    : "";
+  const segs = dir.split("/").filter(Boolean);
+  let acc = "";
+  const crumb = [`<a href="${escapeHtml(mode.base)}">${escapeHtml(live.slug)}</a>`, ...segs.map((s) => {
+    acc += `${s}/`;
+    return `<a href="${escapeHtml(mode.base + encodePath(acc))}">${escapeHtml(s)}</a>`;
+  })].join(" / ");
+  const summary = `${dirs.size ? `${dirs.size} folder${dirs.size === 1 ? "" : "s"}, ` : ""}${files.length} file${files.length === 1 ? "" : "s"} · ${formatBytes(total)}`;
+  const page = htmlPage({
+    title: `${live.slug}/${dir}`,
+    css: LISTING_CSS,
+    head: '<meta name="robots" content="noindex">',
+    body: `<main class="dw-ls"><header><h1>${crumb} /</h1><span class="sum">${summary}${appViewerUrl ? `<a href="${escapeHtml(appViewerUrl)}" rel="nofollow">Browse files</a>` : ""}</span></header><ul>${items.join("")}</ul>${gallery}</main>`,
+  });
   return new Response(page, {
     status: 200,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "public, max-age=0, must-revalidate",
-      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
+      "Content-Security-Policy": "default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
       "X-Dropway-Viewer": "listing",
     },
   });
