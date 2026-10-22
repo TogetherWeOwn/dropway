@@ -11,6 +11,11 @@ Read `docs/ARCHITECTURE.md` first. The short version:
   through `createDropway()` options from outside.
 - New file viewers go in `packages/server/src/viewers/` and are registered in `VIEWERS`.
 - Never edit an applied migration; add a new numbered file in `packages/core/migrations/`.
-- Before committing: `npm run typecheck && npm test`.
+- The CLI (`packages/cli`) runs on Node, not Workers: keep `src/publish.ts` and `src/client.ts`
+  fetch-only, and keep `src/` erasable TypeScript (no enums, namespaces or parameter properties).
+- `scripts/guard-open-core.mjs` fails CI on billing/pricing/payment code, payment SDKs or anything
+  from a hosted layer. Do not work around it; an unrelated word match goes in
+  `scripts/open-core-allowlist.txt` with a reason.
+- Before committing: `npm run check` (guard, typecheck, all tests).
 - Do not deploy the root `wrangler.jsonc` to an account that also runs a hosted
   Dropway (names collide). Test instances use their own config.

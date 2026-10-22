@@ -1,0 +1,8 @@
+# Exceptions for scripts/guard-open-core.mjs (rule 6: billing/pricing words in code).
+# Format: <path glob> <term>   # why this use is not hosted-service logic
+# Terms: stripe billing pricing invoice payment paywall subscription entitlement dunning "checkout session" plan path heading
+# Keep this list short. A new entry needs a reason a reviewer can check.
+
+packages/core/src/lib/slug.ts billing   # reserved site names: no site may be called "billing" (it would shadow a dashboard path)
+test/ui.test.ts billing   # a test asserting the home page never mentions billing
+test/ui.test.ts subscription   # same assertion: the home page never mentions subscriptions

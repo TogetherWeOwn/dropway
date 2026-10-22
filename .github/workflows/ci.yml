@@ -10,6 +10,8 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  # Typecheck and every test: Workers-runtime tests (D1, R2, KV emulated) and the CLI's
+  # unit and end-to-end tests against a local Worker.
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -22,3 +24,45 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: CLI package builds and packs
+        run: |
+          npm run build -w dropway
+          npm pack -w dropway --dry-run
+
+  # This repository is the single-tenant open-source product. Fails on any sign of the
+  # hosted service's code: payment SDKs, private packages or markers, billing/pricing code.
+  open-core-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Guard rules catch planted examples
+        run: node scripts/guard-open-core.mjs --self-test
+      - name: Open-core guard
+        run: node scripts/guard-open-core.mjs
+
+  # The published CLI promises Node 20+. Build the bundle and run it on Node 20.
+  cli-node20:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w dropway
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run the bundle on Node 20
+        run: |
+          node --version
+          node packages/cli/dist/dropway.mjs --version
+          node packages/cli/dist/dropway.mjs --help > /dev/null
+          node packages/cli/dist/dropway.mjs publish packages/cli/src --dry-run --json > /tmp/dry.json
+          node -e 'const r = JSON.parse(require("fs").readFileSync("/tmp/dry.json", "utf8")); if (!r.ok || !r.files.length) process.exit(1); console.log("dry run ok: " + r.files.length + " files")'

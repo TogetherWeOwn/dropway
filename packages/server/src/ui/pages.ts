@@ -70,7 +70,7 @@ export async function homePage(c: Context<DropwayEnv>): Promise<Response> {
       "CLI",
       `<p>Hashes locally and uploads only files the server does not have.</p>${snippet(
         "dw-s-cli",
-        `export DROPWAY_URL=${o}\nexport DROPWAY_API_KEY=dw_...\nnpx dropway publish ./dist`,
+        `export DROPWAY_API=${o}\nexport DROPWAY_API_KEY=dw_...\nnpx dropway publish ./dist`,
       )}`,
     ],
     [

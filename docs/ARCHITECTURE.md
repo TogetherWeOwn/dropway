@@ -39,8 +39,9 @@ packages/server           @dropway/server: createDropway() Hono app factory
   src/openapi.ts          OpenAPI 3.1 document for every route (operationId = MCP tool name)
   src/discovery.ts        /llms.txt, /llms-full.txt, /skill.md, /.well-known/agent-skills (generated)
   src/extensions.ts       Types for routes, MCP tools, UI slots, createDropway options
-packages/cli              `dropway` CLI (placeholder)
+packages/cli              `dropway` CLI (npm package "dropway", Node 20+, zero runtime dependencies)
 skills/dropway/SKILL.md   Agent Skill (`npx skills add TogetherWeOwn/dropway`); generated, `npm run skill:sync`
+scripts/guard-open-core.mjs  CI guard: no billing, pricing, payment or hosted-service code in this repo
 test/                     vitest + @cloudflare/vitest-plugin (runs inside workerd)
 ```
 
@@ -235,7 +236,10 @@ consumers, scripts, tests). Inside routes, use `c.get("dw")` and
   CSP. `uiSlots.banner` shows a notice above every app page;
   `uiSlots.settingsSections` adds sections to `/dashboard/settings`. Never render
   user content on the app origin.
-- **CLI:** `packages/cli` talks to the REST API (it runs on users' machines).
+- **CLI:** `packages/cli` talks to the REST API (it runs on users' machines). The upload protocol
+  (`src/publish.ts`, `src/client.ts`) uses only `fetch`, so `test/cli-publish.test.ts` runs it against
+  the real Worker inside workerd; `packages/cli/test` covers the rest, end to end against a local Worker.
+  A new REST endpoint usually needs no CLI change: `dropway api <METHOD> <path>` reaches it.
 
 ## Conventions
 
