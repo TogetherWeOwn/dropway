@@ -1,6 +1,6 @@
 import { expect } from "vitest";
 import { z } from "zod";
-import type { DropwayContext, Principal } from "@dropway/core";
+import type { DropwayContext, Principal, Scope } from "@dropway/core";
 import * as server from "@dropway/server";
 import { freshInstance, type Instance } from "./helpers";
 
@@ -12,7 +12,7 @@ export interface OperationFixture {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   aliases?: { method: string; path: string }[];
-  scopes: ("sites:read" | "sites:write")[];
+  scopes: Scope[];
   summary: string;
   description: string;
   input: z.ZodType;
