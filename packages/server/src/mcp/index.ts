@@ -49,7 +49,7 @@ type CompiledTool = {
 /** Server instructions (kept under 4,096 characters; a test checks). */
 export function mcpInstructions(dw: DropwayContext): string {
   const o = appOrigin(dw);
-  return `${dw.config.instanceName} (Dropway) publishes files, folders and small static sites to live URLs. Every publish is an immutable version you can roll back.
+  return `${dw.config.instanceName} publishes files, folders and small static sites to live URLs. Every publish is an immutable version you can roll back.
 
 How to work:
 - Publish: publish_site with files [{path, ...one source}]. Sources: content (text; base64 only for small binaries), url (the server downloads a public https URL; best for big or binary files already online), sha256+size (then PUT the bytes to the returned upload link and call finalize_version), copyFrom (reuse a file you already published). Put index.html (or index.md / README.md) at the root.

@@ -99,6 +99,25 @@ export interface ClientOptions {
   backoffMs?: number;
   /** Longest Retry-After we are willing to sleep, in seconds. Default 30. */
   maxRetryAfterSeconds?: number;
+  /**
+   * Called once when the instance answers with a Deprecation header and a
+   * `Link: <...>; rel="successor-version"` on another origin (it moved; the old origin still works).
+   */
+  onMoved?: (newOrigin: string) => void;
+}
+
+/** The successor origin named by a deprecated response, or null. */
+export function movedTo(res: Response, current: string): string | null {
+  if (!res.headers.has("deprecation")) return null;
+  const m = /<([^>]+)>\s*;\s*rel="?successor-version"?/i.exec(res.headers.get("link") ?? "");
+  if (!m) return null;
+  let url: URL;
+  try {
+    url = new URL(m[1]!);
+  } catch {
+    return null;
+  }
+  return (url.protocol === "https:" || url.protocol === "http:") && url.origin !== current ? url.origin : null;
 }
 
 export interface RequestOptions {
@@ -151,6 +170,7 @@ export class DropwayClient {
   private readonly attempts: number;
   private readonly backoffMs: number;
   private readonly maxRetryAfter: number;
+  private onMoved: ((newOrigin: string) => void) | undefined;
 
   constructor(opts: ClientOptions) {
     this.api = normaliseApi(opts.api);
@@ -160,6 +180,7 @@ export class DropwayClient {
     this.attempts = Math.max(1, opts.attempts ?? 4);
     this.backoffMs = opts.backoffMs ?? 500;
     this.maxRetryAfter = opts.maxRetryAfterSeconds ?? 30;
+    this.onMoved = opts.onMoved;
   }
 
   /** Absolute URL for an API path ("/sites" -> <api>/api/v1/sites); absolute URLs pass through. */
@@ -201,6 +222,13 @@ export class DropwayClient {
           continue;
         }
         throw lastError;
+      }
+
+      const successor = this.onMoved ? movedTo(res, this.api) : null;
+      if (successor && this.onMoved) {
+        const notify = this.onMoved;
+        this.onMoved = undefined;
+        notify(successor);
       }
 
       if (res.ok || opts.accept?.includes(res.status)) {
