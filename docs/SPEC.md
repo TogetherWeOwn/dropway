@@ -1636,8 +1636,9 @@ in a new window with `noopener noreferrer`, so an untrusted `<base>` cannot redi
 and it works without script authority in the sandbox. Raw/download responses and stored
 bytes are not changed; claimed and owned sites carry no anonymous link. Transformed HTML
 uses a separate versioned ETag and ignores byte ranges. **The report form and submission
-processing remain R-37; the reserved destination currently returns 404.** The link alone
-is not an operational reporting channel.
+processing remain R-37.** Until that route exists, its destination follows ordinary site
+resolution: a 404 (possibly the site's `404.html`) or the site's `index.html` SPA fallback.
+The link alone is not an operational reporting channel.
 
 ### 11.7 Default limits (all admin-configurable)
 
