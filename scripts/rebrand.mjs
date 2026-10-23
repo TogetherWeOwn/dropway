@@ -49,6 +49,10 @@ const ROOT = resolve(opt("--root") ?? fileURLToPath(new URL("..", import.meta.ur
 
 const TEXT_EXT = /\.(md|mdx|txt|ts|tsx|mts|js|mjs|cjs|json|jsonc|ya?ml|toml|html|css|svg)$/i;
 const CODE_EXT = /\.(ts|tsx|mts|js|mjs|cjs)$/i;
+const MD_EXT = /\.mdx?$/i;
+/** A Markdown fence line; group 2 is the info string (```ts). */
+const FENCE = /^\s*(`{3,}|~{3,})\s*([\w-]*)/;
+const CODE_LANG = /^(ts|tsx|typescript|js|jsx|javascript|mjs|cjs)$/i;
 
 /** Paths never edited (regexes on the repo-relative path). */
 const EXCLUDE = [
@@ -201,10 +205,22 @@ for (const rel of files) {
   if (!existsSync(abs) || !statSync(abs).isFile()) continue;
   const before = readFileSync(abs, "utf8");
   if (before.includes("rebrand:keep-file")) continue;
-  const keep = CODE_EXT.test(rel) ? [...KEEP, ...CODE_KEEP] : KEEP;
+  const codeKeep = [...KEEP, ...CODE_KEEP];
+  const keep = CODE_EXT.test(rel) ? codeKeep : KEEP;
+  // In Markdown, TypeScript/JavaScript fences are code: their identifiers keep the old name too.
+  let fence = null; // [marker, isCode] while inside a fence
   const after = before
     .split("\n")
-    .map((line) => (line.includes("rebrand:keep") ? line : rewriteLine(line, keep)))
+    .map((line) => {
+      let lineKeep = keep;
+      if (MD_EXT.test(rel)) {
+        const f = FENCE.exec(line);
+        if (fence && f && f[1][0] === fence[0][0] && f[1].length >= fence[0].length && !f[2]) fence = null;
+        else if (!fence && f) fence = [f[1], CODE_LANG.test(f[2])];
+        else if (fence?.[1]) lineKeep = codeKeep;
+      }
+      return line.includes("rebrand:keep") ? line : rewriteLine(line, lineKeep);
+    })
     .join("\n");
   if (after === before) continue;
   touched.add(rel);
@@ -289,6 +305,7 @@ function selfTest() {
     "README.md": `Dropway: run \`npx dropway publish ./dist\` with DROPWAY_API_KEY, then read X-Dropway-Version.\n${keptLine}\n${markedLine}\n`,
     "src/app.ts": 'import { createDropway, type Dropway } from "@dropway/server";\nexport const app: Dropway = createDropway({ title: "Dropway" });\n',
     "src/compat.ts": '// rebrand:keep-file\nexport const OLD = "X-Dropway-";\n',
+    "docs/api.md": "Product: Dropway.\n\n```ts\nexport interface Dropway { fetch(): void }\nconst d: Dropway = createDropway();\n```\n\n```sh\nexport DROPWAY_API=x\n```\n",
     "CHANGELOG.md": "Dropway 0.1\n",
     "skills/dropway/SKILL.md": "name: dropway\n",
     "package.json": '{\n  "name": "dropway-monorepo"\n}\n',
@@ -297,6 +314,7 @@ function selfTest() {
   expect("apply succeeds", runOn(a).code === 0);
   expect("prose, CLI, variable and header renamed", read(a, "README.md") === `Kofra: run \`npx kofra publish ./dist\` with KOFRA_API_KEY, then read X-Kofra-Version.\n${keptLine}\n${markedLine}\n`);
   expect("identifiers and package scope kept, string renamed", read(a, "src/app.ts") === 'import { createDropway, type Dropway } from "@dropway/server";\nexport const app: Dropway = createDropway({ title: "Kofra" });\n');
+  expect("Markdown: TypeScript fences keep identifiers, prose and shell fences are renamed", read(a, "docs/api.md") === "Product: Kofra.\n\n```ts\nexport interface Dropway { fetch(): void }\nconst d: Dropway = createDropway();\n```\n\n```sh\nexport KOFRA_API=x\n```\n");
   expect("keep-file untouched", read(a, "src/compat.ts") === '// rebrand:keep-file\nexport const OLD = "X-Dropway-";\n');
   expect("CHANGELOG untouched", read(a, "CHANGELOG.md") === "Dropway 0.1\n");
   expect("skill folder moved and renamed", read(a, "skills/kofra/SKILL.md") === "name: kofra\n" && !existsSync(join(a, "skills/dropway")));

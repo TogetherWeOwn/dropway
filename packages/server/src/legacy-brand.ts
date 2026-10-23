@@ -5,7 +5,10 @@
  * Clients built before the rename send X-Dropway-* request headers and read X-Dropway-*
  * response headers, and installed Agent Skills point at the skill named "dropway".
  * All of that keeps working: requests are read under both prefixes, responses carry both.
+ * createDropway() applies this around fetch (every request, sites included) and as the first
+ * middleware of its app, so the exported app (composition, tests) behaves the same.
  */
+import type { MiddlewareHandler } from "hono";
 
 /** Former Agent Skill name; its URLs still serve the skill. */
 export const LEGACY_SKILL_NAME = "dropway";
@@ -51,3 +54,11 @@ export function addLegacyResponseHeaders(response: Response): Response {
   }
   return out;
 }
+
+/** App middleware: the request with legacy headers read under the new names, the response with both spellings. */
+export const legacyBrandHeaders: MiddlewareHandler = async (c, next) => {
+  c.req.raw = acceptLegacyRequestHeaders(c.req.raw);
+  await next();
+  const res = addLegacyResponseHeaders(c.res);
+  if (res !== c.res) c.res = res;
+};

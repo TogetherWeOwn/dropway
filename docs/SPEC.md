@@ -453,7 +453,7 @@ export interface CreateDropwayOptions {
   queues?: Record<string, QueueConsumer>;                                           // R-18
 }
 
-export interface Kofra {
+export interface Dropway {
   fetch(request: Request, env: ServerBindings, ctx: ExecutionContext): Promise<Response>;        // exists
   scheduled(controller: ScheduledController, env: ServerBindings, ctx: ExecutionContext): Promise<void>; // exists
   queue(batch: MessageBatch<unknown>, env: ServerBindings, ctx: ExecutionContext): Promise<void>; // R-18
