@@ -33,6 +33,8 @@ export interface OperationDefinition<I extends z.ZodType = z.ZodType, O extends 
   aliases?: { method: string; path: string }[];
   scopes: Scope[];
   anonymous?: boolean;
+  /** REST-only setup/recovery; only the bootstrap principal may dispatch. */
+  bootstrap?: boolean;
   summary: string;
   description: string;
   input: I;
@@ -47,9 +49,13 @@ export interface OperationDefinition<I extends z.ZodType = z.ZodType, O extends 
   cli?: { command: string[]; positional?: string[] };
   confirm?: "slug" | "name" | "email" | "domain";
   rawBody?: boolean;
+  /** Generated REST JSON wire-byte budget; defaults to 8 MiB. */
+  jsonBodyMaxBytes?: number;
   examples?: { input: unknown; output: unknown }[];
   handler(input: z.infer<I>, ctx: OperationContext): Promise<z.infer<O>>;
-  /** Wire compatibility for pre-registry REST clients. Never used by MCP. */
+  /** Wire compatibility for pre-registry REST clients. Never used by MCP.
+   * A custom handler owns parsing, body limits, output and replay; shared authorization still runs.
+   */
   http?: {
     input?: z.ZodType;
     output?: z.ZodType;
@@ -82,6 +88,12 @@ export function defineOperation<I extends z.ZodType, O extends z.ZodType, S exte
   if (!definition.description.trim() || definition.description.length >= 4096) throw new Error(`Invalid description: ${definition.id}`);
   if (definition.mcp && "exclude" in definition.mcp && !definition.mcp.exclude.trim()) throw new Error(`Empty MCP exclusion: ${definition.id}`);
   if (definition.rawBody && !(definition.mcp && "exclude" in definition.mcp)) throw new Error(`Raw operation needs an MCP exclusion: ${definition.id}`);
+  if (definition.rawBody && definition.tool?.idempotent && !definition.http?.handler) {
+    throw new Error(`Raw operation cannot use generated idempotency: ${definition.id}`);
+  }
+  if (definition.jsonBodyMaxBytes !== undefined && (!Number.isSafeInteger(definition.jsonBodyMaxBytes) || definition.jsonBodyMaxBytes <= 0)) {
+    throw new Error(`Invalid JSON body byte limit: ${definition.id}`);
+  }
   if (definition.confirm) {
     const input = schemaJson(definition.input);
     for (const name of ["confirm", definition.confirm]) {
@@ -141,6 +153,12 @@ export function requireOperationScopes(principal: Principal, scopes: readonly Sc
 }
 
 function authorizeOperation(op: OperationDefinition, ctx: OperationContext): void {
+  if (op.bootstrap) {
+    if (ctx.principal.kind !== "bootstrap") {
+      throw new ApiError(403, "bootstrap_key_required", "This operation needs the bootstrap key.", "Send Authorization: Bearer <ADMIN_BOOTSTRAP_KEY> for setup or recovery only.");
+    }
+    return;
+  }
   if ((ctx.principal.kind === "anonymous" || ctx.principal.kind === "bootstrap") && !op.anonymous) requireMember(ctx.principal);
   if (ctx.principal.kind === "member" || ctx.principal.kind === "claim") requireOperationScopes(ctx.principal, op.scopes, op.id);
 }
@@ -203,17 +221,32 @@ function honoPath(path: string): string {
   return path.replace(/^\/api\/v1/, "").replace(/\{([a-zA-Z0-9_]+)\}/g, ":$1") || "/";
 }
 
+function urlScalarTypes(field: Record<string, any>): string[] {
+  if (field.anyOf || field.oneOf) return (field.anyOf ?? field.oneOf).flatMap(urlScalarTypes);
+  return Array.isArray(field.type) ? field.type : [field.type];
+}
+
+function decodeUrlInput(values: Record<string, string>, schema: Record<string, any>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(values).map(([key, value]) => {
+    const types = [...new Set(urlScalarTypes(schema.properties?.[key] ?? {}).filter((type) => type !== "null"))];
+    if (types.length === 1) {
+      if ((types[0] === "integer" || types[0] === "number") && /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(value)) {
+        const number = Number(value);
+        if (Number.isFinite(number)) return [key, number];
+      }
+      if (types[0] === "boolean" && (value === "true" || value === "false")) return [key, value === "true"];
+    }
+    return [key, value];
+  }));
+}
+
 async function requestInput(c: Context<DropwayEnv>, op: OperationDefinition) {
   const schema = schemaJson(op.input);
-  const query: Record<string, unknown> = { ...c.req.query() };
-  for (const [key, value] of Object.entries(query)) {
-    const field = schema.properties?.[key];
-    if (field?.type === "integer" || field?.type === "number") query[key] = value === "" ? value : Number(value);
-    if (field?.type === "boolean" && (value === "true" || value === "false")) query[key] = value === "true";
-  }
-  const body = op.rawBody || ["GET", "HEAD"].includes(c.req.method) ? {} : await readJson(c);
+  const query = decodeUrlInput(c.req.query(), schema);
+  const path = decodeUrlInput(c.req.param(), schema);
+  const body = op.rawBody || ["GET", "HEAD"].includes(c.req.method) ? {} : await readJson(c, op.jsonBodyMaxBytes);
   // The URL names the resource; a body cannot select a different one.
-  return { ...query, ...body, ...c.req.param() };
+  return { ...query, ...body, ...path };
 }
 
 export function installOperationRoutes(api: Hono<DropwayEnv>, operations: readonly OperationDefinition[]) {
@@ -223,33 +256,32 @@ export function installOperationRoutes(api: Hono<DropwayEnv>, operations: readon
       const key = `${route.method.toUpperCase()} ${route.path.replace(/\{[^}]+\}/g, "{}")}`;
       if (routes.has(key)) throw new Error(`Duplicate operation route: ${key}`);
       routes.add(key);
-      const handler =
-        op.http?.handler ??
-        (async (c: Context<DropwayEnv>) => {
-          const ctx: OperationContext = {
-            dw: c.get("dw"),
-            principal: c.get("principal"),
-            request: c.req.raw,
-            client: c.req.header("x-dropway-client") ?? null,
-            idempotencyKey: validateIdempotencyKey(c.req.header("idempotency-key")),
-            transport: "rest",
-          };
-          // Authorization and validation also run before a cached response can be returned.
-          authorizeOperation(op, ctx);
-          const input = validateOperationInput(op, await requestInput(c, op));
-          const { result, replayed } = await withIdempotency(
-            ctx.dw,
-            {
-              scope: idempotencyScope(ctx.principal),
-              operation: `rest:${op.id}`,
-              key: op.tool?.idempotent ? ctx.idempotencyKey : null,
-              input,
-              redactForReplay: op.tool?.redactForReplay,
-            },
-            () => runOperation(op, input, ctx),
-          );
-          return c.json(replayed ? { ...(result as Record<string, unknown>), replayed: true } : result, (op.http?.status ?? 200) as 200);
-        });
+      const handler = async (c: Context<DropwayEnv>) => {
+        const ctx: OperationContext = {
+          dw: c.get("dw"),
+          principal: c.get("principal"),
+          request: c.req.raw,
+          client: c.req.header("x-dropway-client") ?? null,
+          idempotencyKey: validateIdempotencyKey(c.req.header("idempotency-key")),
+          transport: "rest",
+        };
+        // Authorization runs for both adapters, before parsing or cached replay.
+        authorizeOperation(op, ctx);
+        if (op.http?.handler) return op.http.handler(c);
+        const input = validateOperationInput(op, await requestInput(c, op));
+        const { result, replayed } = await withIdempotency(
+          ctx.dw,
+          {
+            scope: idempotencyScope(ctx.principal),
+            operation: `rest:${op.id}`,
+            key: op.tool?.idempotent ? ctx.idempotencyKey : null,
+            input,
+            redactForReplay: op.tool?.redactForReplay,
+          },
+          () => runOperation(op, input, ctx),
+        );
+        return c.json(replayed ? { ...(result as Record<string, unknown>), replayed: true } : result, (op.http?.status ?? 200) as 200);
+      };
       const path = honoPath(route.path);
       api.on(route.method.toUpperCase(), op.http?.wildcard ? path.replace(/:path$/, ":path{.+}") : path, handler);
     }

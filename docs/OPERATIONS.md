@@ -44,19 +44,32 @@ remediation hint; both transports preserve it.
 ## Binding and validation
 
 - GET input combines path parameters and query parameters. Numeric and boolean
-  query values are decoded according to the Zod schema. JSON methods combine the
-  body with URL parameters; a body cannot override a path-selected resource.
+  path/query values, including nullable scalars, are decoded according to the Zod
+  schema; invalid scalar text is rejected, not coerced to zero or false. JSON
+  methods combine the body with URL parameters without coercing JSON values;
+  a body cannot override a path-selected resource.
+- Generated JSON routes accept at most 8 MiB of wire bytes by default. Set a
+  positive integer `jsonBodyMaxBytes` on an operation for a different finite
+  budget. The reader checks Content-Length and actual streamed bytes before
+  decoding/parsing, cancels overflow and returns `413 request_too_large`.
+  Use upload links instead of putting large file bytes in JSON. Legacy metadata
+  adapters using `readJson()` use the same default; raw uploads keep their own
+  streaming reader and existing limits.
 - Zod validates inputs and applies defaults before dispatch. Operation output is
   validated, then normalized to JSON for both transports.
 - Definitions must use flat object input/output schemas. Keep summaries at most
   80 characters and descriptions below 4,096. Include useful successful examples.
-- Required scopes are enforced before dispatch and before cached replay. A claim
-  token has only `sites:read`/`sites:write`, never key or member administration;
-  site services must still enforce its one-site restriction. Anonymous access is
-  opt-in. Public metadata also accepts the bootstrap credential.
+- Required scopes are enforced before dispatch, including custom `http.handler`
+  adapters, and before cached replay. A claim token has only
+  `sites:read`/`sites:write`, never key or member administration; site services
+  must still enforce its one-site restriction. Anonymous access is opt-in.
+  Public metadata also accepts the bootstrap credential. REST-only setup and
+  recovery explicitly use `bootstrap: true`, rejecting every other principal.
 - A `rawBody: true` operation leaves the Request body untouched for the handler;
   its default OpenAPI body type is `application/octet-stream`. It needs an MCP
-  exclusion reason. Put non-body input in its path/query schema.
+  exclusion reason. Put non-body input in its path/query schema. Raw operations
+  cannot use generated `tool.idempotent` replay: path/query input alone cannot
+  identify the bytes. A custom HTTP adapter must own any raw retry contract.
 - For declarative destructive confirmation, set `confirm: "name"` (or `slug`,
   `email`, `domain`) and include required string `confirm` and target fields in
   the input schema. Both generated transports reject a mismatch before execution.
@@ -66,7 +79,13 @@ remediation hint; both transports preserve it.
   for essential tools. Tool filtering and the existing MCP idempotency behavior
   remain in the endpoint. Generic REST operations marked `tool.idempotent` use
   the same replay service with `Idempotency-Key`, a REST-specific namespace and
-  any declared `tool.redactForReplay` secret redaction.
+  any declared `tool.redactForReplay` secret redaction. Member replay identity
+  includes the tenant, member, credential id, site restriction, role, sorted
+  scopes and authentication method. Changing credentials or authorization runs
+  the service again, never returns a more privileged credential's saved result.
+  Pre-hardening member replay records are no longer read and expire normally
+  after 24 hours; retries spanning this upgrade may execute again. Claims remain
+  scoped to the single anonymous site they control.
 
 ## Discovery and compatibility
 
@@ -83,8 +102,12 @@ convenience CLI command.
 Core definitions live in `packages/server/src/operations/`, with stable order in
 `core.ts`. Existing REST clients keep their original payloads/statuses through
 explicit `http` compatibility adapters on those definitions; those adapters call
-the original core services and own no business rules. New definitions should not
-need adapters. Notably:
+the original core services and own no business rules. A custom `http.handler`
+replaces generated parsing, output validation and retry handling, not shared
+principal/scope authorization. `tool.idempotent` and `jsonBodyMaxBytes` do not
+wrap custom adapters: the adapter must explicitly call `withIdempotency()` with
+an appropriate payload identity or `readJson(c, maxBytes)` with its chosen
+budget. New definitions should not need adapters. Notably:
 
 - `POST /api/v1/publish` still supports multipart, raw, zip and legacy JSON.
   `POST /api/v1/publish-sources` exposes the model-friendly `publish_site` input.

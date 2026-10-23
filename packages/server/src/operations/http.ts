@@ -69,6 +69,7 @@ export const HTTP_OPERATIONS = [
   }),
   defineOperation({
     id: "setup_instance",
+    bootstrap: true,
     method: "POST",
     path: "/api/v1/setup",
     aliases: [{ method: "POST", path: "/api/v1/accounts" }],
@@ -124,6 +125,7 @@ export const HTTP_OPERATIONS = [
   }),
   defineOperation({
     id: "recover_owner_key",
+    bootstrap: true,
     method: "POST",
     path: "/api/v1/setup/recover",
     aliases: [],
@@ -167,6 +169,7 @@ export const HTTP_OPERATIONS = [
   defineOperation({
     rawBody: true,
     id: "publish_upload",
+    anonymous: true,
     method: "POST",
     path: "/api/v1/publish",
     aliases: [],

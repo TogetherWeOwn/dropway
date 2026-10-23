@@ -3,9 +3,35 @@ import { cors } from "hono/cors";
 import { ApiError, badRequest } from "@dropway/core";
 import type { DropwayEnv } from "../env";
 
-/** Parse an object body without silently accepting malformed JSON. */
-export async function readJson(c: Context<DropwayEnv>): Promise<Record<string, unknown>> {
-  const text = await c.req.text();
+/** Bound wire bytes before decoding or parsing an object body. Raw uploads use their own reader. */
+export async function readJson(c: Context<DropwayEnv>, maxBytes = 8 * 1024 * 1024): Promise<Record<string, unknown>> {
+  const tooLarge = () => new ApiError(413, "request_too_large", `JSON requests accept up to ${maxBytes} bytes.`, "Split the request or use sha256 upload links for file bytes.", { limit: maxBytes });
+  const body = c.req.raw.body;
+  if (Number(c.req.header("content-length")) > maxBytes) {
+    await body?.cancel().catch(() => {});
+    throw tooLarge();
+  }
+  let text = "";
+  if (body) {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let bytes = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > maxBytes) {
+          await reader.cancel().catch(() => {});
+          throw tooLarge();
+        }
+        text += decoder.decode(value, { stream: true });
+      }
+      text += decoder.decode();
+    } finally {
+      reader.releaseLock();
+    }
+  }
   if (!text.trim()) return {};
   try {
     const v = JSON.parse(text);

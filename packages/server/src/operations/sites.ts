@@ -8,6 +8,7 @@ import { fromSchema, LIST, WRITE, CREATE, siteOut, str, settingsFrom, P, D, clie
 export const SITE_OPERATIONS = [
   defineOperation({
     id: "create_site",
+    anonymous: true,
     method: "POST",
     path: "/api/v1/sites",
     summary: "Create an empty site",

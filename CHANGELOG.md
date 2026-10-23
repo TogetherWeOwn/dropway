@@ -26,6 +26,15 @@
   are also available at `/api/v1/publish-sources` and `/api/v1/read-file`.
 - Add public `GET /api/v1/operations` and Redocly validation in CI, including
   required summaries, descriptions, examples and JSON error responses.
+- Enforce declared authorization before custom HTTP adapters; explicitly retain
+  bootstrap setup/recovery and anonymous publishing. Decode numeric/boolean URL
+  scalars, including nullable fields, without letting JSON override path resources.
+- Bound JSON metadata bodies before parsing (8 MiB default, configurable per
+  generated operation), cancel oversized streams and reject raw-body automatic
+  replay definitions that cannot distinguish changed bytes.
+- Partition member idempotency replay by credential and current authorization,
+  including tenant/site restrictions, role and scopes. Older member records
+  expire unused; retries spanning the upgrade may execute again.
 
 - Export `EXTENSION_API_VERSION = 1` from `@dropway/server`, identifying the
   current public embedding contract. Extension API changes must update this
