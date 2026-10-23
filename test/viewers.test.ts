@@ -257,7 +257,7 @@ describe("viewer pages", () => {
     expect(await page.text()).toContain("<p>home</p>");
     const frame = await get("index.html?view=1");
     expect(frame.headers.get("x-kofra-viewer")).toBe("html-frame");
-    expect(await frame.text()).toContain(`<iframe class="dw-frame" src="/s/${slug}/index.html"`);
+    expect(await frame.text()).toContain(`<iframe class="k-frame" src="/s/${slug}/index.html"`);
     const src = await get("index.html?view=source");
     expect(src.headers.get("x-kofra-viewer")).toBe("source");
     const html = await src.text();
@@ -344,9 +344,9 @@ describe("viewer pages", () => {
 
   it("&embed=1 drops the bar (used by the app-origin viewer)", async () => {
     const full = await (await get("src/app.ts?view=1")).text();
-    expect(full).toContain('class="dw-vbar"');
+    expect(full).toContain('class="k-vbar"');
     const embed = await get("src/app.ts?view=1&embed=1");
-    expect(await embed.text()).not.toContain('class="dw-vbar"');
+    expect(await embed.text()).not.toContain('class="k-vbar"');
     expect(embed.headers.get("etag")).toMatch(/-e"$/);
   });
 
@@ -362,7 +362,7 @@ describe("viewer pages", () => {
     const res = await get("img/");
     expect(res.headers.get("x-kofra-viewer")).toBe("listing");
     const html = await res.text();
-    expect(html).toContain('class="dw-gal"');
+    expect(html).toContain('class="k-gallery"');
     expect(html).toContain(">SVG image<");
     expect(html).toContain(`href="https://dropway.test/v/${slug}/img/"`);
   });

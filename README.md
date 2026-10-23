@@ -190,6 +190,20 @@ npm run dev        # wrangler dev; put ADMIN_BOOTSTRAP_KEY in .dev.vars
 This repository is the complete single-tenant product. CI fails if billing, pricing or payment code,
 or code from a hosted service, lands here (`scripts/guard-open-core.mjs`).
 
+The page design (Security Print: light, dark and Auto colour modes) lives in `packages/server/design/`.
+Edit the sources there, then run `npm run design:build`; `npm test` fails while the generated modules
+are stale. `npm run design:shots -- --out <dir>` screenshots every page in every colour mode at 390, 768
+and 1440 px (headless Chrome via `CHROME_PATH`). See `packages/server/design/DESIGN.md`.
+
+## Third-party fonts
+
+Pages use three fonts, served by the Worker itself from `/__dropway/fonts/` (no font CDN):
+[Public Sans](https://github.com/uswds/public-sans), [Newsreader](https://github.com/productiontype/Newsreader)
+and [Martian Mono](https://github.com/evilmartians/mono). All three are under the
+[SIL Open Font License 1.1](https://openfontlicense.org) with no Reserved Font Name. The files are the
+unmodified `@fontsource-variable` 5.3.0 builds; the licences are in `packages/server/design/fonts/OFL-*.txt`
+and every instance serves them at `/__dropway/fonts/OFL.txt`.
+
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). The bundled fonts keep their own licence (SIL OFL 1.1, above).

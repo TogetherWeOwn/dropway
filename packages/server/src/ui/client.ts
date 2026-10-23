@@ -15,9 +15,11 @@
  * project). The suite checks the served script is self-contained; flows were
  * checked in a real browser (see the PR / commit notes).
  */
-export function dropwayClient() {
+export function dropwayClient(motifsFactory) {
   "use strict";
   var d = document;
+  // Seals and plates (./motifs.ts), passed in by ./assets.ts; null if absent.
+  var M = typeof motifsFactory === "function" ? motifsFactory() : null;
   var bootEl = d.getElementById("dw-boot");
   var boot = bootEl ? JSON.parse(bootEl.textContent || "{}") : {};
   var P = boot.page || {};
@@ -235,11 +237,49 @@ export function dropwayClient() {
   function plural(n, one, many) {
     return n + " " + (n === 1 ? one : many || one + "s");
   }
+  /** Date and time in the reader's time zone, with the zone named (DESIGN.md: times always show a zone). */
+  function localTime(iso) {
+    if (!iso) return "";
+    try {
+      return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short", timeZoneName: "short" });
+    } catch (e) {
+      return new Date(iso).toLocaleString();
+    }
+  }
+  function reducedMotion() {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+  /** A dashboard block: <section class="k-blk"> with a header row (serif h2, optional tools). */
+  function blk(title, tools) {
+    var sec = h("section", { class: "k-blk" }, h("div", { class: "k-blk-h" }, h("h2", { text: title }), tools ? h("div", { class: "k-tools" }, tools) : null));
+    for (var i = 2; i < arguments.length; i++) addOne(sec, arguments[i]);
+    return sec;
+  }
+  /**
+   * A file's checksum seal (seeded with its SHA-256) beside the short hash. The mark only shows which
+   * bytes were stored: it never says a file is safe.
+   */
+  function sealFor(path, sha, opts) {
+    opts = opts || {};
+    if (!M || !/^[0-9a-f]{64}$/.test(String(sha))) return null;
+    var box = h("span", { class: "k-sum" + (opts.mini ? " k-mini" : "") + (opts.hideSm ? " k-hide-sm" : "") });
+    // Parsed as SVG, never written as HTML; the seal holds only numbers derived from the hex checksum.
+    var parsed = new DOMParser().parseFromString(M.seal("SHA256:" + sha, { size: "mini" }), "image/svg+xml").documentElement;
+    var svg = parsed && parsed.nodeName === "svg" ? d.importNode(parsed, true) : null;
+    if (svg) {
+      svg.removeAttribute("aria-hidden");
+      svg.setAttribute("role", "img");
+      svg.setAttribute("aria-label", "Checksum seal for " + path + ", SHA-256 " + sha.slice(0, 12));
+      box.appendChild(svg);
+    }
+    if (!opts.noText) add(box, h("span", {}, h("code", { title: "SHA-256 " + sha, text: sha.slice(0, 12) + "…" }), opts.caption ? h("span", { class: "k-small", text: opts.caption }) : null));
+    return box;
+  }
 
   function toast(msg, isError) {
     var box = d.getElementById("dw-toasts");
     if (!box) return;
-    var t = h("div", { class: "dw-toast" + (isError ? " err" : "") , role: isError ? "alert" : null, text: msg });
+    var t = h("div", { class: "k-toast" + (isError ? " k-danger" : ""), role: isError ? "alert" : null, text: msg });
     box.appendChild(t);
     setTimeout(function () {
       t.remove();
@@ -249,10 +289,14 @@ export function dropwayClient() {
   function errorBox(err, prefix) {
     return h(
       "div",
-      { class: "dw-error", role: "alert" },
-      h("strong", { text: (prefix ? prefix + ": " : "") + (err && err.message ? err.message : String(err)) }),
-      err && err.hint ? h("div", { class: "dw-small", text: err.hint }) : null,
-      err && err.code ? h("div", { class: "dw-small dw-muted dw-mono", text: err.code }) : null,
+      { class: "k-banner k-danger", role: "alert" },
+      h(
+        "div",
+        {},
+        h("strong", { text: (prefix ? prefix + ": " : "") + (err && err.message ? err.message : String(err)) }),
+        err && err.hint ? h("p", { class: "k-small", text: err.hint }) : null,
+        err && err.code ? h("p", { class: "k-small k-mono", text: err.code }) : null,
+      ),
     );
   }
 
@@ -284,7 +328,7 @@ export function dropwayClient() {
   function copyButton(getText, label) {
     return h("button", {
       type: "button",
-      class: "dw-btn small",
+      class: "k-btn k-sm k-ghost",
       "aria-label": label || "Copy",
       text: "Copy",
       onclick: function (ev) {
@@ -296,19 +340,19 @@ export function dropwayClient() {
   /** Modal confirmation. typeToConfirm: the user must type this value. Resolves true or false. */
   function confirmBox(opts) {
     return new Promise(function (resolve) {
-      var input = opts.typeToConfirm ? h("input", { class: "dw-input", autocomplete: "off", spellcheck: "false", "aria-label": "Type " + opts.typeToConfirm + " to confirm" }) : null;
-      var ok = h("button", { class: "dw-btn " + (opts.danger === false ? "primary" : "danger"), value: "ok", text: opts.confirmText || "Confirm", disabled: !!input });
+      var input = opts.typeToConfirm ? h("input", { class: "k-input k-mono", id: "dw-dlg-input", autocomplete: "off", spellcheck: "false" }) : null;
+      var ok = h("button", { class: "k-btn" + (opts.danger === false ? "" : " k-danger"), value: "ok", text: opts.confirmText || "Confirm", disabled: !!input });
       var dlg = h(
         "dialog",
-        { class: "dw-dialog", "aria-labelledby": "dw-dlg-title" },
+        { class: "k-dlg" + (opts.danger === false ? "" : " k-warn"), "aria-labelledby": "dw-dlg-title", "aria-describedby": opts.message ? "dw-dlg-msg" : null },
         h(
           "form",
           { method: "dialog" },
           h("h2", { id: "dw-dlg-title", text: opts.title }),
-          opts.message ? h("p", { class: "dw-muted", text: opts.message }) : null,
-          input ? h("label", { class: "dw-label", text: "Type " + opts.typeToConfirm + " to confirm" }) : null,
+          opts.message ? h("p", { id: "dw-dlg-msg", text: opts.message }) : null,
+          input ? h("label", { class: "k-label", for: "dw-dlg-input", text: "Type " + opts.typeToConfirm + " to confirm" }) : null,
           input,
-          h("div", { class: "dw-row" }, h("button", { class: "dw-btn", value: "cancel", text: "Cancel" }), ok),
+          h("div", { class: "k-btnrow" }, h("button", { class: "k-btn k-ghost", value: "cancel", text: "Cancel" }), ok),
         ),
       );
       if (input)
@@ -330,17 +374,18 @@ export function dropwayClient() {
   function secretBlock(title, value, note) {
     return h(
       "div",
-      { class: "dw-callout", role: "status" },
+      { class: "k-keyout", role: "status" },
+      h("span", { class: "k-k", text: "Shown once" }),
       h("strong", { text: title }),
-      h("div", { class: "dw-secret" }, h("code", { text: value }), copyButton(value, "Copy key")),
-      note ? h("div", { class: "dw-small dw-muted", text: note }) : null,
+      h("div", { class: "k-keyout-row" }, h("code", { text: value }), copyButton(value, "Copy key")),
+      note ? h("p", { class: "k-small", text: note }) : null,
     );
   }
 
   function skeleton(n) {
     var out = [];
-    for (var i = 0; i < (n || 3); i++) out.push(h("div", { class: "dw-skel", "aria-hidden": "true" }));
-    return h("div", { "aria-busy": "true", "aria-label": "Loading" }, out);
+    for (var i = 0; i < (n || 3); i++) out.push(h("div", { class: "k-skel", "aria-hidden": "true" }));
+    return h("div", { "aria-busy": "true" }, h("span", { class: "k-sr", text: "Loading" }), out);
   }
 
   function safeNext(n) {
@@ -378,10 +423,10 @@ export function dropwayClient() {
       var who = (m.member && (m.member.email || m.member.name)) || "Signed in";
       add(
         box,
-        h("span", { class: "who", title: (m.member && m.member.role) || "", text: who }),
+        h("span", { class: "k-who", title: (m.member && m.member.role) || "", text: who }),
         h("button", {
           type: "button",
-          class: "dw-btn small",
+          class: "k-btn k-sm k-quiet",
           text: "Sign out",
           onclick: signOut,
         }),
@@ -601,39 +646,40 @@ export function dropwayClient() {
         root,
         h(
           "div",
-          { class: "dw-drop" },
+          { class: "k-dropzone" },
           h("strong", { text: "Sign in to publish from the browser" }),
-          h("p", { class: "dw-muted dw-small", text: "This instance publishes with API keys. Agents use the API, CLI or MCP below." }),
-          h("a", { class: "dw-btn primary", href: signInHref(location.pathname), text: "Sign in" }),
+          h("p", { text: "This instance publishes with API keys. Agents use the API, CLI or MCP." }),
+          h("a", { class: "k-btn", href: signInHref(location.pathname), text: "Sign in" }),
         ),
       );
       return;
     }
     var state = { items: [], skipped: [], busy: false };
-    var siteSelect = h("select", { class: "dw-select", id: "dw-pub-site", "aria-label": "Site to update" }, h("option", { value: "", text: "Loading sites…" }));
-    var slugInput = h("input", { class: "dw-input", id: "dw-pub-slug", placeholder: "generated if empty", autocomplete: "off", spellcheck: "false", pattern: "[a-z0-9][a-z0-9-]{1,62}" });
+    var siteSelect = h("select", { class: "k-input", id: "dw-pub-site", "aria-label": "Site to update" }, h("option", { value: "", text: "Loading sites…" }));
+    var slugInput = h("input", { class: "k-input", id: "dw-pub-slug", placeholder: "generated if empty", autocomplete: "off", spellcheck: "false", pattern: "[a-z0-9][a-z0-9-]{1,62}" });
     var modeNew = h("input", { type: "radio", name: "dw-pub-mode", value: "new", checked: !opts.site });
     var modeUpd = h("input", { type: "radio", name: "dw-pub-mode", value: "update", checked: !!opts.site });
-    var message = h("input", { class: "dw-input", id: "dw-pub-msg", maxlength: "200", placeholder: "What changed (optional)" });
+    var message = h("input", { class: "k-input", id: "dw-pub-msg", maxlength: "200", placeholder: "What changed (optional)" });
     var dirInput = h("input", { type: "file", webkitdirectory: true, multiple: true, hidden: true });
     var fileInput = h("input", { type: "file", multiple: true, hidden: true });
-    var summary = h("div", { class: "dw-small dw-muted", "aria-live": "polite" });
-    var publishBtn = h("button", { type: "button", class: "dw-btn primary", text: "Publish", disabled: true });
-    var clearBtn = h("button", { type: "button", class: "dw-btn ghost", text: "Clear", hidden: true });
-    var status = h("div", { class: "dw-small", "aria-live": "polite" });
-    var bar = h("span");
-    var progress = h("div", { class: "dw-progress", hidden: true, role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100" }, bar);
+    var summary = h("div", { class: "k-small", "aria-live": "polite" });
+    var chosen = h("ul", { class: "k-frows k-chosen", hidden: true, "aria-label": "Files to publish" });
+    var publishBtn = h("button", { type: "button", class: "k-btn", text: "Publish", disabled: true });
+    var clearBtn = h("button", { type: "button", class: "k-btn k-quiet", text: "Clear", hidden: true });
+    var status = h("p", { class: "k-msgline", "aria-live": "polite" });
+    var bar = h("i");
+    var progress = h("div", { class: "k-prog", hidden: true, role: "progressbar", "aria-label": "Publishing", "aria-valuemin": "0", "aria-valuemax": "100" }, bar);
     var result = h("div");
     var zone = h(
       "div",
-      { class: "dw-drop", tabindex: "0", role: "button", "aria-label": "Drop a folder, files or a zip here, or press Enter to choose a folder" },
+      { class: "k-dropzone", role: "group", "aria-label": "Drop zone: drop a folder, files or a .zip here, or choose them with the buttons" },
       h("strong", { text: "Drop a folder, files or a .zip" }),
-      h("p", { class: "dw-muted dw-small", style: "margin:.25rem 0 .9rem", text: "Files are hashed in your browser; only files the server does not have yet are uploaded." }),
+      h("p", { text: "Files are hashed in your browser; only files the server does not have yet are uploaded." }),
       h(
         "div",
-        { class: "dw-row", style: "justify-content:center" },
-        h("button", { type: "button", class: "dw-btn", text: "Choose folder", onclick: function (e) { e.stopPropagation(); dirInput.click(); } }),
-        h("button", { type: "button", class: "dw-btn", text: "Choose files", onclick: function (e) { e.stopPropagation(); fileInput.click(); } }),
+        { class: "k-btnrow" },
+        h("button", { type: "button", class: "k-btn k-ghost", text: "Choose folder", onclick: function (e) { e.stopPropagation(); dirInput.click(); } }),
+        h("button", { type: "button", class: "k-btn k-ghost", text: "Choose files", onclick: function (e) { e.stopPropagation(); fileInput.click(); } }),
       ),
       dirInput,
       fileInput,
@@ -658,13 +704,30 @@ export function dropwayClient() {
         return /^(index\.html?|index\.md|readme\.md)$/i.test(it.path);
       });
       clear(summary);
+      clear(chosen);
+      chosen.hidden = !keep.length;
       if (keep.length) {
         add(
           summary,
-          h("span", { style: "color:var(--fg);font-weight:600", text: zip ? "1 zip file · " + bytes(total) + " (unpacked on the server)" : plural(keep.length, "file") + " · " + bytes(total) }),
-          !zip && keep.length > 1 ? (hasIndex ? " · has an index page" : " · no index.html: the site root will list the files") : "",
-          skipped.length ? h("div", { text: "Skipped " + plural(skipped.length, "file") + ": " + skipped.slice(0, 5).join(", ") + (skipped.length > 5 ? "…" : "") }) : null,
+          h("strong", { text: zip ? "1 zip file · " + bytes(total) + " (unpacked on the server)" : plural(keep.length, "file") + " · " + bytes(total) }),
+          !zip && keep.length > 1 && hasIndex ? " · has an index page" : "",
+          !zip && keep.length > 1 && !hasIndex ? h("p", { class: "k-fwarn", text: "No index.html: the site root will list the files." }) : null,
+          skipped.length ? h("p", { class: "k-small", text: "Skipped " + plural(skipped.length, "file") + ": " + skipped.slice(0, 5).join(", ") + (skipped.length > 5 ? "…" : "") }) : null,
         );
+        keep.slice(0, 6).forEach(function (it) {
+          var folder = it.path.indexOf("/") > 0;
+          add(
+            chosen,
+            h(
+              "li",
+              { class: "k-frow" },
+              h("span", { class: "k-thumb", "aria-hidden": "true" }, h("span", { class: "k-th-doc" }, h("i"), h("b"), h("b", { class: "k-s" }))),
+              h("span", {}, h("span", { class: "k-fname", text: it.path }), h("span", { class: "k-fmeta", text: bytes(it.file.size) + (folder ? " · in a folder" : "") })),
+              h("span"),
+            ),
+          );
+        });
+        if (keep.length > 6) add(chosen, h("li", { class: "k-frow" }, h("span"), h("span", { class: "k-small", text: "and " + plural(keep.length - 6, "more file") }), h("span")));
       } else if (skipped.length) add(summary, "Every file was skipped: " + skipped.slice(0, 5).join(", "));
       publishBtn.disabled = !keep.length || state.busy;
       clearBtn.hidden = !keep.length;
@@ -673,21 +736,15 @@ export function dropwayClient() {
     zone.addEventListener("click", function () {
       dirInput.click();
     });
-    zone.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        dirInput.click();
-      }
-    });
     ["dragenter", "dragover"].forEach(function (t) {
       zone.addEventListener(t, function (e) {
         e.preventDefault();
-        zone.classList.add("over");
+        zone.classList.add("k-over");
       });
     });
     ["dragleave", "drop"].forEach(function (t) {
       zone.addEventListener(t, function () {
-        zone.classList.remove("over");
+        zone.classList.remove("k-over");
       });
     });
     zone.addEventListener("drop", async function (e) {
@@ -813,29 +870,30 @@ export function dropwayClient() {
         result,
         h(
           "div",
-          { class: "dw-callout", role: "status" },
-          h("strong", { text: r.unchanged ? "Nothing changed: the live version already has exactly these files." : "Live" + (r.version && r.version.number ? " as v" + r.version.number : "") + "." }),
+          { class: "k-keyout", role: "status" },
+          h("span", { class: "k-k", text: r.unchanged ? "Unchanged" : "Published" }),
+          h("strong", { text: r.unchanged ? "Nothing changed: the live version already has exactly these files." : "It's live" + (r.version && r.version.number ? " as v" + r.version.number : "") + "." }),
           url
-            ? h("div", { class: "dw-secret" }, h("code", {}, h("a", { href: url, target: "_blank", rel: "noopener", text: url })), copyButton(url, "Copy URL"))
+            ? h("div", { class: "k-keyout-row" }, h("code", {}, h("a", { href: url, target: "_blank", rel: "noopener", text: url })), copyButton(url, "Copy URL"))
             : null,
           h(
             "div",
-            { class: "dw-row" },
-            url ? h("a", { class: "dw-btn", href: url, target: "_blank", rel: "noopener", text: "Open site" }) : null,
-            h("a", { class: "dw-btn", href: "/v/" + encodeURIComponent(r.slug) + "/", text: "Browse files" }),
-            key ? h("a", { class: "dw-btn", href: "/dashboard/sites/" + encodeURIComponent(r.slug), text: "Manage" }) : null,
+            { class: "k-btnrow" },
+            url ? h("a", { class: "k-btn", href: url, target: "_blank", rel: "noopener", text: "Open site" }) : null,
+            h("a", { class: "k-btn k-ghost", href: "/v/" + encodeURIComponent(r.slug) + "/", text: "Browse files" }),
+            key ? h("a", { class: "k-btn k-ghost", href: "/dashboard/sites/" + encodeURIComponent(r.slug), text: "Manage" }) : null,
           ),
           r.warnings && r.warnings.length
-            ? h("ul", { class: "dw-small" }, r.warnings.map(function (w) {
+            ? h("ul", { class: "k-small" }, r.warnings.map(function (w) {
                 return h("li", { text: w.message });
               }))
             : null,
           r.claimToken
             ? h(
                 "div",
-                { class: "dw-small", style: "margin-top:.6rem" },
-                "Anonymous site: it expires " + (r.expiresAt ? new Date(r.expiresAt).toLocaleString() : "soon") + ". Keep it with the claim token (shown once): ",
-                h("div", { class: "dw-secret" }, h("code", { text: r.claimToken }), copyButton(r.claimToken, "Copy claim token")),
+                { class: "k-small" },
+                h("p", { text: "Anonymous site: it expires " + (r.expiresAt ? localTime(r.expiresAt) : "soon") + ". Keep it with the claim token (shown once):" }),
+                h("div", { class: "k-keyout-row" }, h("code", { text: r.claimToken }), copyButton(r.claimToken, "Copy claim token")),
               )
             : null,
         ),
@@ -865,14 +923,14 @@ export function dropwayClient() {
 
     publishBtn.addEventListener("click", run);
     var target = anonymous
-      ? h("p", { class: "dw-small dw-muted", text: "You are not signed in: this instance allows anonymous sites. They expire unless claimed with an API key." })
+      ? h("p", { class: "k-small", text: "You are not signed in: this instance allows anonymous sites. They expire unless claimed with an API key." })
       : h(
           "fieldset",
-          { style: "border:0;padding:0;margin:0 0 .9rem" },
-          h("legend", { class: "dw-label", text: "Publish to" }),
-          h("div", { class: "dw-grid2" },
-            h("label", { class: "dw-check" }, modeNew, h("span", {}, "A new site", h("span", { class: "dw-sub" }, "Name (optional)"), slugInput)),
-            h("label", { class: "dw-check" }, modeUpd, h("span", { style: "flex:1" }, "A new version of", h("span", { class: "dw-sub" }, "Site"), siteSelect)),
+          { class: "k-plain" },
+          h("legend", { class: "k-label", text: "Publish to" }),
+          h("div", { class: "k-two" },
+            h("div", { class: "k-group" }, h("label", { class: "k-tog" }, modeNew, h("span", { text: "A new site" })), h("label", { class: "k-sub", for: "dw-pub-slug", text: "Name (optional)" }), slugInput),
+            h("div", { class: "k-group" }, h("label", { class: "k-tog" }, modeUpd, h("span", { text: "A new version of" })), h("label", { class: "k-sub", for: "dw-pub-site", text: "Site" }), siteSelect),
           ),
         );
     slugInput.addEventListener("focus", function () {
@@ -884,9 +942,10 @@ export function dropwayClient() {
     add(
       root,
       target,
-      opts.compact ? null : h("div", { class: "dw-field" }, h("label", { class: "dw-label", for: "dw-pub-msg", text: "Message" }), message),
+      opts.compact ? null : h("div", { class: "k-group" }, h("label", { class: "k-label", for: "dw-pub-msg", text: "Message" }), message),
       zone,
-      h("div", { class: "dw-row", style: "justify-content:space-between;margin-top:.75rem" }, summary, h("div", { class: "dw-row" }, clearBtn, publishBtn)),
+      chosen,
+      h("div", { class: "k-pubbar" }, summary, h("div", { class: "k-btnrow" }, clearBtn, publishBtn)),
       progress,
       status,
       result,
@@ -904,7 +963,7 @@ export function dropwayClient() {
     var cta = d.getElementById("dw-home-cta");
     if (cta && m) {
       clear(cta);
-      add(cta, h("a", { class: "dw-btn primary", href: "/dashboard", text: "Open dashboard" }), h("a", { class: "dw-btn", href: "/dashboard/keys", text: "API keys" }));
+      add(cta, h("a", { class: "k-btn", href: "/dashboard", text: "Open dashboard" }), h("a", { class: "k-btn k-ghost", href: "/dashboard/keys", text: "API keys" }));
     }
     var quick = d.getElementById("dw-quick");
     if (quick) mountPublisher(quick, { compact: true });
@@ -916,8 +975,8 @@ export function dropwayClient() {
     var next = safeNext(params.get("next"));
     var note = d.getElementById("dw-login-note");
     if (note && params.get("expired")) add(note, errorBox({ message: "Your key was rejected (revoked or expired). Sign in again." }));
-    if (note && params.get("signedout")) add(note, h("div", { class: "dw-callout", role: "status", text: "Signed out. The key was removed from this browser." }));
-    if (note && params.get("retry")) add(note, h("div", { class: "dw-callout", role: "status", text: "The page was still loading. Nothing was sent anywhere else; please sign in again." }));
+    if (note && params.get("signedout")) add(note, h("div", { class: "k-banner", role: "status", text: "Signed out. The key was removed from this browser." }));
+    if (note && params.get("retry")) add(note, h("div", { class: "k-banner", role: "status", text: "The page was still loading. Nothing was sent anywhere else; please sign in again." }));
     var form = d.getElementById("dw-signin");
     if (form) {
       form.addEventListener("submit", async function (e) {
@@ -947,7 +1006,7 @@ export function dropwayClient() {
       if (!f) return;
       f.addEventListener("submit", async function (e) {
         e.preventDefault();
-        var out = f.querySelector(".dw-out");
+        var out = f.querySelector("[data-out]");
         clear(out);
         var btn = f.querySelector("button[type=submit]");
         btn.disabled = true;
@@ -956,7 +1015,7 @@ export function dropwayClient() {
           var k = res.apiKey.key;
           f.elements.secret.value = "";
           // The job of this form is done: leave only the key and the way on.
-          $$(".dw-field, .dw-grid2, button[type=submit]", f).forEach(function (x) {
+          $$(".k-group, .k-two, button[type=submit]", f).forEach(function (x) {
             x.hidden = true;
           });
           add(
@@ -964,7 +1023,7 @@ export function dropwayClient() {
             secretBlock(label, k, "Shown once. Store it in your password manager; agents use it as Authorization: Bearer <key>."),
             h("button", {
               type: "button",
-              class: "dw-btn primary",
+              class: "k-btn",
               text: "I saved it. Continue",
               onclick: function () {
                 setKey(k, false);
@@ -994,35 +1053,34 @@ export function dropwayClient() {
 
   function siteRow(s) {
     var v = s.currentVersion;
-    var badges = [];
-    if (s.settings && s.settings.passwordProtected) badges.push(h("span", { class: "dw-badge warn", text: "Password" }));
-    if (s.settings && s.settings.spa) badges.push(h("span", { class: "dw-badge", text: "SPA" }));
-    if (s.expiresAt) badges.push(h("span", { class: "dw-badge warn", title: s.expiresAt, text: "Expires " + new Date(s.expiresAt).toLocaleDateString() }));
-    if (!v) badges.push(h("span", { class: "dw-badge", text: "Empty" }));
+    var chips = [];
+    if (v) chips.push(h("span", { class: "k-chip k-ok", text: "Live" }));
+    else chips.push(h("span", { class: "k-chip", text: "Empty" }));
+    if (s.settings && s.settings.passwordProtected) chips.push(h("span", { class: "k-chip k-warn", text: "Password" }));
+    if (s.settings && s.settings.spa) chips.push(h("span", { class: "k-chip", text: "SPA" }));
+    if (s.expiresAt) chips.push(h("span", { class: "k-chip k-warn", title: s.expiresAt, text: "Expires " + localTime(s.expiresAt) }));
     return h(
       "tr",
       { "data-search": [s.slug, s.title || "", s.description || ""].join(" ").toLowerCase() },
       h(
         "td",
         {},
-        h("a", { class: "dw-title", href: "/dashboard/sites/" + encodeURIComponent(s.slug), text: s.title || s.slug }),
-        " ",
-        badges,
-        s.title ? h("span", { class: "dw-sub dw-mono", text: s.slug }) : null,
+        h("a", { class: "k-title", href: "/dashboard/sites/" + encodeURIComponent(s.slug), text: s.title || s.slug }),
+        s.title ? h("span", { class: "k-sub k-mono", text: s.slug }) : null,
+        h("span", { class: "k-chips k-rowchips" }, chips),
       ),
       h(
         "td",
-        { class: "dw-hide-sm" },
-        h("span", { class: "dw-url" }, h("a", { href: s.url, target: "_blank", rel: "noopener", class: "dw-small", text: s.url.replace(/^https?:\/\//, "") }), copyButton(s.url, "Copy URL of " + s.slug)),
+        { class: "k-hide-sm" },
+        h("span", { class: "k-url" }, h("a", { href: s.url, target: "_blank", rel: "noopener", class: "k-small", text: s.url.replace(/^https?:\/\//, "") }), copyButton(s.url, "Copy URL of " + s.slug)),
       ),
-      h("td", { class: "num dw-small" }, v ? "v" + v.number : "–", h("span", { class: "dw-sub", text: v ? plural(v.fileCount, "file") + " · " + bytes(v.totalBytes) : "" })),
-      h("td", { class: "num dw-small dw-muted dw-hide-sm", title: s.updatedAt, text: ago(s.updatedAt) }),
+      h("td", { class: "k-num k-small" }, v ? "v" + v.number : "–", h("span", { class: "k-sub", text: v ? plural(v.fileCount, "file") + " · " + bytes(v.totalBytes) : "" })),
+      h("td", { class: "k-num k-small k-hide-sm", title: s.updatedAt, text: ago(s.updatedAt) }),
       h(
         "td",
-        { class: "act" },
-        h("a", { class: "dw-btn small", href: "/v/" + encodeURIComponent(s.slug) + "/", text: "Files" }),
-        " ",
-        h("a", { class: "dw-btn small", href: s.url, target: "_blank", rel: "noopener", text: "Open" }),
+        { class: "k-act" },
+        h("a", { class: "k-btn k-sm k-ghost", href: "/v/" + encodeURIComponent(s.slug) + "/", text: "Files", "aria-label": "Files of " + s.slug }),
+        h("a", { class: "k-btn k-sm k-ghost", href: s.url, target: "_blank", rel: "noopener", text: "Open", "aria-label": "Open " + s.slug }),
       ),
     );
   }
@@ -1030,24 +1088,27 @@ export function dropwayClient() {
   pages.sites = async function () {
     if (!requireAuth()) return;
     renderAccount();
+    var params = new URLSearchParams(location.search);
+    if (params.get("deleted")) toast(params.get("deleted") + " was deleted.");
     var root = d.getElementById("dw-sites");
     var count = d.getElementById("dw-sites-count");
-    var search = h("input", { class: "dw-input", type: "search", placeholder: "Filter by name or title", "aria-label": "Filter sites" });
+    var search = h("input", { class: "k-input k-find", type: "search", placeholder: "Filter by name or title", "aria-label": "Filter sites" });
     var tbody = h("tbody");
-    var more = h("button", { type: "button", class: "dw-btn", text: "Load more", hidden: true });
+    var more = h("button", { type: "button", class: "k-btn k-ghost", text: "Load more", hidden: true });
+    var nomatch = h("p", { class: "k-pad k-small", role: "status", hidden: true, text: "No site matches that filter." });
     var table = h(
       "div",
-      { class: "dw-scroll" },
+      { class: "k-table-wrap" },
       h(
         "table",
-        { class: "dw-table" },
-        h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Site" }), h("th", { scope: "col", class: "dw-hide-sm", text: "URL" }), h("th", { scope: "col", class: "num", text: "Live" }), h("th", { scope: "col", class: "num dw-hide-sm", text: "Updated" }), h("th", { scope: "col" }))),
+        { class: "k-table" },
+        h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Site" }), h("th", { scope: "col", class: "k-hide-sm", text: "URL" }), h("th", { scope: "col", class: "k-num", text: "Live" }), h("th", { scope: "col", class: "k-num k-hide-sm", text: "Updated" }), h("th", { scope: "col" }, h("span", { class: "k-sr", text: "Actions" })))),
         tbody,
       ),
     );
     var body = h("div", {}, skeleton(4));
     clear(root);
-    add(root, h("section", { class: "dw-section" }, h("header", {}, h("h2", { text: "All sites" }), search), body, h("div", { class: "dw-pad", style: "text-align:center", hidden: true }, more)));
+    add(root, blk("All sites", search, body, nomatch, h("div", { class: "k-pad k-center", hidden: true }, more)));
     var cursor = null;
     var loaded = 0;
     async function load() {
@@ -1059,12 +1120,13 @@ export function dropwayClient() {
             body,
             h(
               "div",
-              { class: "dw-empty", role: "status" },
+              { class: "k-empty", role: "status" },
               h("h3", { text: "No sites yet" }),
               h("p", { text: "Publish a folder from this browser, or let an agent publish with the API, CLI or MCP." }),
-              h("a", { class: "dw-btn primary", href: "/dashboard/publish", text: "Publish a folder" }),
+              h("a", { class: "k-btn", href: "/dashboard/publish", text: "Publish a folder" }),
             ),
           );
+          search.hidden = true;
           if (count) count.textContent = "No sites yet.";
           return;
         }
@@ -1079,14 +1141,17 @@ export function dropwayClient() {
         more.hidden = !cursor;
       } catch (e) {
         clear(body);
-        add(body, h("div", { class: "dw-pad" }, errorBox(e, "Could not load sites")));
+        add(body, h("div", { class: "k-pad" }, errorBox(e, "Could not load sites")));
       }
     }
     search.addEventListener("input", function () {
       var q = search.value.trim().toLowerCase();
+      var shown = 0;
       $$("tr[data-search]", tbody).forEach(function (tr) {
         tr.hidden = q && tr.getAttribute("data-search").indexOf(q) < 0;
+        if (!tr.hidden) shown++;
       });
+      nomatch.hidden = !q || shown > 0;
     });
     more.addEventListener("click", load);
     load();
@@ -1106,52 +1171,55 @@ export function dropwayClient() {
       versions = r[1].versions;
     } catch (e) {
       clear(root);
-      add(root, errorBox(e, "Could not load " + slug), h("a", { class: "dw-btn", href: "/dashboard", text: "Back to sites" }));
+      add(root, errorBox(e, "Could not load " + slug), h("a", { class: "k-btn k-ghost", href: "/dashboard", text: "Back to sites" }));
       return;
     }
     d.title = (site.title || site.slug) + " · " + boot.instanceName;
     clear(root);
-    var filesSection = h("section", { class: "dw-section", id: "files" });
+    var filesSection = h("section", { class: "k-blk", id: "files", "aria-label": "Files" });
     var head = h(
       "div",
-      { class: "dw-pagehead" },
+      { class: "k-pagehead" },
       h(
         "div",
-        { style: "min-width:0" },
-        h("h1", { class: "dw-h1", text: site.title || site.slug }),
-        h("p", {}, h("span", { class: "dw-url" }, h("a", { href: site.url, target: "_blank", rel: "noopener", text: site.url }), copyButton(site.url, "Copy site URL"))),
+        {},
+        h("h1", { text: site.title || site.slug }),
+        h("p", {}, h("span", { class: "k-url" }, h("a", { href: site.url, target: "_blank", rel: "noopener", text: site.url }), copyButton(site.url, "Copy site URL"))),
         site.description ? h("p", { text: site.description }) : null,
       ),
       h(
         "div",
-        { class: "dw-row" },
-        h("a", { class: "dw-btn", href: "/v/" + encodeURIComponent(slug) + "/", text: "Browse files" }),
-        h("a", { class: "dw-btn", href: "/dashboard/publish?site=" + encodeURIComponent(slug), text: "Publish update" }),
-        h("a", { class: "dw-btn primary", href: site.url, target: "_blank", rel: "noopener", text: "Open site" }),
+        { class: "k-btnrow" },
+        h("a", { class: "k-btn k-ghost", href: "/v/" + encodeURIComponent(slug) + "/", text: "Browse files" }),
+        h("a", { class: "k-btn k-ghost", href: "/dashboard/publish?site=" + encodeURIComponent(slug), text: "Publish update" }),
+        h("a", { class: "k-btn", href: site.url, target: "_blank", rel: "noopener", text: "Open site" }),
       ),
     );
 
-    var vBody = h("tbody");
+    var vList = h("ol", { class: "k-versions", "aria-label": "Versions, newest first" });
     versions.forEach(function (v) {
-      vBody.appendChild(
+      vList.appendChild(
         h(
-          "tr",
-          {},
-          h("td", {}, h("strong", { text: "v" + v.number }), " ", v.live ? h("span", { class: "dw-badge live", text: "Live" }) : null),
-          h("td", { class: "dw-small" }, v.message ? h("span", { text: v.message }) : h("span", { class: "dw-muted", text: "No message" }), h("span", { class: "dw-sub", text: [v.client, v.source].filter(Boolean).join(" · ") })),
-          h("td", { class: "num dw-small" }, plural(v.fileCount, "file"), h("span", { class: "dw-sub", text: bytes(v.totalBytes) })),
-          h("td", { class: "num dw-small dw-muted dw-hide-sm", title: v.finalizedAt || v.createdAt, text: ago(v.finalizedAt || v.createdAt) }),
+          "li",
+          { "aria-current": v.live ? "true" : null },
+          h("span", { class: "k-vn", text: "v" + v.number }),
           h(
-            "td",
-            { class: "act" },
-            h("button", { type: "button", class: "dw-btn small", text: "Files", onclick: function () { showFiles(v); filesSection.scrollIntoView({ behavior: "smooth" }); } }),
-            " ",
+            "div",
+            { class: "k-vmsg" },
+            h("span", { class: "k-chips" }, v.live ? h("span", { class: "k-chip k-ok", text: "Live" }) : null, h("span", { class: v.message ? null : "k-muted", text: v.message || "No message" })),
+            h("span", { class: "k-sub", title: v.finalizedAt || v.createdAt, text: [plural(v.fileCount, "file") + " · " + bytes(v.totalBytes), ago(v.finalizedAt || v.createdAt), v.client, v.source].filter(Boolean).join(" · ") }),
+          ),
+          h(
+            "div",
+            { class: "k-act" },
+            h("button", { type: "button", class: "k-btn k-sm k-ghost", text: "Files", "aria-label": "Files in version " + v.number, onclick: function () { showFiles(v); filesSection.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth" }); } }),
             v.live
               ? null
               : h("button", {
                   type: "button",
-                  class: "dw-btn small",
+                  class: "k-btn k-sm k-ghost",
                   text: "Restore",
+                  "aria-label": "Restore version " + v.number,
                   onclick: async function (ev) {
                     var btn = ev.currentTarget;
                     btn.disabled = true;
@@ -1165,12 +1233,11 @@ export function dropwayClient() {
                     }
                   },
                 }),
-            " ",
             v.live
               ? null
               : h("button", {
                   type: "button",
-                  class: "dw-btn small danger",
+                  class: "k-btn k-sm k-danger",
                   text: "Delete",
                   "aria-label": "Delete version " + v.number,
                   onclick: async function () {
@@ -1189,41 +1256,40 @@ export function dropwayClient() {
         ),
       );
     });
-    var versionsSection = h(
-      "section",
-      { class: "dw-section" },
-      h("header", {}, h("h2", { text: "Versions" }), h("span", { class: "dw-small dw-muted", text: plural(versions.length, "version") + ". Restoring is instant: it only moves the live pointer." })),
+    var versionsSection = blk(
+      "Versions",
+      h("span", { class: "k-small", text: plural(versions.length, "version") + ". Restoring is instant: it only moves the live pointer." }),
       versions.length
-        ? h("div", { class: "dw-scroll" }, h("table", { class: "dw-table" }, h("thead", {}, h("tr", {}, h("th", { text: "Version" }), h("th", { text: "Message" }), h("th", { class: "num", text: "Files" }), h("th", { class: "num dw-hide-sm", text: "Published" }), h("th", {}))), vBody))
-        : h("div", { class: "dw-empty" }, h("h3", { text: "Nothing published yet" }), h("a", { class: "dw-btn primary", href: "/dashboard/publish?site=" + encodeURIComponent(slug), text: "Publish files" })),
+        ? vList
+        : h("div", { class: "k-empty" }, h("h3", { text: "Nothing published yet" }), h("p", { text: "This site exists but has no live version yet." }), h("a", { class: "k-btn", href: "/dashboard/publish?site=" + encodeURIComponent(slug), text: "Publish files" })),
     );
 
     async function showFiles(v) {
       clear(filesSection);
-      add(filesSection, h("header", {}, h("h2", { text: "Files in v" + v.number + (v.live ? " (live)" : "") })), skeleton(3));
+      add(filesSection, h("div", { class: "k-blk-h" }, h("h2", { text: "Files in v" + v.number + (v.live ? " (live)" : "") })), skeleton(3));
       try {
         files = await api("/sites/" + encodeURIComponent(slug) + "/files" + (v.live ? "" : "?version=" + encodeURIComponent(v.id)));
       } catch (e) {
         clear(filesSection);
-        add(filesSection, h("div", { class: "dw-pad" }, errorBox(e, "Could not load files")));
+        add(filesSection, h("div", { class: "k-pad" }, errorBox(e, "Could not load files")));
         return;
       }
-      var filter = h("input", { class: "dw-input", type: "search", placeholder: "Filter files", "aria-label": "Filter files" });
+      var filter = h("input", { class: "k-input k-find", type: "search", placeholder: "Filter files", "aria-label": "Filter files" });
       var tb = h("tbody");
       files.files.forEach(function (f) {
         tb.appendChild(
           h(
             "tr",
             { "data-search": f.path.toLowerCase() },
-            h("td", { class: "dw-mono" }, v.live ? h("a", { href: "/v/" + encodeURIComponent(slug) + "/" + encodePath(f.path), text: f.path }) : h("span", { text: f.path })),
-            h("td", { class: "dw-hide-sm" }, h("span", { class: "dw-badge", text: f.kind })),
-            h("td", { class: "num dw-small", text: bytes(f.size) }),
+            h("td", { class: "k-mono" }, v.live ? h("a", { href: "/v/" + encodeURIComponent(slug) + "/" + encodePath(f.path), text: f.path }) : h("span", { text: f.path })),
+            h("td", { class: "k-hide-sm" }, h("span", { class: "k-chip", text: f.kind })),
+            h("td", { class: "k-hide-sm" }, sealFor(f.path, f.sha256, { mini: true })),
+            h("td", { class: "k-num k-small", text: bytes(f.size) }),
             h(
               "td",
-              { class: "act" },
-              v.live ? h("a", { class: "dw-btn small", href: f.url, target: "_blank", rel: "noopener", text: "Open" }) : null,
-              " ",
-              h("button", { type: "button", class: "dw-btn small", text: "Download", onclick: function (ev) { downloadFile(slug, f.path, v.live ? null : v.id, ev.currentTarget); } }),
+              { class: "k-act" },
+              v.live ? h("a", { class: "k-btn k-sm k-ghost k-hide-sm", href: f.url, target: "_blank", rel: "noopener", text: "Open", "aria-label": "Open " + f.path }) : null,
+              h("button", { type: "button", class: "k-btn k-sm k-ghost", text: "Download", "aria-label": "Download " + f.path, onclick: function (ev) { downloadFile(slug, f.path, v.live ? null : v.id, ev.currentTarget); } }),
             ),
           ),
         );
@@ -1237,30 +1303,34 @@ export function dropwayClient() {
       clear(filesSection);
       add(
         filesSection,
-        h("header", {}, h("h2", { text: "Files in v" + v.number + (v.live ? " (live)" : "") }), h("div", { class: "dw-row" }, h("span", { class: "dw-small dw-muted", text: plural(files.files.length, "file") }), filter)),
-        h("div", { class: "dw-scroll" }, h("table", { class: "dw-table" }, h("thead", {}, h("tr", {}, h("th", { text: "Path" }), h("th", { class: "dw-hide-sm", text: "Kind" }), h("th", { class: "num", text: "Size" }), h("th", {}))), tb)),
-        v.live ? null : h("p", { class: "dw-pad dw-small dw-muted", style: "margin:0", text: "Older versions are not served publicly. Restore this version to view it on the site, or download single files." }),
+        h("div", { class: "k-blk-h" }, h("h2", { text: "Files in v" + v.number + (v.live ? " (live)" : "") }), h("div", { class: "k-tools" }, h("span", { class: "k-small", text: plural(files.files.length, "file") }), filter)),
+        v.live ? null : h("p", { class: "k-pad k-small", text: "Older versions are not served publicly. Restore this version to view it on the site, or download single files." }),
+        h("div", { class: "k-table-wrap" }, h("table", { class: "k-table" }, h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Path" }), h("th", { scope: "col", class: "k-hide-sm", text: "Kind" }), h("th", { scope: "col", class: "k-hide-sm", text: "Checksum" }), h("th", { scope: "col", class: "k-num", text: "Size" }), h("th", { scope: "col" }, h("span", { class: "k-sr", text: "Actions" })))), tb)),
       );
     }
 
     var s = site.settings;
     var form = h(
       "form",
-      { class: "dw-pad" },
-      h("div", { class: "dw-grid2" },
-        h("div", { class: "dw-field" }, h("label", { class: "dw-label", for: "dw-s-title", text: "Title" }), h("input", { class: "dw-input", id: "dw-s-title", name: "title", maxlength: "200", value: site.title || "" })),
-        h("div", { class: "dw-field" }, h("label", { class: "dw-label", for: "dw-s-desc", text: "Description" }), h("input", { class: "dw-input", id: "dw-s-desc", name: "description", maxlength: "2000", value: site.description || "" })),
+      { class: "k-pad" },
+      h("div", { class: "k-two" },
+        h("div", { class: "k-group" }, h("label", { class: "k-label", for: "dw-s-title", text: "Title" }), h("input", { class: "k-input", id: "dw-s-title", name: "title", maxlength: "200", value: site.title || "" })),
+        h("div", { class: "k-group" }, h("label", { class: "k-label", for: "dw-s-desc", text: "Description" }), h("input", { class: "k-input", id: "dw-s-desc", name: "description", maxlength: "2000", value: site.description || "" })),
       ),
-      h("label", { class: "dw-check" }, h("input", { type: "checkbox", name: "spa", checked: s.spa }), h("span", {}, "Single-page app", h("span", { class: "dw-sub", text: "Unknown paths serve index.html (client-side routing)." }))),
-      h("label", { class: "dw-check" }, h("input", { type: "checkbox", name: "renderMarkdown", checked: s.renderMarkdown }), h("span", {}, "Render Markdown", h("span", { class: "dw-sub", text: "Browsers see .md files as pages; off serves the raw text." }))),
-      h("label", { class: "dw-check" }, h("input", { type: "checkbox", name: "crossOriginIsolation", checked: s.crossOriginIsolation }), h("span", {}, "Cross-origin isolation", h("span", { class: "dw-sub", text: "Sends COOP/COEP so threaded WebAssembly (SharedArrayBuffer) works. Cross-origin embeds then need CORP." }))),
-      h("div", { class: "dw-field", style: "margin-top:.9rem" },
-        h("label", { class: "dw-label", for: "dw-s-pw", text: s.passwordProtected ? "Password (set; type a new one to change it)" : "Password (optional)" }),
-        h("div", { class: "dw-row" }, h("input", { class: "dw-input", id: "dw-s-pw", name: "password", type: "password", autocomplete: "new-password", minlength: "4", maxlength: "200", style: "max-width:18rem" }),
-          s.passwordProtected ? h("button", { type: "button", class: "dw-btn", text: "Remove password", onclick: async function () { await saveSettings({ password: null }, "Password removed."); } }) : null),
-        h("p", { class: "dw-help", text: "Visitors must enter it. Changing it signs everyone out." }),
+      h(
+        "div",
+        { class: "k-toggles" },
+        h("label", { class: "k-tog" }, h("input", { type: "checkbox", name: "spa", checked: s.spa }), h("span", {}, "Single-page app", h("span", { class: "k-sub", text: "Unknown paths serve index.html (client-side routing)." }))),
+        h("label", { class: "k-tog" }, h("input", { type: "checkbox", name: "renderMarkdown", checked: s.renderMarkdown }), h("span", {}, "Render Markdown", h("span", { class: "k-sub", text: "Browsers see .md files as pages; off serves the raw text." }))),
+        h("label", { class: "k-tog" }, h("input", { type: "checkbox", name: "crossOriginIsolation", checked: s.crossOriginIsolation }), h("span", {}, "Cross-origin isolation", h("span", { class: "k-sub", text: "Sends COOP/COEP so threaded WebAssembly (SharedArrayBuffer) works. Cross-origin embeds then need CORP." }))),
       ),
-      h("div", { class: "dw-row" }, h("button", { type: "submit", class: "dw-btn primary", text: "Save settings" })),
+      h("div", { class: "k-group k-pwrow" },
+        h("label", { class: "k-label", for: "dw-s-pw", text: s.passwordProtected ? "Password (set; type a new one to change it)" : "Password (optional)" }),
+        h("div", { class: "k-field" }, h("input", { class: "k-input", id: "dw-s-pw", name: "password", type: "password", autocomplete: "new-password", minlength: "4", maxlength: "200", "aria-describedby": "dw-s-pw-hint" }),
+          s.passwordProtected ? h("button", { type: "button", class: "k-btn k-ghost", text: "Remove password", onclick: async function () { await saveSettings({ password: null }, "Password removed."); } }) : null),
+        h("p", { class: "k-hint", id: "dw-s-pw-hint", text: "Visitors must enter it. Changing it signs everyone out." }),
+      ),
+      h("div", { class: "k-btnrow" }, h("button", { type: "submit", class: "k-btn", text: "Save settings" })),
     );
     async function saveSettings(body, msg) {
       try {
@@ -1278,17 +1348,16 @@ export function dropwayClient() {
       if (f.password.value) body.password = f.password.value;
       saveSettings(body);
     });
-    var danger = h(
-      "section",
-      { class: "dw-section" },
-      h("header", {}, h("h2", { text: "Delete site" })),
+    var danger = blk(
+      "Delete site",
+      null,
       h(
         "div",
-        { class: "dw-pad dw-row", style: "justify-content:space-between" },
-        h("span", { class: "dw-small dw-muted", text: "The URL stops working at once and the name is freed. Files no other site uses are removed by the hourly cleanup." }),
+        { class: "k-pad k-spread" },
+        h("p", { class: "k-small", text: "The URL stops working at once and the name is freed. Files no other site uses are removed by the hourly cleanup." }),
         h("button", {
           type: "button",
-          class: "dw-btn danger",
+          class: "k-btn k-danger",
           text: "Delete site",
           onclick: async function () {
             var ok = await confirmBox({ title: "Delete " + slug + "?", message: "Every version goes with it. This cannot be undone from the dashboard.", confirmText: "Delete site", typeToConfirm: slug });
@@ -1303,7 +1372,7 @@ export function dropwayClient() {
         }),
       ),
     );
-    add(root, head, versionsSection, filesSection, h("section", { class: "dw-section" }, h("header", {}, h("h2", { text: "Settings" })), form), danger);
+    add(root, head, versionsSection, filesSection, blk("Settings", null, form), danger);
     var live = versions.filter(function (v) {
       return v.live;
     })[0];
@@ -1354,19 +1423,19 @@ export function dropwayClient() {
     var listBody = h("div", {}, skeleton(3));
     var showAll = can(m, "members:write") ? h("input", { type: "checkbox" }) : null;
     var scopeBoxes = m.scopes.map(function (sc) {
-      return h("label", { class: "dw-check" }, h("input", { type: "checkbox", name: "scope", value: sc, checked: true }), h("span", { class: "dw-mono", text: sc }));
+      return h("label", { class: "k-tog" }, h("input", { type: "checkbox", name: "scope", value: sc, checked: true }), h("span", { class: "k-mono", text: sc }));
     });
-    var siteSel = h("select", { class: "dw-select", name: "site", id: "dw-k-site" }, h("option", { value: "", text: m.siteRestriction ? "Same site as this key" : "All sites" }));
+    var siteSel = h("select", { class: "k-input", name: "site", id: "dw-k-site" }, h("option", { value: "", text: m.siteRestriction ? "Same site as this key" : "All sites" }));
     var form = h(
       "form",
-      { class: "dw-pad" },
-      h("div", { class: "dw-grid2" },
-        h("div", { class: "dw-field" }, h("label", { class: "dw-label", for: "dw-k-name", text: "Name" }), h("input", { class: "dw-input", id: "dw-k-name", name: "name", maxlength: "120", placeholder: "e.g. claude-code on laptop", required: true })),
-        h("div", { class: "dw-field" }, h("label", { class: "dw-label", for: "dw-k-site", text: "Limit to one site" }), siteSel),
-        h("div", { class: "dw-field" }, h("label", { class: "dw-label", for: "dw-k-exp", text: "Expires after (days)" }), h("input", { class: "dw-input", id: "dw-k-exp", name: "expires", type: "number", min: "1", max: "3650", placeholder: "never" })),
+      { class: "k-pad" },
+      h("div", { class: "k-two" },
+        h("div", { class: "k-group" }, h("label", { class: "k-label", for: "dw-k-name", text: "Name" }), h("input", { class: "k-input", id: "dw-k-name", name: "name", maxlength: "120", placeholder: "e.g. claude-code on laptop", required: true })),
+        h("div", { class: "k-group" }, h("label", { class: "k-label", for: "dw-k-site", text: "Limit to one site" }), siteSel),
+        h("div", { class: "k-group" }, h("label", { class: "k-label", for: "dw-k-exp", text: "Expires after (days)" }), h("input", { class: "k-input", id: "dw-k-exp", name: "expires", type: "number", min: "1", max: "3650", placeholder: "never" })),
       ),
-      h("fieldset", { style: "border:0;padding:0;margin:0 0 .75rem" }, h("legend", { class: "dw-label", text: "Scopes" }), h("div", { class: "dw-row", style: "gap:.25rem 1.25rem" }, scopeBoxes), h("p", { class: "dw-help", text: "A key can never hold more than the key you are signed in with." })),
-      h("button", { type: "submit", class: "dw-btn primary", text: "Create key" }),
+      h("fieldset", { class: "k-plain" }, h("legend", { class: "k-label", text: "Scopes" }), h("div", { class: "k-scopes" }, scopeBoxes), h("p", { class: "k-hint", text: "A key can never hold more than the key you are signed in with." })),
+      h("button", { type: "submit", class: "k-btn", text: "Create key" }),
     );
     form.addEventListener("submit", async function (e) {
       e.preventDefault();
@@ -1382,7 +1451,7 @@ export function dropwayClient() {
         add(
           created,
           secretBlock("Key “" + (k.name || k.prefix) + "” created", k.key, "Shown once. Give it to the agent or person as KOFRA_API_KEY."),
-          h("pre", { class: "dw-snippet", text: "export KOFRA_URL=" + boot.origin + "\nexport KOFRA_API_KEY=" + k.key }),
+          h("div", { class: "k-codeblock" }, h("div", { class: "k-codeblock-h" }, h("span", { class: "k-k", text: "Environment" })), h("pre", { tabindex: "0", text: "export KOFRA_URL=" + boot.origin + "\nexport KOFRA_API_KEY=" + k.key })),
         );
         form.reset();
         loadKeys();
@@ -1392,13 +1461,8 @@ export function dropwayClient() {
     });
     add(
       root,
-      h("section", { class: "dw-section" }, h("header", {}, h("h2", { text: "Create a key" }), h("span", { class: "dw-small dw-muted", text: "One key per agent or person makes revoking easy." })), form, h("div", { class: "dw-pad", style: "padding-top:0" }, created)),
-      h(
-        "section",
-        { class: "dw-section" },
-        h("header", {}, h("h2", { text: "Active keys" }), showAll ? h("label", { class: "dw-check", style: "margin:0" }, showAll, h("span", { class: "dw-small", text: "Every member's keys" })) : null),
-        listBody,
-      ),
+      blk("Create a key", h("span", { class: "k-small", text: "One key per agent or person makes revoking easy." }), form, h("div", { class: "k-pad k-pad-flush" }, created)),
+      blk("Active keys", showAll ? h("label", { class: "k-tog" }, showAll, h("span", { text: "Every member's keys" })) : null, listBody),
     );
     if (showAll) showAll.addEventListener("change", loadKeys);
     api("/sites?limit=200")
@@ -1413,7 +1477,7 @@ export function dropwayClient() {
         var res = await api("/keys" + (showAll && showAll.checked ? "?all=1" : ""));
         clear(listBody);
         if (!res.keys.length) {
-          add(listBody, h("div", { class: "dw-empty", text: "No active keys." }));
+          add(listBody, h("div", { class: "k-empty", role: "status" }, h("h3", { text: "No active keys" }), h("p", { text: "Create one above for each agent or person." })));
           return;
         }
         var tb = h("tbody");
@@ -1422,18 +1486,18 @@ export function dropwayClient() {
             h(
               "tr",
               {},
-              h("td", {}, h("strong", { text: k.name || "Unnamed" }), " ", k.current ? h("span", { class: "dw-badge accent", text: "This browser" }) : null, h("span", { class: "dw-sub dw-mono", text: k.prefix + "…" })),
-              h("td", { class: "dw-small" }, k.scopes.map(function (sc) {
-                return h("span", { class: "dw-badge", style: "margin:0 .2rem .2rem 0", text: sc });
-              }), k.siteId ? h("span", { class: "dw-sub", text: "One site only" }) : null),
-              h("td", { class: "num dw-small dw-muted dw-hide-sm" }, h("span", { title: k.createdAt, text: "Created " + ago(k.createdAt) }), h("span", { class: "dw-sub", text: k.lastUsedAt ? "Used " + ago(k.lastUsedAt) : "Never used" })),
-              h("td", { class: "num dw-small dw-hide-sm", text: k.expiresAt ? "Expires " + new Date(k.expiresAt).toLocaleDateString() : "No expiry" }),
+              h("td", {}, h("strong", { text: k.name || "Unnamed" }), k.current ? h("span", { class: "k-chips k-rowchips" }, h("span", { class: "k-chip k-accent", text: "This browser" })) : null, h("span", { class: "k-sub k-mono", text: k.prefix + "…" })),
+              h("td", {}, h("span", { class: "k-chips" }, k.scopes.map(function (sc) {
+                return h("span", { class: "k-chip", text: sc });
+              })), k.siteId ? h("span", { class: "k-sub", text: "One site only" }) : null),
+              h("td", { class: "k-num k-small k-hide-sm" }, h("span", { title: localTime(k.createdAt), text: "Created " + ago(k.createdAt) }), h("span", { class: "k-sub", title: k.lastUsedAt ? localTime(k.lastUsedAt) : null, text: k.lastUsedAt ? "Used " + ago(k.lastUsedAt) : "Never used" })),
+              h("td", { class: "k-num k-small k-hide-sm", text: k.expiresAt ? "Expires " + localTime(k.expiresAt) : "No expiry" }),
               h(
                 "td",
-                { class: "act" },
+                { class: "k-act" },
                 h("button", {
                   type: "button",
-                  class: "dw-btn small danger",
+                  class: "k-btn k-sm k-danger",
                   text: "Revoke",
                   "aria-label": "Revoke key " + (k.name || k.prefix),
                   onclick: async function () {
@@ -1461,10 +1525,10 @@ export function dropwayClient() {
             ),
           );
         });
-        add(listBody, h("div", { class: "dw-scroll" }, h("table", { class: "dw-table" }, h("thead", {}, h("tr", {}, h("th", { text: "Key" }), h("th", { text: "Scopes" }), h("th", { class: "num dw-hide-sm", text: "Activity" }), h("th", { class: "num dw-hide-sm", text: "Expiry" }), h("th", {}))), tb)));
+        add(listBody, h("div", { class: "k-table-wrap" }, h("table", { class: "k-table" }, h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Key" }), h("th", { scope: "col", text: "Scopes" }), h("th", { scope: "col", class: "k-num k-hide-sm", text: "Activity" }), h("th", { scope: "col", class: "k-num k-hide-sm", text: "Expiry" }), h("th", { scope: "col" }, h("span", { class: "k-sr", text: "Actions" })))), tb)));
       } catch (e) {
         clear(listBody);
-        add(listBody, h("div", { class: "dw-pad" }, errorBox(e, "Could not load keys")));
+        add(listBody, h("div", { class: "k-pad" }, errorBox(e, "Could not load keys")));
       }
     }
     loadKeys();
@@ -1480,10 +1544,10 @@ export function dropwayClient() {
         acct,
         h(
           "dl",
-          { class: "dw-kv" },
+          { class: "k-kv" },
           h("dt", { text: "Signed in as" }), h("dd", { text: m.member.email || m.member.name || m.member.id }),
           h("dt", { text: "Role" }), h("dd", { text: m.member.role }),
-          h("dt", { text: "Key scopes" }), h("dd", { class: "dw-mono", text: m.scopes.join(" ") }),
+          h("dt", { text: "Key scopes" }), h("dd", { class: "k-mono", text: m.scopes.join(" ") }),
           h("dt", { text: "Key limited to a site" }), h("dd", { text: m.siteRestriction ? "yes" : "no" }),
         ),
       );
@@ -1498,11 +1562,11 @@ export function dropwayClient() {
     var list = h("div", {}, skeleton(2));
     var form = h(
       "form",
-      { class: "dw-row", style: "align-items:flex-end" },
-      h("div", { style: "flex:1 1 14rem" }, h("label", { class: "dw-label", for: "dw-m-email", text: "Email" }), h("input", { class: "dw-input", id: "dw-m-email", name: "email", type: "email", required: true })),
-      h("div", { style: "flex:1 1 10rem" }, h("label", { class: "dw-label", for: "dw-m-name", text: "Name" }), h("input", { class: "dw-input", id: "dw-m-name", name: "name" })),
-      h("div", {}, h("label", { class: "dw-label", for: "dw-m-role", text: "Role" }), h("select", { class: "dw-select", id: "dw-m-role", name: "role" }, h("option", { value: "member", text: "Member" }), h("option", { value: "admin", text: "Admin" }), m.member.role === "owner" ? h("option", { value: "owner", text: "Owner" }) : null)),
-      h("button", { type: "submit", class: "dw-btn primary", text: "Add member" }),
+      { class: "k-inline", "aria-label": "Add a member" },
+      h("div", { class: "k-group" }, h("label", { class: "k-label", for: "dw-m-email", text: "Email" }), h("input", { class: "k-input", id: "dw-m-email", name: "email", type: "email", required: true })),
+      h("div", { class: "k-group" }, h("label", { class: "k-label", for: "dw-m-name", text: "Name" }), h("input", { class: "k-input", id: "dw-m-name", name: "name" })),
+      h("div", { class: "k-group" }, h("label", { class: "k-label", for: "dw-m-role", text: "Role" }), h("select", { class: "k-input", id: "dw-m-role", name: "role" }, h("option", { value: "member", text: "Member" }), h("option", { value: "admin", text: "Admin" }), m.member.role === "owner" ? h("option", { value: "owner", text: "Owner" }) : null)),
+      h("button", { type: "submit", class: "k-btn", text: "Add member" }),
     );
     form.addEventListener("submit", async function (e) {
       e.preventDefault();
@@ -1517,7 +1581,7 @@ export function dropwayClient() {
       }
     });
     clear(mem);
-    add(mem, list, h("div", { class: "dw-pad" }, form, out));
+    add(mem, list, h("div", { class: "k-pad" }, form, out));
     async function loadMembers() {
       try {
         var res = await api("/members");
@@ -1528,18 +1592,19 @@ export function dropwayClient() {
             h(
               "tr",
               {},
-              h("td", {}, h("strong", { text: x.email || x.name || x.id }), x.name && x.email ? h("span", { class: "dw-sub", text: x.name }) : null),
-              h("td", {}, h("span", { class: "dw-badge" + (x.role === "owner" ? " accent" : ""), text: x.role })),
-              h("td", { class: "num dw-small dw-muted dw-hide-sm", text: "Added " + ago(x.createdAt) }),
+              h("td", {}, h("strong", { text: x.email || x.name || x.id }), x.name && x.email ? h("span", { class: "k-sub", text: x.name }) : null),
+              h("td", {}, h("span", { class: "k-chip" + (x.role === "owner" ? " k-accent" : ""), text: x.role })),
+              h("td", { class: "k-num k-small k-hide-sm", title: localTime(x.createdAt), text: "Added " + ago(x.createdAt) }),
               h(
                 "td",
-                { class: "act" },
+                { class: "k-act" },
                 x.id === m.member.id
-                  ? h("span", { class: "dw-small dw-muted", text: "You" })
+                  ? h("span", { class: "k-small", text: "You" })
                   : h("button", {
                       type: "button",
-                      class: "dw-btn small danger",
+                      class: "k-btn k-sm k-danger",
                       text: "Remove",
+                      "aria-label": "Remove " + (x.email || x.name || x.id),
                       onclick: async function () {
                         var ok = await confirmBox({ title: "Remove " + (x.email || x.name || x.id) + "?", message: "Their API keys stop working at once. Sites they published stay.", confirmText: "Remove member" });
                         if (!ok) return;
@@ -1556,10 +1621,10 @@ export function dropwayClient() {
             ),
           );
         });
-        add(list, h("div", { class: "dw-scroll" }, h("table", { class: "dw-table" }, h("thead", {}, h("tr", {}, h("th", { text: "Member" }), h("th", { text: "Role" }), h("th", { class: "num dw-hide-sm", text: "Added" }), h("th", {}))), tb)));
+        add(list, h("div", { class: "k-table-wrap" }, h("table", { class: "k-table" }, h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Member" }), h("th", { scope: "col", text: "Role" }), h("th", { scope: "col", class: "k-num k-hide-sm", text: "Added" }), h("th", { scope: "col" }, h("span", { class: "k-sr", text: "Actions" })))), tb)));
       } catch (e) {
         clear(list);
-        add(list, h("div", { class: "dw-pad" }, errorBox(e, "Could not load members")));
+        add(list, h("div", { class: "k-pad" }, errorBox(e, "Could not load members")));
       }
     }
     loadMembers();
@@ -1575,7 +1640,12 @@ export function dropwayClient() {
     var tools = d.getElementById("dw-tools");
     var info = d.getElementById("dw-fileinfo");
     var current = P.path || "";
+    var currentView = new URLSearchParams(location.search).get("mode") || "view";
     var manifest = null;
+    // A new mode reaches the framed viewer page through ?theme= (it is on another origin).
+    d.addEventListener("kofra:themechange", function () {
+      go(current, currentView, false);
+    });
 
     function fileByPath(p) {
       if (!manifest) return null;
@@ -1591,10 +1661,10 @@ export function dropwayClient() {
       var f = fileByPath(p);
       var base = siteUrlFor(p);
       if (!p || p.charAt(p.length - 1) === "/") return base;
-      if (mode === "source") return base + "?view=source&embed=1";
+      if (mode === "source") return withViewerTheme(base + "?view=source&embed=1");
       if (mode === "raw") return base + "?raw=1";
       if (f && f.kind === "html") return base;
-      return base + "?view=1&embed=1";
+      return withViewerTheme(base + "?view=1&embed=1");
     }
 
     function renderTools(p, mode) {
@@ -1621,7 +1691,7 @@ export function dropwayClient() {
           tools,
           h(
             "div",
-            { class: "dw-vtabs", role: "tablist", "aria-label": "View mode" },
+            { class: "k-seg", role: "tablist", "aria-label": "View mode" },
             tab(kind === "html" ? "Page" : kind === "binary" || kind === "archive" || kind === "wasm" || kind === "model3d" ? "Info" : "Rendered", "view", true),
             tab("Source", "source", !kind || TEXT_KINDS.indexOf(kind) >= 0),
             tab("Raw", "raw", true),
@@ -1632,12 +1702,12 @@ export function dropwayClient() {
         tools,
         h(
           "div",
-          { class: "dw-row" },
-          !isDir && f && authed() ? h("button", { type: "button", class: "dw-btn small", text: "Download", onclick: function (ev) { downloadFile(slug, p, null, ev.currentTarget); } }) : !isDir ? h("a", { class: "dw-btn small", href: url + "?download=1", text: "Download" }) : null,
+          { class: "k-btnrow" },
+          !isDir && f && authed() ? h("button", { type: "button", class: "k-btn k-sm k-ghost", text: "Download", onclick: function (ev) { downloadFile(slug, p, null, ev.currentTarget); } }) : !isDir ? h("a", { class: "k-btn k-sm k-ghost", href: url + "?download=1", text: "Download" }) : null,
           !isDir && f && TEXT_KINDS.indexOf(f.kind) >= 0 && f.size <= 5 * 1024 * 1024
             ? h("button", {
                 type: "button",
-                class: "dw-btn small",
+                class: "k-btn k-sm k-ghost",
                 text: "Copy text",
                 onclick: async function (ev) {
                   var btn = ev.currentTarget;
@@ -1650,20 +1720,23 @@ export function dropwayClient() {
                 },
               })
             : null,
-          h("button", { type: "button", class: "dw-btn small", text: "Copy link", onclick: function (ev) { copyText(url, ev.currentTarget); } }),
-          h("a", { class: "dw-btn small", href: url, target: "_blank", rel: "noopener", text: "Open" }),
+          h("button", { type: "button", class: "k-btn k-sm k-ghost", text: "Copy link", onclick: function (ev) { copyText(url, ev.currentTarget); } }),
+          h("a", { class: "k-btn k-sm k-ghost", href: url, target: "_blank", rel: "noopener", text: "Open" }),
         ),
       );
       add(
         info,
-        h("span", { class: "dw-mono", text: p || "/" }),
-        f ? h("span", { class: "dw-muted", text: " · " + bytes(f.size) + " · " + f.contentType.split(";")[0] }) : null,
+        f ? h("span", { class: "k-chip k-accent", text: f.kind }) : null,
+        h("span", { class: "k-crumbs" }, h("span", { "aria-current": "page", text: p || "/" })),
+        f ? h("span", { class: "k-vmeta", text: bytes(f.size) + " · " + f.contentType.split(";")[0] }) : null,
+        f ? sealFor(p, f.sha256, { mini: true, hideSm: true }) : null,
       );
     }
 
     function go(p, mode, push) {
       current = p;
       mode = mode || "view";
+      currentView = mode;
       var src = viewSrc(p, mode);
       if (frame.src !== src) {
         // A fresh iframe instead of a new src: changing src would add a history entry
@@ -1698,7 +1771,7 @@ export function dropwayClient() {
       return root;
     }
     function renderNode(node, prefix, depth) {
-      var ul = h("ul", { "aria-label": depth ? null : "Files of " + slug });
+      var ul = h("ul");
       Object.keys(node.dirs)
         .sort()
         .forEach(function (name) {
@@ -1744,19 +1817,19 @@ export function dropwayClient() {
     renderTools(current, mode);
     if (!authed()) {
       clear(tree);
-      add(tree, h("div", { class: "dw-tree-note" }, h("p", { text: "Sign in to browse every file of this site." }), h("a", { class: "dw-btn small primary", href: signInHref(location.pathname + location.search), text: "Sign in" })));
+      add(tree, h("div", { class: "k-vside-h" }, h("p", { class: "k-small", text: "Sign in to browse every file of this site." }), h("a", { class: "k-btn k-sm", href: signInHref(location.pathname + location.search), text: "Sign in" })));
       return;
     }
     try {
       manifest = await api("/sites/" + encodeURIComponent(slug) + "/files");
     } catch (e) {
       clear(tree);
-      add(tree, h("div", { class: "dw-tree-note" }, errorBox(e, "Could not list files")));
+      add(tree, h("div", { class: "k-vside-h" }, errorBox(e, "Could not list files")));
       return;
     }
     var smallSite = manifest.files.length <= 40;
-    var filter = h("input", { class: "dw-input", type: "search", placeholder: "Filter files", "aria-label": "Filter files" });
-    var treeBox = h("div", { class: "dw-treebox" }, renderNode(buildTree(manifest.files), "", 0));
+    var filter = h("input", { class: "k-input k-find", type: "search", placeholder: "Filter files", "aria-label": "Filter files" });
+    var treeBox = h("nav", { class: "k-tree", "aria-label": "Files of " + slug }, renderNode(buildTree(manifest.files), "", 0));
     filter.addEventListener("input", function () {
       var q = filter.value.trim().toLowerCase();
       $$("a[data-path]", treeBox).forEach(function (a) {
@@ -1767,7 +1840,7 @@ export function dropwayClient() {
     clear(tree);
     add(
       tree,
-      h("div", { class: "dw-tree-head" }, h("a", { class: "dw-title", href: "/dashboard/sites/" + encodeURIComponent(slug), text: slug }), h("span", { class: "dw-small dw-muted", text: manifest.version ? "v" + manifest.version.number + " · " + plural(manifest.files.length, "file") : "No live version" })),
+      h("div", { class: "k-vside-h" }, h("a", { class: "k-title", href: "/dashboard/sites/" + encodeURIComponent(slug), text: slug }), h("span", { class: "k-small", text: manifest.version ? "v" + manifest.version.number + " · " + plural(manifest.files.length, "file") : "No live version" })),
       filter,
       treeBox,
     );
@@ -1776,8 +1849,82 @@ export function dropwayClient() {
     if (cur) cur.scrollIntoView({ block: "nearest" });
   };
 
+  // ------------------------------------------------------------------ colour mode (Auto / Light / Dark)
+
+  // The server already wrote <html data-theme> from the cookie, so there is never a flash. This only
+  // upgrades the no-script switch (a form posting to /__dropway/theme) to switch in place.
+  var THEME_COOKIE = "__Host-dw_theme";
+  var darkQuery = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  function themePref() {
+    var t = d.documentElement.getAttribute("data-theme");
+    return t === "light" || t === "dark" ? t : "auto";
+  }
+  function themeMode() {
+    var p = themePref();
+    return p !== "auto" ? p : darkQuery && darkQuery.matches ? "dark" : "light";
+  }
+  /** Kofra-generated viewer pages (?view=1, ?view=source) on the sites origin take the mode as ?theme= (no cookie there). */
+  function withViewerTheme(url) {
+    var pref = themePref();
+    if (pref === "auto" || !/[?&]view=(1|source)(&|$)/.test(url)) return url;
+    return url + "&theme=" + pref;
+  }
+  function updateAutoTitle() {
+    $$('.k-mode-switch button[value="auto"]').forEach(function (b) {
+      b.title = "Follow your device setting (now " + (darkQuery && darkQuery.matches ? "dark" : "light") + ")";
+    });
+  }
+  function applyTheme(pref) {
+    var root = d.documentElement;
+    if (pref === "auto") root.removeAttribute("data-theme");
+    else root.setAttribute("data-theme", pref);
+    var cs = $('meta[name="color-scheme"]');
+    if (cs) cs.setAttribute("content", pref === "auto" ? "light dark" : "only " + pref);
+    var colors = boot.themeColors || {};
+    $$('meta[name="theme-color"]').forEach(function (m) {
+      var mode = pref !== "auto" ? pref : (m.getAttribute("media") || "").indexOf("dark") >= 0 ? "dark" : "light";
+      if (colors[mode]) m.setAttribute("content", colors[mode]);
+    });
+    $$(".k-mode-switch button[name=theme]").forEach(function (b) {
+      b.setAttribute("aria-pressed", b.value === pref ? "true" : "false");
+    });
+    updateAutoTitle();
+  }
+  function themeChanged(pref) {
+    try {
+      d.dispatchEvent(new CustomEvent("kofra:themechange", { detail: { pref: pref, mode: themeMode() } }));
+    } catch (e) {}
+  }
+  function wireThemeSwitch() {
+    $$("form.k-mode-switch").forEach(function (form) {
+      form.addEventListener("submit", function (e) {
+        var pref = e.submitter && e.submitter.value;
+        if (pref !== "auto" && pref !== "light" && pref !== "dark") return; // no submitter: let the form post
+        e.preventDefault();
+        d.cookie = pref === "auto" ? THEME_COOKIE + "=; Path=/; Secure; SameSite=Lax; Max-Age=0" : THEME_COOKIE + "=" + pref + "; Path=/; Secure; SameSite=Lax; Max-Age=31536000";
+        applyTheme(pref);
+        if (/[?&]theme=/.test(location.search)) {
+          var u = new URL(location.href);
+          u.searchParams.delete("theme");
+          history.replaceState(history.state, "", u.pathname + u.search + u.hash);
+        }
+        themeChanged(pref);
+      });
+    });
+    if (darkQuery) {
+      var onOs = function () {
+        updateAutoTitle();
+        if (themePref() === "auto") themeChanged("auto");
+      };
+      if (darkQuery.addEventListener) darkQuery.addEventListener("change", onOs);
+      else if (darkQuery.addListener) darkQuery.addListener(onOs);
+    }
+    updateAutoTitle();
+  }
+
   // ------------------------------------------------------------------ start
 
+  wireThemeSwitch();
   wireCopyButtons(d);
   var start = pages[d.body.getAttribute("data-page")];
   /** With uiSlots.session and no key in this browser, ask the API whether a cookie session is live first. */

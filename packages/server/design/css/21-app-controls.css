@@ -1,0 +1,17 @@
+/* App-only controls: checkbox labels, tabs, key-value lists. */
+.tog{display:inline-flex;gap:9px;align-items:flex-start;font-size:14px;line-height:1.4;color:var(--ink)}
+.tog input{width:16px;height:16px;margin:2px 0 0;flex:none}
+.tog .sub{font-size:13px}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--rule);overflow-x:auto;scrollbar-width:thin}
+.tabs [role=tab]{background:transparent;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;padding:10px 14px;color:var(--ink-2);font-size:14.5px;white-space:nowrap}
+.tabs [role=tab]:hover{color:var(--accent)}
+.tabs [role=tab][aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.tabs [role=tab]:focus-visible{outline-offset:-2px}
+[role=tabpanel]{padding-top:var(--s4)}
+.kv{display:grid;grid-template-columns:minmax(8rem,max-content) minmax(0,1fr);gap:8px 20px;margin:0;font-size:14.5px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+@media (max-width:720px){.kv{grid-template-columns:minmax(0,1fr);gap:2px 0}.kv dd{margin-bottom:10px}}
+details.how{margin-top:12px;font-size:14px;color:var(--ink-2)}
+details.how>summary{font-weight:600;font-size:14.5px}
+details.how[open]>summary{margin-bottom:12px}

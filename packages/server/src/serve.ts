@@ -17,7 +17,8 @@ import {
   type DropwayContext,
   type LiveSite,
 } from "@dropway/core";
-import { escapeHtml, systemPage } from "./html";
+import { escapeHtml, siteSystemCsp, systemPage } from "./html";
+import { themeOf } from "./ui/theme";
 import { findViewer, toViewerFile, VIEWER_CSP, VIEWERS, type ViewMode, type Viewer } from "./viewers";
 import { renderListing } from "./viewers/listing";
 import { MAX_CSS_REWRITE_BYTES, rewriteCss, rewriteHtml, type PathRewrite } from "./path-rewrite";
@@ -142,13 +143,22 @@ export function systemResponse(
   extra = "",
 ): Response {
   const h = new Headers({ "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-  h.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'");
+  h.set("Content-Security-Policy", siteSystemCsp(dw));
   securityHeaders(h, live, mode);
   const origin = appOrigin(dw);
   const body =
     req.method === "HEAD"
       ? null
-      : systemPage({ code, title, message: message.replace("{app}", `<a href="${escapeHtml(origin)}">${escapeHtml(dw.config.instanceName)}</a>`), extra });
+      : systemPage({
+          dw,
+          code,
+          title,
+          message: message.replace("{app}", `<a href="${escapeHtml(origin)}">${escapeHtml(dw.config.instanceName)}</a>`),
+          extra,
+          // Only terminal lifecycle states get a stamp.
+          stamp: status === 410 ? { text: "Expired" } : undefined,
+          variant: code === "PASSWORD" ? "panel" : "state",
+        });
   return new Response(body, { status, headers: h });
 }
 
@@ -208,11 +218,14 @@ async function handlePassword(dw: DropwayContext, req: Request, live: LiveSite, 
 }
 
 function passwordForm(dw: DropwayContext, req: Request, live: LiveSite, mode: ServeMode, next: string, failed: boolean): Response {
-  const extra = `<form method="post" action="${escapeHtml(mode.base + PASSWORD_PATH)}" style="display:flex;gap:.5rem">
+  // The form posts with the same ?theme= as the page, so a wrong-password answer keeps the mode. No
+  // autofocus: browsers block it in the app's file viewer (a cross-origin frame) and it skips the page.
+  const theme = themeOf(dw);
+  const extra = `<form method="post" action="${escapeHtml(mode.base + PASSWORD_PATH + (theme === "auto" ? "" : `?theme=${theme}`))}">
 <input type="hidden" name="next" value="${escapeHtml(next)}">
-<input type="password" name="password" placeholder="Password" required autofocus style="flex:1;padding:.6rem .8rem;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg)">
-<button style="padding:.6rem 1rem;border:0;border-radius:8px;background:var(--accent);color:#fff;cursor:pointer">Open</button></form>
-${failed ? '<p style="color:var(--accent)">That password is not right.</p>' : ""}`;
+<label class="k-label" for="dw-pw">Password</label>
+<div class="k-field"><input class="k-input" id="dw-pw" type="password" name="password" autocomplete="current-password" required${failed ? ' aria-invalid="true" aria-describedby="dw-pw-err"' : ""}><button class="k-btn" type="submit">Open</button></div>
+${failed ? '<p class="k-msgline k-err" id="dw-pw-err" role="alert">That password is not right.</p>' : ""}</form>`;
   const r = systemResponse(dw, req, mode, live, 401, "PASSWORD", "This site is password protected", "Enter the password to view it.", extra);
   // Only the app (its file viewer) may frame the form; X-Frame-Options covers browsers without CSP 2.
   r.headers.set("Content-Security-Policy", `${r.headers.get("Content-Security-Policy")}; frame-ancestors ${appOrigin(dw)}`);
@@ -322,7 +335,7 @@ export async function serveSite(
   } else if (resolved.kind === "not_found") {
     response = systemResponse(dw, req, mode, live, 404, "404", "Page not found", `There is no file at <code>/${escapeHtml(filePath)}</code> on this site.`);
   } else if (resolved.kind === "listing") {
-    response = renderListing(live, resolved.dir, mode, `${appOrigin(dw)}/v/${live.slug}/${encodePath(resolved.dir)}`);
+    response = renderListing(live, resolved.dir, mode, `${appOrigin(dw)}/v/${live.slug}/${encodePath(resolved.dir)}`, { dw, theme: themeOf(dw) });
     securityHeaders(response.headers, live, mode);
   } else {
     response = await serveFile(req, dw, url, live, mode, resolved.path, resolved.status, viewers);
@@ -357,7 +370,9 @@ async function serveFile(
   // Rendered views: see ./viewers (one per file kind, plus ?view=source).
   if (viewer && viewMode) {
     const embed = flag(sp, "embed");
-    const etag = `W/"${viewer.id}@${viewer.version ?? 1}-${sha256}${embed ? "-e" : ""}${reportVariant}"`;
+    // ?theme= (from the app's file viewer) prints the page in one mode: a different body, so a different ETag.
+    const theme = themeOf(dw);
+    const etag = `W/"${viewer.id}@${viewer.version ?? 1}-${sha256}${embed ? "-e" : ""}${theme === "auto" ? "" : `-t${theme[0]}`}${reportVariant}"`;
     const h = new Headers();
     if (etagMatches(req, etag)) {
       h.set("ETag", etag);

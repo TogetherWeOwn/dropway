@@ -17,8 +17,8 @@ export const htmlFrameViewer: Viewer = {
     return viewerPage(vc, {
       tabs,
       barExtra: `<a href="${escapeHtml(vc.fileUrl)}" rel="nofollow" title="Open the page without the bar">Open</a>`,
-      css: `html,body{height:100%}body{display:flex;flex-direction:column}.dw-frame{flex:1;width:100%;border:0;background:#fff}`,
-      body: `<iframe class="dw-frame" src="${escapeHtml(vc.fileUrl)}" title="${escapeHtml(vc.file.path)}"></iframe>`,
+      css: `html,body{height:100%}body{display:flex;flex-direction:column}.k-vbody{flex:1;display:flex;min-height:0}.k-frame{flex:1;width:100%;border:0;background:#fff;display:block}`,
+      body: `<iframe class="k-frame" src="${escapeHtml(vc.fileUrl)}" title="${escapeHtml(vc.file.path)}"></iframe>`,
       csp: viewerCsp({ frameSrc: [vc.url.origin] }),
     });
   },

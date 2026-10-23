@@ -17,12 +17,13 @@ import {
 import { createAppRouter } from "./app";
 import type { DropwayEnv, ServerBindings } from "./env";
 import type { CreateDropwayOptions, McpToolDefinition, UiSlots } from "./extensions";
-import { escapeHtml, htmlPage } from "./html";
+import { APP_PAGE_CSP, escapeHtml, siteSystemCsp, systemPage } from "./html";
 import { apiErrorResponse, installApiMiddleware } from "./routes/api";
 import { legacyAppRedirect, legacyAppSuccessor, withDeprecationHeaders } from "./legacy";
 import { redirectResponse, routeSiteRequest } from "./route-sites";
-import { SITE_SANDBOX, serveSite, systemResponse } from "./serve";
-import { bindUiSlots } from "./ui/shell";
+import { isNavigation, SITE_SANDBOX, serveSite, systemResponse } from "./serve";
+import { appStatePage, bindUiSlots } from "./ui/shell";
+import { bindRequestTheme } from "./ui/theme";
 import { VIEWERS, type Viewer } from "./viewers";
 import { createMcpEndpoint } from "./mcp";
 import { CORE_MCP_TOOLS } from "./mcp/tools";
@@ -97,7 +98,12 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
   // Former-name headers (legacy-brand.ts) here too, so the exported app matches fetch.
   app.use("*", legacyBrandHeaders);
   app.use("*", async (c, next) => {
-    c.set("dw", contexts.get(c.req.raw) ?? context(c.env, c.executionCtx, new URL(c.req.url)));
+    let dw = contexts.get(c.req.raw);
+    if (!dw) {
+      dw = context(c.env, c.executionCtx, new URL(c.req.url));
+      bindRequestTheme(dw, c.req.raw);
+    }
+    c.set("dw", dw);
     c.set("requestId", c.req.header("cf-ray") ?? crypto.randomUUID());
     bindUiSlots(c, uiSlots);
     await next();
@@ -112,12 +118,23 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
       );
     }
     // CORS-readable, so a sandboxed site (opaque origin) whose fetch() lands here sees a 404 instead of a network error.
-    return c.html(htmlPage({ title: "Not found", body: `<main class="dw-system"><div class="dw-code">404</div><h1>Not found</h1><p><a href="/">Home</a></p></main>` }), 404, { "Access-Control-Allow-Origin": "*" });
+    const html = appStatePage(c.get("dw"), c.req.url, { title: "Not found", code: "404", heading: "Not found", message: "There is no page at this address.", actions: '<a class="k-btn" href="/">Home</a>' });
+    return c.html(html, 404, { "Access-Control-Allow-Origin": "*", "Content-Security-Policy": APP_PAGE_CSP, "X-Content-Type-Options": "nosniff", Vary: "Cookie" });
   });
   app.onError((err, c) => {
     if (c.req.path.startsWith("/api/")) return apiErrorResponse(c, err);
     console.error(JSON.stringify({ event: "app_error", path: c.req.path, error: String(err), stack: (err as Error)?.stack }));
-    return c.text("Internal error", 500);
+    if (!(c.req.header("accept") ?? "").includes("text/html")) return c.text("Internal error", 500);
+    const id = String(c.get("requestId") ?? "");
+    const html = appStatePage(c.get("dw"), c.req.url, {
+      title: "Server error",
+      code: "500",
+      heading: "Something went wrong on our side",
+      message: "The page could not be built. Try again in a moment; if it keeps happening, tell the people who run this instance.",
+      extra: id ? `<p class="k-small">Request <span class="k-mono">${escapeHtml(id)}</span></p>` : "",
+      actions: `<a class="k-btn" href="${escapeHtml(new URL(c.req.url).pathname)}">Try again</a><a class="k-btn k-ghost" href="/">Home</a>`,
+    });
+    return c.html(html, 500, { "Content-Security-Policy": APP_PAGE_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store", Vary: "Cookie" });
   });
 
   // Clients from before the rename send and read the old header names (legacy-brand.ts).
@@ -128,6 +145,8 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
   async function handle(request: Request, env: ServerBindings, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const dw = context(env, ctx, url);
+    // Site origins: ?theme= only (the theme cookie belongs to the app origin and is never read there).
+    bindRequestTheme(dw, request, { cookie: false });
     try {
       // A former app origin (config.legacyAppOrigins): pages move, the API and MCP keep answering.
       const successor = legacyAppSuccessor(dw, url);
@@ -140,10 +159,11 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
         case "redirect":
           return redirectResponse(route);
         case "sites_home":
-          return sitesHome(dw);
+          return sitesHome(dw, request);
         case "sites_not_found":
           return systemResponse(dw, request, { kind: "path", base: "/", sandbox: true, rewrite: null }, null, 404, "404", "Nothing is published here", "There is no site at this address. See {app}.");
         case "app": {
+          bindRequestTheme(dw, request);
           contexts.set(request, dw);
           const res = await app.fetch(request, env, ctx);
           return successor ? withDeprecationHeaders(res, dw, successor) : res;
@@ -151,6 +171,12 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
       }
     } catch (e) {
       console.error(JSON.stringify({ event: "serve_error", url: request.url, error: String(e), stack: (e as Error)?.stack }));
+      if (isNavigation(request)) {
+        return new Response(PLATFORM_ERROR_HTML, {
+          status: 500,
+          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'", "X-Content-Type-Options": "nosniff" },
+        });
+      }
       return new Response("Internal error", { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
     }
   }
@@ -164,16 +190,30 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
   return { fetch, scheduled, app, operations, mcpTools, uiSlots, viewers, adapters, context };
 }
 
-function sitesHome(dw: DropwayContext): Response {
+/**
+ * The page for any request that failed before a response could be built. A static string made at
+ * module load: the site bundle with no fonts and no instance data, so it depends on nothing that may
+ * be failing.
+ */
+const PLATFORM_ERROR_HTML = systemPage({
+  code: "500",
+  title: "Something went wrong on our side",
+  message: "This page could not be served. Try again in a moment.",
+  fonts: false,
+});
+
+function sitesHome(dw: DropwayContext, request: Request): Response {
   const o = appOrigin(dw);
-  const page = htmlPage({
-    title: dw.config.instanceName,
-    body: `<main class="dw-system"><div class="dw-code">SITES</div><h1>${escapeHtml(dw.config.instanceName)} sites</h1><p>This address serves published sites at <code>/&lt;site&gt;/</code>. To publish your own, see <a href="${escapeHtml(o)}">${escapeHtml(o)}</a>.</p></main>`,
+  const page = systemPage({
+    dw,
+    code: "SITES",
+    title: `${dw.config.instanceName} sites`,
+    message: `This address serves published sites at <code>/&lt;site&gt;/</code>. To publish your own, see <a href="${escapeHtml(o)}">${escapeHtml(o)}</a>.`,
   });
-  return new Response(page, {
+  return new Response(request.method === "HEAD" ? null : page, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Content-Security-Policy": `default-src 'none'; style-src 'unsafe-inline'; ${SITE_SANDBOX}`,
+      "Content-Security-Policy": `${siteSystemCsp(dw)}; ${SITE_SANDBOX}`,
       "Cache-Control": "public, max-age=300",
       "X-Content-Type-Options": "nosniff",
     },

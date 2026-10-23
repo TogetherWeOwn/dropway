@@ -1,0 +1,33 @@
+/* App file viewer (/v/<site>/...): file tree beside a toolbar and the framed preview. Breadcrumbs are shared
+   with the site-origin viewer bar. The frame keeps a white canvas in every mode, as a browser does (E2). */
+.page.wide{height:100vh;height:100dvh;min-height:0;overflow:hidden}
+.page.wide>main{min-height:0}
+.vapp{display:flex;flex:1;min-height:0;width:100%}
+.vside{width:18rem;flex:none;border-right:1px solid var(--rule);background:var(--paper-2);overflow:auto;display:flex;flex-direction:column;gap:12px;padding:16px 14px}
+.vside .find{width:100%}
+.vside-h{display:flex;flex-direction:column;gap:2px;padding:0 4px}
+.vcenter{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--paper)}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;padding:10px 18px;border-bottom:1px solid var(--rule-soft);background:var(--paper)}
+.toolbar .vfile{display:flex;align-items:center;gap:10px;min-width:0;flex:1 1 16rem;flex-wrap:wrap}
+.toolbar .tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.vcenter>.trust{padding:6px 18px;border-bottom:1px solid var(--rule-soft);background:var(--paper-2)}
+.frame{flex:1;width:100%;min-height:0;border:0;background:#fff;display:block}
+.tree{font-size:14px;line-height:1.35}
+.tree ul{list-style:none;margin:0;padding:0 0 0 12px}
+.tree>ul{padding-left:0}
+.tree li{margin:0}
+.tree summary{padding:4px 6px;font-weight:600;color:var(--ink);list-style:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tree summary::-webkit-details-marker{display:none}
+.tree summary::before{content:"\25B8";display:inline-block;width:1.1em;color:var(--muted)}
+.tree details[open]>summary::before{content:"\25BE"}
+.tree summary:hover,.tree a:hover{background:var(--accent-wash)}
+.tree a{display:block;padding:4px 6px 4px 1.45em;color:var(--ink);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tree a[aria-current]{background:var(--accent-tint);color:var(--accent);font-weight:600;box-shadow:inset 3px 0 0 var(--accent)}
+@media (max-width:760px){
+  .page.wide{height:auto;min-height:100vh;overflow:visible}
+  .vapp{flex-direction:column}
+  .vside{width:auto;max-height:34vh;border-right:0;border-bottom:1px solid var(--rule)}
+  .vcenter{min-height:70vh}
+  .toolbar{padding:10px 14px}
+  .vcenter>.trust{padding:6px 14px}
+}

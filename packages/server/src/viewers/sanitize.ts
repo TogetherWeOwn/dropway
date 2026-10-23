@@ -94,6 +94,9 @@ function safeSrcset(value: string, tag: string): boolean {
   return value.split(",").every((part) => isSafeUrl(part.trim().split(/\s+/)[0] ?? "", tag, "src"));
 }
 
+/** Class and id names reserved for Kofra's own markup (design system k-*, page hooks dw-*). */
+export const RESERVED_NAME = /^(k|dw)-/i;
+
 /** Sanitize an HTML fragment. */
 export async function sanitizeHtml(html: string): Promise<string> {
   const rewriter = new HTMLRewriter()
@@ -122,6 +125,18 @@ export async function sanitizeHtml(html: string): Promise<string> {
             continue;
           }
           const v = el.getAttribute(name) ?? "";
+          // User content must not wear Kofra's chrome: classes and ids in the k- (design system) and dw-
+          // (page hooks) namespaces are dropped, so a page cannot draw a fake banner, seal or button.
+          if (n === "class") {
+            const kept = v.split(/\s+/).filter((t) => t && !RESERVED_NAME.test(t));
+            if (kept.length) el.setAttribute(name, kept.join(" "));
+            else el.removeAttribute(name);
+            continue;
+          }
+          if (n === "id" && RESERVED_NAME.test(v.trim())) {
+            el.removeAttribute(name);
+            continue;
+          }
           if (URL_ATTRS.has(n) && !isSafeUrl(v, tag, n)) el.removeAttribute(name);
           else if (n === "srcset" && !safeSrcset(v, tag)) el.removeAttribute(name);
         }

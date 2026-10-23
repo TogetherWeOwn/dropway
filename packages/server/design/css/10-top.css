@@ -1,0 +1,25 @@
+/* App header: wordmark, tag, navigation, account area, colour mode switch (ui/chrome.ts).
+   Wide: wordmark, tag, nav (pushed right), account, switch. Below 720px: wordmark, account and switch on
+   the first row, the nav wraps to its own row under them. */
+.top{border-bottom:1px solid var(--rule);background:var(--paper)}
+.top>.wrap{display:flex;align-items:center;gap:10px var(--s5);min-height:60px;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}
+.top .wm{font-size:22px;line-height:1.2}
+.top .tag{font-family:var(--mono);font-size:10.5px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.1em;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:22rem}
+.nav{margin-left:auto;display:flex;gap:4px 18px;font-size:14px;flex-wrap:wrap;align-items:center}
+.nav a{text-decoration:none;color:var(--ink);padding:4px 0;border-bottom:2px solid transparent}
+.nav a:hover{color:var(--accent);border-bottom-color:var(--accent-line)}
+.nav a[aria-current=page]{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.acct{display:flex;align-items:center;gap:10px;font-size:13.5px;color:var(--ink-2);white-space:nowrap;margin-left:auto}
+.nav~.acct{margin-left:0}
+.acct .who{max-width:14rem;overflow:hidden;text-overflow:ellipsis}
+.acct form{margin:0}
+.slotbanner{border-bottom:1px solid var(--rule-soft);background:var(--paper-2)}
+.slotbanner>.wrap{padding-top:10px;padding-bottom:10px;font-size:14.5px}
+@media (max-width:720px){
+  .top>.wrap{gap:10px 12px}
+  .top .tag{display:none}
+  .nav{order:3;flex-basis:100%;margin-left:0;gap:4px 16px}
+  .acct,.nav~.acct{margin-left:auto}
+  .acct .who{display:none}
+}
+@media print{.nav,.acct{display:none}}

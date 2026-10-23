@@ -28,11 +28,11 @@ export function codeLanguage(path: string, kind: FileKind): string | null {
 export const CODE_CSS = `
 .dw-codewrap{position:relative}
 .dw-codehead{display:flex;gap:.6rem;align-items:center;justify-content:flex-end;padding:.5rem .9rem 0;font-size:.8rem;color:var(--muted)}
-.dw-codehead .dw-lang{margin-right:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.dw-src{margin:.5rem .9rem 2rem;border:1px solid var(--line);border-radius:9px;background:var(--card);overflow:auto;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;tab-size:4}
+.dw-codehead .dw-lang{margin-right:auto;font-family:var(--mono)}
+.dw-src{margin:8px 18px 32px;border:1px solid var(--rule-soft);background:var(--paper-3);color:var(--ink);overflow:auto;font:13px/24px var(--mono);tab-size:4}
 .dw-lines{display:table;min-width:100%;border-collapse:collapse;padding:.4rem 0}
 .dw-ln{display:table-row}
-.dw-ln>a{display:table-cell;width:1%;min-width:3.2em;padding:0 .9em 0 .8em;text-align:right;color:var(--muted);opacity:.6;text-decoration:none;user-select:none;-webkit-user-select:none;border-right:1px solid var(--line);vertical-align:top}
+.dw-ln>a{display:table-cell;width:1%;min-width:3.2em;padding:0 .9em 0 .8em;text-align:right;color:var(--muted);opacity:.6;text-decoration:none;user-select:none;-webkit-user-select:none;border-right:1px solid var(--rule-soft);vertical-align:top}
 .dw-ln>a::before{content:attr(data-n)}
 .dw-ln>a:hover{opacity:1;color:var(--accent)}
 .dw-ln>.c{display:table-cell;padding:0 1em;white-space:pre}
@@ -72,11 +72,11 @@ export async function readShownText(vc: ViewerContext): Promise<{ text: string; 
 export async function codePage(vc: ViewerContext, opts: { text: string; truncated: boolean; shown: number; lang: string | null; note?: string; tabs: ReturnType<typeof standardTabs> }) {
   const { html, lines, cache } = await renderCodeLines(vc, opts.text, opts.lang, opts.truncated ? `first${opts.shown}` : "full");
   const name = hljsLanguage(opts.lang);
-  const plainNote = opts.text.length > HIGHLIGHT_MAX_BYTES && name ? `<p class="dw-note">This file is too large to highlight; it is shown as plain text.</p>` : "";
+  const plainNote = opts.text.length > HIGHLIGHT_MAX_BYTES && name ? `<p class="k-banner k-notebar" role="note">This file is too large to highlight; it is shown as plain text.</p>` : "";
   const body = `${opts.note ?? ""}${opts.truncated ? truncatedNote(vc, opts.shown) : ""}${plainNote}<main class="dw-codewrap">
-<input type="checkbox" id="dw-wrap" class="dw-toggle">
-<div class="dw-codehead"><span class="dw-lang">${escapeHtml(name ?? "plain text")} · ${lines.toLocaleString("en-US")} line${lines === 1 ? "" : "s"}</span><label for="dw-wrap" class="dw-btn">Wrap</label><button type="button" id="dw-copy" class="dw-btn" hidden>Copy</button></div>
-<div class="dw-src">${html}</div></main>`;
+<input type="checkbox" id="dw-wrap" class="k-toggle">
+<div class="dw-codehead"><span class="dw-lang">${escapeHtml(name ?? "plain text")} · ${lines.toLocaleString("en-US")} line${lines === 1 ? "" : "s"}</span><label for="dw-wrap" class="k-btn k-sm k-ghost k-togglebtn">Wrap</label><button type="button" id="dw-copy" class="k-btn k-sm k-ghost" hidden>Copy</button></div>
+<div class="dw-src" tabindex="0" role="region" aria-label="${escapeHtml(vc.file.path)}">${html}</div></main>`;
   return viewerPage(vc, {
     tabs: opts.tabs,
     body,

@@ -1,5 +1,8 @@
-import { encodePath, KIND_LABELS } from "@dropway/core";
+import { appOrigin, encodePath, KIND_LABELS } from "@dropway/core";
 import { escapeHtml, formatBytes, htmlPage } from "../html";
+import { TRUST_LINE } from "../ui/chrome";
+import { fileSeal } from "../ui/motifs";
+import { themeOf } from "../ui/theme";
 import type { ViewerContext } from "./index";
 
 /**
@@ -45,6 +48,8 @@ export interface ViewerTab {
   label: string;
   href: string;
   current?: boolean;
+  /** The stored bytes (never gets ?theme=). */
+  raw?: boolean;
 }
 
 /**
@@ -56,7 +61,7 @@ export function standardTabs(vc: ViewerContext, opts: { rendered?: string | null
   const source = vc.mode === "source";
   if (opts.rendered !== null) tabs.push({ label: opts.rendered ?? "Rendered", href: vc.fileUrl, current: !source });
   if (opts.source) tabs.push({ label: "Source", href: vc.sourceUrl, current: source });
-  if (opts.raw !== false) tabs.push({ label: "Raw", href: vc.rawUrl });
+  if (opts.raw !== false) tabs.push({ label: "Raw", href: vc.rawUrl, raw: true });
   return tabs;
 }
 
@@ -66,52 +71,46 @@ function crumbs(vc: ViewerContext): string {
   const out: string[] = [`<a href="${escapeHtml(vc.siteBase)}">${escapeHtml(vc.live.slug)}</a>`];
   let dir = "";
   parts.forEach((p, i) => {
-    if (i === parts.length - 1) out.push(`<strong>${escapeHtml(p)}</strong>`);
+    if (i === parts.length - 1) out.push(`<strong aria-current="page">${escapeHtml(p)}</strong>`);
     else {
       dir += `${p}/`;
       out.push(`<a href="${escapeHtml(vc.siteBase + encodePath(dir))}">${escapeHtml(p)}</a>`);
     }
   });
-  return out.join('<span class="dw-sep">/</span>');
+  return out.join('<span class="k-sep" aria-hidden="true">/</span>');
+}
+
+/**
+ * Carry ?theme= (set by the app's file viewer for an explicit mode) onto links to other Kofra-generated
+ * views of the same file (Rendered, Source). Never onto Raw or Download: those are the user's bytes.
+ */
+function withTheme(vc: ViewerContext, href: string): string {
+  const t = vc.url.searchParams.get("theme");
+  if (t !== "light" && t !== "dark") return href;
+  // An HTML file's own address is the user's page, not a Kofra view.
+  if (vc.file.kind === "html" && !/[?&]view=/.test(href)) return href;
+  return `${href}${href.includes("?") ? "&" : "?"}theme=${t}`;
 }
 
 export function viewerBar(vc: ViewerContext, tabs: ViewerTab[], extra = ""): string {
   if (vc.embed) return "";
   const kind = KIND_LABELS[vc.file.kind] ?? "File";
   const type = vc.file.contentType.split(";")[0]!;
-  return `<header class="dw-vbar" role="banner">
-<div class="dw-vfile"><span class="dw-kind">${escapeHtml(kind)}</span><span class="dw-crumbs">${crumbs(vc)}</span><span class="dw-vmeta">${formatBytes(vc.file.size)} · ${escapeHtml(type)}</span></div>
-<nav class="dw-vtabs" aria-label="View">${tabs
-    .map((t) => `<a href="${escapeHtml(t.href)}"${t.current ? ' aria-current="page"' : ""} rel="nofollow">${escapeHtml(t.label)}</a>`)
+  const origin = appOrigin(vc.dw);
+  return `<header class="k-vbar">
+<div class="k-vfile"><a class="k-wm" href="${escapeHtml(origin)}" rel="nofollow">${escapeHtml(vc.dw.config.instanceName)}</a><span class="k-chip k-accent">${escapeHtml(kind)}</span><nav class="k-crumbs" aria-label="Path">${crumbs(vc)}</nav><span class="k-vmeta">${formatBytes(vc.file.size)} · ${escapeHtml(type)}</span><span class="k-sum k-mini k-hide-sm">${fileSeal(vc.file.path, vc.file.sha256)}<span><code title="SHA-256 ${escapeHtml(vc.file.sha256)}">${escapeHtml(vc.file.sha256.slice(0, 12))}…</code></span></span></div>
+<nav class="k-seg" aria-label="View">${tabs
+    .map((t) => `<a href="${escapeHtml(t.raw ? t.href : withTheme(vc, t.href))}"${t.current ? ' aria-current="page"' : ""} rel="nofollow">${escapeHtml(t.label)}</a>`)
     .join("")}</nav>
-<nav class="dw-vact" aria-label="File">${extra}<a href="${escapeHtml(vc.downloadUrl)}" rel="nofollow" download>Download</a><a href="${escapeHtml(vc.appViewerUrl)}" rel="nofollow" title="Browse every file of this site">Files</a></nav>
+<nav class="k-btnrow" aria-label="File">${extra}<a class="k-btn k-sm k-ghost" href="${escapeHtml(vc.downloadUrl)}" rel="nofollow" download>Download</a><a class="k-btn k-sm k-ghost" href="${escapeHtml(vc.appViewerUrl)}" rel="nofollow" title="Browse every file of this site">Files</a></nav>
+<p class="k-trust k-show-lg">${TRUST_LINE}</p>
 </header>`;
 }
 
-/** Shared viewer styles (on top of BASE_CSS). */
+/** Shared viewer styles (on top of the site bundle). */
 export const VIEWER_CSS = `
-[hidden]{display:none!important}
-.dw-vbar{position:sticky;top:0;z-index:20;display:flex;flex-wrap:wrap;gap:.4rem .9rem;align-items:center;justify-content:space-between;padding:.45rem .9rem;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(8px);font-size:.82rem;line-height:1.3}
-.dw-vfile{display:flex;align-items:center;gap:.6rem;min-width:0;flex:1 1 18rem}
-.dw-kind{flex:none;font:600 .68rem/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.05em;text-transform:uppercase;color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 40%,transparent);border-radius:4px;padding:.25rem .4rem}
-.dw-crumbs{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.dw-crumbs a{color:var(--muted);text-decoration:none}.dw-crumbs a:hover{color:var(--accent)}.dw-crumbs strong{font-weight:600;color:var(--fg)}
-.dw-sep{color:var(--muted);opacity:.5;padding:0 .2rem}
-.dw-vmeta{flex:none;color:var(--muted);white-space:nowrap}
-.dw-vtabs{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;flex:none}
-.dw-vtabs a{padding:.28rem .7rem;text-decoration:none;color:var(--muted);border-left:1px solid var(--line)}
-.dw-vtabs a:first-child{border-left:0}.dw-vtabs a:hover{color:var(--fg);background:var(--code)}
-.dw-vtabs a[aria-current]{color:var(--fg);background:var(--card);font-weight:600;box-shadow:inset 0 -2px 0 var(--accent)}
-.dw-vact{display:flex;gap:.4rem;flex:none;align-items:center}
-.dw-vact a,.dw-vact label,.dw-btn{padding:.28rem .65rem;border:1px solid var(--line);border-radius:7px;text-decoration:none;color:var(--fg);background:var(--card);cursor:pointer;font-size:.82rem;line-height:1.3;user-select:none}
-.dw-vact a:hover,.dw-vact label:hover,.dw-btn:hover{border-color:var(--accent);color:var(--accent)}
-.dw-toggle{position:absolute;opacity:0;pointer-events:none}
-.dw-toggle:focus-visible+label{outline:2px solid var(--accent);outline-offset:2px}
-.dw-note{margin:.75rem auto;max-width:60rem;padding:.55rem .85rem;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:7px;background:var(--card);font-size:.85rem;color:var(--muted)}
-.dw-note a{color:var(--accent)}
-.dw-checker{background-color:var(--card);background-image:linear-gradient(45deg,var(--code) 25%,transparent 25%),linear-gradient(-45deg,var(--code) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,var(--code) 75%),linear-gradient(-45deg,transparent 75%,var(--code) 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0}
-.dw-meta{color:var(--muted);font-size:.85rem;text-align:center;margin:.75rem 0}
-@media (max-width:640px){.dw-vmeta{display:none}.dw-vbar{padding:.4rem .6rem}}
+.k-vbody{min-height:calc(100vh - 3.5rem)}
+.k-toggle:focus-visible~* .k-togglebtn,.k-toggle:focus-visible~.k-togglebtn{outline:2px solid var(--focus);outline-offset:2px}
 `;
 
 /** A complete viewer page response. `body` is trusted HTML (escape user content before passing it). */
@@ -122,8 +121,15 @@ export function viewerPage(
   const page = htmlPage({
     title: opts.title ?? `${vc.file.path.split("/").pop()} · ${vc.live.slug}`,
     css: VIEWER_CSS + (opts.css ?? ""),
-    head: '<meta name="robots" content="noindex">',
-    body: viewerBar(vc, opts.tabs, opts.barExtra) + opts.body + (opts.script ? `<script>${opts.script}</script>` : ""),
+    robots: "noindex",
+    delivery: "site",
+    theme: themeOf(vc.dw),
+    appOrigin: appOrigin(vc.dw),
+    body:
+      viewerBar(vc, opts.tabs, opts.barExtra) +
+      `<div class="k-vbody">${opts.body}</div>` +
+      (vc.embed ? "" : `<p class="k-trust k-vtrust k-hide-lg">${TRUST_LINE}</p>`) +
+      (opts.script ? `<script>${opts.script}</script>` : ""),
   });
   const headers: Record<string, string> = { "Content-Type": "text/html; charset=utf-8", ...opts.headers };
   if (opts.csp) headers["Content-Security-Policy"] = opts.csp;
@@ -132,7 +138,7 @@ export function viewerPage(
 
 /** Note shown when only the first part of a large file is displayed. */
 export function truncatedNote(vc: ViewerContext, shownBytes: number): string {
-  return `<p class="dw-note">Showing the first ${formatBytes(shownBytes)} of ${formatBytes(vc.file.size)}. <a href="${escapeHtml(vc.rawUrl)}" rel="nofollow">Raw</a> or <a href="${escapeHtml(vc.downloadUrl)}" rel="nofollow">download</a> the whole file.</p>`;
+  return `<p class="k-banner k-notebar" role="note">Showing the first ${formatBytes(shownBytes)} of ${formatBytes(vc.file.size)}.&nbsp;<a href="${escapeHtml(vc.rawUrl)}" rel="nofollow">Raw</a>&nbsp;or&nbsp;<a href="${escapeHtml(vc.downloadUrl)}" rel="nofollow">download</a>&nbsp;the whole file.</p>`;
 }
 
 /** Decode UTF-8 (BOM stripped, invalid sequences replaced). */

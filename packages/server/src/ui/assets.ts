@@ -1,17 +1,19 @@
 import { dropwayClient } from "./client";
+import { kofraMotifs } from "./motifs";
 
 /**
  * The dashboard script, served from the Worker itself at
  * /__dropway/ui/app-<hash>.js (immutable; the hash changes with the code).
  *
- * The source is the text of dropwayClient(), so packages stay "TypeScript
+ * The source is the text of dropwayClient() (given the seal generator, kofraMotifs() from
+ * ./motifs.ts, as its argument), so packages stay "TypeScript
  * source, no build step" and an embedding app gets the same script without
  * extra bundler config. The bundler may wrap inner functions in __name(...)
  * (esbuild keepNames, which wrangler turns on), so a no-op __name is defined
  * around it.
  */
 export const CLIENT_SCRIPT = `/*! Kofra dashboard (MIT) https://github.com/TogetherWeOwn/dropway */
-(function(){"use strict";var __name=function(t){return t};(${dropwayClient.toString()})();})();
+(function(){"use strict";var __name=function(t){return t};(${dropwayClient.toString()})(${kofraMotifs.toString()});})();
 `;
 
 /** 32-bit FNV-1a, hex: enough to bust caches when the script changes. */
