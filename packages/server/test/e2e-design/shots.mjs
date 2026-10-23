@@ -521,8 +521,8 @@ async function main() {
   const browser = await chromium.launch({ executablePath: CHROME, args: ["--no-sandbox", "--font-render-hinting=none", "--disable-gpu", "--disable-lcd-text"] });
   const matrix = [];
   const checks = {};
+  let second = null;
   try {
-    let second = null;
     const record = (sc, mode, width, cell) => {
       matrix.push(cell);
       const bad = Object.entries(cell.gates).filter(([, v]) => !v.pass).map(([k]) => k);
@@ -551,7 +551,10 @@ async function main() {
     for (const job of main.filter((x) => x.mutates).flatMap(jobsFor)) await runOne(job);
     if (EXTRA && !ONLY) checks.themeSwitch = await themeSwitchChecks(browser, mf, fx);
     for (const sc of fresh) {
-      if (!second) second = await startWorker(mkdtempSync(join(tmpdir(), "kofra-shots-fresh-")));
+      if (!second) {
+        const dir = mkdtempSync(join(tmpdir(), "kofra-shots-fresh-"));
+        second = { ...(await startWorker(dir)), dir };
+      }
       if (sc.needsOwner && !second.owner) {
         const r = await second.mf.dispatchFetch(`${APP}/api/v1/setup`, { method: "POST", headers: { Authorization: `Bearer ${BOOT}`, "Content-Type": "application/json" }, body: JSON.stringify({ email: "new@kofra.test" }) });
         second.owner = (await r.json()).apiKey.key;
@@ -582,11 +585,14 @@ async function main() {
     }
     for (const c of matrix) delete c.masked;
     matrix.sort((a, b) => list.findIndex((s) => s.id === a.screen) - list.findIndex((s) => s.id === b.screen) || PASSES.indexOf(a.pass) - PASSES.indexOf(b.pass) || MODES.indexOf(a.mode) - MODES.indexOf(b.mode) || a.width - b.width);
-    if (second) await second.mf.dispose();
   } finally {
     await browser.close();
     await mf.dispose();
     rmSync(tmp, { recursive: true, force: true });
+    if (second) {
+      await second.mf.dispose();
+      rmSync(second.dir, { recursive: true, force: true });
+    }
   }
   writeFileSync(join(OUT, "matrix.json"), JSON.stringify({ generatedAt: new Date().toISOString(), target: "core", checks, cells: matrix }, null, 1));
   writeFileSync(join(OUT, "index.html"), gallery(list, matrix, checks));
