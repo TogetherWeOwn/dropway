@@ -2,7 +2,7 @@ import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
 import { diagnosticText } from "../diagnostics";
 import { cloneRawRequest } from "hono/request";
-import { ApiError, badRequest } from "@dropway/core";
+import { ApiError, badRequest, requestIp } from "@dropway/core";
 import type { DropwayEnv } from "../env";
 
 /** Bound wire bytes before decoding or parsing an object body. Raw uploads use their own reader. */
@@ -84,7 +84,10 @@ export function installApiMiddleware(api: Hono<DropwayEnv>, middleware: Middlewa
   );
   api.use("*", async (c, next) => {
     const dw = c.get("dw");
-    c.set("principal", await dw.adapters.identity.resolve(c.req.raw, dw));
+    // This explicit browser operation authenticates only its real cookie in
+    // refreshSession. An unrelated bearer must not update key metadata first.
+    const cookieRefresh = c.req.method === "POST" && c.req.path === "/api/v1/auth/sessions/refresh";
+    c.set("principal", cookieRefresh ? { kind: "anonymous", ip: requestIp(c.req.raw) } : await dw.adapters.identity.resolve(c.req.raw, dw));
     await next();
     c.header("X-Request-Id", c.get("requestId"));
   });

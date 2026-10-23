@@ -74,7 +74,7 @@ export async function issueSession(dc: DropwayContext, member: MemberRow, reques
 }
 
 /** Explicit browser surfaces only; ordinary REST and MCP never resolve cookies. */
-export async function resolveSession(dc: DropwayContext, request: Request): Promise<MemberPrincipal> {
+async function sessionState(dc: DropwayContext, request: Request) {
   if (!["GET", "HEAD"].includes(request.method)) requireBrowserWrite(dc, request);
   const token = sessionToken(request);
   if (!token || new URL(request.url).origin !== appOrigin(dc) || new URL(request.url).protocol !== "https:") throw unauthorized("Sign in to continue.", "Open /login.", "invalid_session");
@@ -85,11 +85,24 @@ export async function resolveSession(dc: DropwayContext, request: Request): Prom
   const member = await activeMember(dc, row.member_id);
   if (!member) throw unauthorized();
   // Ordinary navigation omits Origin. It may read, but must not slide authority.
-  if (browserWriteAllowed(dc, request) && now - row.last_seen_at >= 3600_000) {
-    await dc.env.DB.prepare("UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ? AND revoked_at IS NULL AND expires_at > ?")
-      .bind(now, now + SESSION_TTL, row.id, now).run();
+  const refreshed = browserWriteAllowed(dc, request) && now - row.last_seen_at >= 3600_000;
+  if (refreshed) {
+    const changed = await dc.env.DB.prepare("UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ? AND revoked_at IS NULL AND expires_at > ? RETURNING id")
+      .bind(now, now + SESSION_TTL, row.id, now).first();
+    if (!changed) throw unauthorized("This session expired or was revoked.", "Sign in again at /login.", "invalid_session");
   }
-  return memberPrincipal(member, request.headers.get("cf-connecting-ip") ?? "0.0.0.0", "session");
+  return { principal: memberPrincipal(member, request.headers.get("cf-connecting-ip") ?? "0.0.0.0", "session"), refreshed };
+}
+
+export async function resolveSession(dc: DropwayContext, request: Request): Promise<MemberPrincipal> {
+  return (await sessionState(dc, request)).principal;
+}
+
+/** A first-party POST naturally carries Origin; cookie and D1 renew together. */
+export async function refreshSession(dc: DropwayContext, request: Request) {
+  requireBrowserWrite(dc, request);
+  const state = await sessionState(dc, request);
+  return { ...(state.refreshed ? { cookie: sessionSetCookie(sessionToken(request)!) } : {}) };
 }
 
 /** Inspect without consuming: browser confirmation must not spend the credential. */

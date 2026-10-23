@@ -22,6 +22,13 @@
   and signed-in anonymous-site claiming. Ordinary REST resources remain bearer-only;
   explicit browser auth and claim writes require exact app `Origin` **and**
   `Sec-Fetch-Site: same-origin`. API-key sign-in stays cookie-free.
+- Browser Fetch Metadata selects deliberate identity confirmation before a login link
+  is consumed. Untrusted session reads cannot slide authority or refresh cookies;
+  first-party pages use a guarded POST to renew D1 and the same cookie after an hour.
+  Access-derived unsafe calls and enabled email-code requests enforce both browser
+  headers, regardless of Cookie presence. Explicit bearer clients remain independent.
+- Preserve proof on origin/transport refusal, redact diagnostic URL queries/tokens,
+  and let failed email delivery retry without resetting verification budgets.
 - Add migration `0004_sessions.sql`; apply it before upgrading the Worker.
   Numbers 0002 and 0003 remain reserved for their separate roadmap features.
 

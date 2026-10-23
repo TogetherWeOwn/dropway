@@ -78,7 +78,10 @@ requires a deliberate same-origin POST with both browser security headers. Progr
 GET clients without Fetch Metadata retain direct exchange; protect the URL as a secret.
 `/dashboard/sessions` lists sessions, revokes selected sessions and signs out. Sessions
 last 30 days and slide only on activity supplying both browser security headers; ordinary
-GET navigation without Origin is read-only. Removing a member invalidates their sessions.
+GET navigation without Origin is read-only. The first-party session/claim script uses
+`POST /api/v1/auth/sessions/refresh` to renew D1 and the same host-only cookie together
+after one hour; before then it is a no-op. This endpoint accepts no API-key substitute.
+Removing a member invalidates their sessions.
 API-key sign-in and the resource dashboard remain available; ordinary REST resources
 and MCP use bearer tokens, not cookies. No persistent API key is minted by browser login.
 
@@ -93,14 +96,17 @@ whitespace is trimmed; the code must still be exactly six ASCII digits. Without
 `EMAIL` or an embedding `EmailAdapter`, the UI hides email sign-in and both operations
 return `feature_unavailable`. Delivery uses the current
 [Cloudflare Email Service structured Workers API](https://developers.cloudflare.com/email-service/api/send-emails/workers-api/),
-not an HTTP API credential or an implicit signup flow.
+not an HTTP API credential or an implicit signup flow. Both enabled email-code operations
+require exact app Origin and same-origin Fetch Metadata, including cookieless requests.
 
 Optional Cloudflare Access: configure **both** `ACCESS_TEAM_DOMAIN` (team hostname or
 HTTPS team origin, such as `example.cloudflareaccess.com`) and `ACCESS_AUD` (application
 audience). The default identity verifies RS256 signatures using that team's fixed JWKS
 endpoint, issuer, audience and expiry, then maps a unique existing active member email.
 An unsigned token or an email header alone grants no authority. Access never creates a
-member implicitly. An explicit bearer credential takes precedence.
+member implicitly. Access-derived unsafe REST and MCP calls require both exact app
+Origin and same-origin Fetch Metadata, even without a forwarded Cookie header. An explicit
+bearer credential takes precedence and does not require browser headers.
 
 Anonymous claim links keep proof in their URL fragment. Opening the claim page keeps
 it in this tab across sign-in and sends it only when submitting the actual claim form.

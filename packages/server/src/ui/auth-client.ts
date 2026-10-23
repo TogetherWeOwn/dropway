@@ -8,6 +8,11 @@ export function browserSignin() {
     try { return JSON.parse(sessionStorage.getItem("dw_pending_claim") || "null"); } catch { return null; }
   }
   var claim = document.getElementById("dw-claim-page");
+  if (location.pathname === "/dashboard/sessions" || document.getElementById("dw-claim")) {
+    // Same-origin POST supplies both browser headers naturally. Session proof
+    // stays HttpOnly; ordinary navigation itself never renews server authority.
+    fetch("/api/v1/auth/sessions/refresh", { method: "POST", credentials: "same-origin" }).catch(function () { /* retry on the next app visit */ });
+  }
   if (claim) {
     var slug = claim.dataset.slug || "";
     var token = new URLSearchParams(location.hash.slice(1)).get("token");

@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import {
-  browserWriteAllowed, createLoginLink, emailAvailable, listSessions, logoutSession, requestEmailCode,
+  browserWriteAllowed, createLoginLink, emailAvailable, listSessions, logoutSession, refreshSession, requestEmailCode,
   requireBrowserWrite, resolveSession, revokeSession, sessionSetCookie, sessionToken, verifyEmailCode,
 } from "@dropway/core";
 import type { DropwayEnv } from "../env";
@@ -48,6 +48,20 @@ export const AUTH_OPERATIONS = [
     examples: [{ input: {}, output: { sessions: [] } }],
   }),
   defineOperation({
+    id: "refresh_session", method: "POST", path: "/api/v1/auth/sessions/refresh", toolset: "auth", scopes: [], anonymous: true,
+    summary: "Renew this browser session after first-party activity",
+    description: "Requires the actual __Host-dw_session cookie, exact app Origin and Sec-Fetch-Site: same-origin. After one hour, renew both D1 authority and the same host-only cookie. An empty body is accepted; bearer credentials cannot substitute for the cookie.",
+    input: empty, output: object, annotations: WRITE, mcp: browserOnly,
+    handler: async (_args, { dw, request }) => refreshSession(dw, request),
+    http: { handler: async (c) => {
+      const result = await refreshSession(c.get("dw"), c.req.raw);
+      c.header("Cache-Control", "no-store");
+      if (result.cookie) c.header("Set-Cookie", result.cookie);
+      return c.json({ refreshed: true });
+    } },
+    examples: [{ input: {}, output: { refreshed: true } }],
+  }),
+  defineOperation({
     id: "revoke_session", method: "DELETE", path: "/api/v1/auth/sessions/{id}", toolset: "auth", scopes: [], anonymous: true,
     summary: "Revoke your browser session",
     description: "Requires the actual __Host-dw_session cookie, exact app Origin and Sec-Fetch-Site: same-origin. Revoke only a session belonging to the signed-in member.",
@@ -82,9 +96,8 @@ export const AUTH_OPERATIONS = [
     },
     http: { statuses: [202, 303], contentTypes: ["application/json", "application/x-www-form-urlencoded"], handler: async (c) => {
       const dw = c.get("dw");
-      const body = await input(c);
-      if (emailAvailable(dw) && c.req.header("Cookie")) requireBrowserWrite(dw, c.req.raw);
-      const result = await requestEmailCode(dw, body);
+      if (emailAvailable(dw)) requireBrowserWrite(dw, c.req.raw);
+      const result = await requestEmailCode(dw, await input(c));
       c.header("Cache-Control", "no-store");
       if (c.req.header("Content-Type")?.startsWith("application/x-www-form-urlencoded")) return c.redirect("/login?code=1", 303);
       return c.json(result, 202);

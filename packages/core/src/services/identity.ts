@@ -5,6 +5,7 @@ import { unauthorized } from "../errors";
 import type { Principal } from "../principal";
 import { API_KEY_PREFIX, authenticateApiKey } from "./keys";
 import { resolveAccessIdentity } from "./access-identity";
+import { requireBrowserWrite } from "./sessions";
 
 export const CLAIM_TOKEN_PREFIX = "dwc_";
 
@@ -46,7 +47,12 @@ export const defaultIdentity: IdentityAdapter = {
     const token = bearerToken(request);
     if (token) return principalFromToken(dc, token, ip);
     const access = request.headers.get("Cf-Access-Jwt-Assertion");
-    if (access && dc.config.accessTeamDomain && dc.config.accessAud) return resolveAccessIdentity(dc, access, ip);
+    if (access && dc.config.accessTeamDomain && dc.config.accessAud) {
+      // Proxy assertions may come from ambient Access cookies, not an explicit
+      // bearer credential. Guard every unsafe surface, REST and MCP alike.
+      if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) requireBrowserWrite(dc, request);
+      return resolveAccessIdentity(dc, access, ip);
+    }
     return { kind: "anonymous", ip };
   },
 };

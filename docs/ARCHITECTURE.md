@@ -275,13 +275,19 @@ consumers, scripts, tests). Inside routes, use `c.get("dw")` and
 header check. `services/email-signin.ts` owns existing-member code challenges (five tries,
 15 minutes, HMAC hashes, no signup). `services/access-identity.ts` verifies RS256 Access
 assertions against configured team JWKS, issuer, audience and time claims before mapping
-an existing unique member email. Explicit bearer credentials always take precedence.
+an existing unique member email. Unsafe Access-derived REST/MCP requests require both
+exact app Origin and same-origin Fetch Metadata even when a proxy strips cookies.
+Explicit bearer credentials always take precedence and keep their non-browser contract.
 
 The default identity adapter still ignores cookies on ordinary REST resource routes and
 MCP. Thin `/api/v1/auth/*` browser-auth handlers explicitly resolve the built-in session;
 claim uses `GET /claim` plus `POST /claim`, calling the same core claim service as REST/MCP.
 Cookie writes require exact `Origin` AND `Sec-Fetch-Site: same-origin`, not SameSite alone.
 Session reads without both headers do not slide D1 expiry or refresh browser cookies.
+The session/claim script deliberately calls `POST /api/v1/auth/sessions/refresh`, which
+naturally carries Origin. It renews the same cookie and D1 authority together after an
+hour; before then it is a no-op. This cookie-only operation skips unrelated bearer
+identity resolution (and API-key last-use writes), not its core session/browser checks.
 Login-link requests carrying browser Fetch Metadata show the destination member and a
 native confirmation form; its guarded `POST /login/confirm` consumes the unspent proof.
 Headerless programmatic GET exchanges retain the one-use issuer contract. The login
@@ -295,7 +301,9 @@ POST. No user content runs on these pages. API-key sign-in remains cookie-free.
 
 `adapters.email.send(message, dw)` optionally overrides delivery. Without it, `EMAIL.send`
 (Cloudflare Email Service) delivers; without either, email options are hidden and the
-operations return `feature_unavailable`. `EMAIL_FROM` sets the verified sender. Embedding
+operations return `feature_unavailable`. Enabled email-code requests require both browser
+headers even without cookies, before challenge creation or delivery, for known and unknown
+emails alike. `EMAIL_FROM` sets the verified sender. Embedding
 cookie adapters and `uiSlots.session` remain separate and require their own security proof.
 
 ## Conventions
