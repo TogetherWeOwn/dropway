@@ -6,6 +6,7 @@
 export const EXTENSION_API_VERSION = 2;
 
 export { createDropway, CORE_MCP_TOOLS, type Dropway } from "./create";
+export { defineOperation, type OperationDefinition, type OperationContext } from "./operations";
 export type {
   CreateDropwayOptions,
   McpHandlerFactory,

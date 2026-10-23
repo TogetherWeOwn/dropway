@@ -1,4 +1,7 @@
 import { Hono } from "hono";
+import { diagnosticText } from "./diagnostics";
+import { createOperationRegistry } from "./operations/registry";
+import { installOperationRoutes, operationTools, type OperationDefinition } from "./operations";
 import {
   ApiError,
   appOrigin,
@@ -16,7 +19,7 @@ import { createAppRouter } from "./app";
 import type { DropwayEnv, ServerBindings } from "./env";
 import type { CreateDropwayOptions, McpToolDefinition, UiSlots } from "./extensions";
 import { escapeHtml, htmlPage } from "./html";
-import { apiErrorResponse, installApiMiddleware, installApiRoutes } from "./routes/api";
+import { apiErrorResponse, installApiMiddleware } from "./routes/api";
 import { legacyAppRedirect, legacyAppSuccessor, withDeprecationHeaders } from "./legacy";
 import { redirectResponse, routeSiteRequest } from "./route-sites";
 import { SITE_SANDBOX, serveSite, systemResponse } from "./serve";
@@ -24,8 +27,6 @@ import { bindUiSlots } from "./ui/shell";
 import { VIEWERS, type Viewer } from "./viewers";
 import { createMcpEndpoint } from "./mcp";
 import { CORE_MCP_TOOLS } from "./mcp/tools";
-import { installAgentApiRoutes } from "./routes/api-agent";
-import { installAuthRoutes } from "./routes/auth";
 
 export interface Dropway {
   /** Worker fetch handler: export default { fetch: dropway.fetch, scheduled: dropway.scheduled }. */
@@ -34,6 +35,8 @@ export interface Dropway {
   scheduled(controller: ScheduledController, env: ServerBindings, ctx: ExecutionContext): Promise<void>;
   /** App-origin router (REST API mounted at /api/v1). Useful for tests and composition. */
   app: Hono<DropwayEnv>;
+  /** Instance-local source for REST routes, documentation, MCP and CLI commands. */
+  operations: OperationDefinition[];
   /** MCP tools exposed by this instance (core + extensions). */
   mcpTools: readonly McpToolDefinition[];
   uiSlots: UiSlots;
@@ -61,8 +64,8 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
     ...(opts.adapters?.email ? { email: opts.adapters.email } : {}),
   };
   const uiSlots: UiSlots = { navItems: [], pages: [], ...opts.uiSlots };
-  // Extension tools come after core tools; one with a core tool's name replaces it.
-  const mcpTools: readonly McpToolDefinition[] = [...new Map([...CORE_MCP_TOOLS, ...(opts.mcpTools ?? [])].map((t) => [t.name, t] as const)).values()];
+  const operations = createOperationRegistry(opts.operations);
+  const mcpTools: readonly McpToolDefinition[] = [...new Map([...operationTools(operations), ...(opts.mcpTools ?? [])].map((t) => [t.name, t] as const)).values()];
   const viewers: readonly Viewer[] = [...(opts.viewers ?? []), ...VIEWERS];
 
   const configs = new WeakMap<object, DropwayConfig>();
@@ -90,9 +93,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
   installApiMiddleware(api, opts.apiMiddleware ?? []);
   const appRoutes = new Hono<DropwayEnv>();
   for (const extend of opts.routes ?? []) extend({ api, app: appRoutes });
-  installAuthRoutes(api);
-  installApiRoutes(api);
-  installAgentApiRoutes(api);
+  installOperationRoutes(api, operations);
   const app = new Hono<DropwayEnv>();
   app.use("*", async (c, next) => {
     c.set("dw", contexts.get(c.req.raw) ?? context(c.env, c.executionCtx, new URL(c.req.url)));
@@ -101,7 +102,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
     await next();
   });
   app.route("/api/v1", api);
-  app.route("/", createAppRouter({ app: appRoutes, uiSlots, mcp: opts.mcp ?? createMcpEndpoint(), mcpTools }));
+  app.route("/", createAppRouter({ app: appRoutes, uiSlots, mcp: opts.mcp ?? createMcpEndpoint(), mcpTools, operations }));
   app.notFound((c) => {
     if (c.req.path.startsWith("/api/")) {
       return c.json(
@@ -114,7 +115,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
   });
   app.onError((err, c) => {
     if (c.req.path.startsWith("/api/")) return apiErrorResponse(c, err);
-    console.error(JSON.stringify({ event: "app_error", path: c.req.path, error: String(err), stack: (err as Error)?.stack }));
+    console.error(JSON.stringify({ event: "app_error", path: diagnosticText(c.req.path), error: diagnosticText(err), stack: diagnosticText((err as Error)?.stack ?? "") }));
     return c.text("Internal error", 500);
   });
 
@@ -143,7 +144,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
         }
       }
     } catch (e) {
-      console.error(JSON.stringify({ event: "serve_error", url: request.url, error: String(e), stack: (e as Error)?.stack }));
+      console.error(JSON.stringify({ event: "serve_error", url: diagnosticText(request.url), error: diagnosticText(e), stack: diagnosticText((e as Error)?.stack ?? "") }));
       return new Response("Internal error", { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
     }
   }
@@ -154,7 +155,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
     await opts.scheduled?.(dw, controller);
   }
 
-  return { fetch, scheduled, app, mcpTools, uiSlots, viewers, adapters, context };
+  return { fetch, scheduled, app, operations, mcpTools, uiSlots, viewers, adapters, context };
 }
 
 function sitesHome(dw: DropwayContext): Response {

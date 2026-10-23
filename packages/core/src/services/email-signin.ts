@@ -2,7 +2,7 @@ import type { EmailAdapter } from "../adapters";
 import { appOrigin, type DropwayContext } from "../context";
 import { ApiError, badRequest, forbidden, unauthorized } from "../errors";
 import { hmacHex, newId } from "../lib/crypto";
-import { activeMember, issueSession, resolveSession, sessionToken, SIGN_IN_TTL } from "./sessions";
+import { activeMember, issueSession, requireSessionOrigin, resolveSession, sessionToken, SIGN_IN_TTL } from "./sessions";
 import type { MemberRow } from "./tenants";
 
 export function emailAvailable(dc: DropwayContext): boolean {
@@ -38,29 +38,39 @@ export async function requestEmailCode(dc: DropwayContext, input: { email?: unkn
   const accepted = { accepted: true, message: "If this email belongs to an existing member, a code will be sent. Check your inbox." };
   if (!member) return accepted;
   const now = Date.now();
-  const id = newId("emc");
+  const previous = await dc.env.DB.prepare("SELECT id FROM email_codes WHERE email = ? AND purpose = 'sign_in' AND expires_at > ? ORDER BY created_at DESC LIMIT 1")
+    .bind(email, now).first<{ id: string }>();
+  const id = previous?.id ?? newId("emc");
   // Rejection sampling gives an unbiased six-digit code.
   const random = new Uint32Array(1);
   do { crypto.getRandomValues(random); } while (random[0]! >= 4294000000);
   const code = String(random[0]! % 1000000).padStart(6, "0");
   const hash = await hmacHex(dc.config.signingSecret, `${id}:${email}:${code}`);
-  // A resend cannot reset the guessing budget or flood the member's mailbox.
-  const inserted = await dc.env.DB.prepare("INSERT INTO email_codes (id, purpose, email, code_hash, created_at, expires_at) SELECT ?, 'sign_in', ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM email_codes WHERE email = ? AND purpose = 'sign_in' AND expires_at > ?) RETURNING id")
-    .bind(id, email, hash, now, now + SIGN_IN_TTL, email, now).first();
+  // A resend rotates the hash, but keeps the original expiry and five-try budget.
+  // Reserve delivery atomically; simultaneous resends cannot flood the mailbox.
+  const inserted = previous
+    ? await dc.env.DB.prepare("UPDATE email_codes SET code_hash = ?, created_at = ? WHERE id = ? AND used_at IS NULL AND attempts < 5 AND expires_at > ? AND created_at <= ? RETURNING id")
+      .bind(hash, now, id, now, now - 60_000).first()
+    : await dc.env.DB.prepare("INSERT INTO email_codes (id, purpose, email, code_hash, created_at, expires_at) SELECT ?, 'sign_in', ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM email_codes WHERE email = ? AND purpose = 'sign_in' AND expires_at > ?) RETURNING id")
+      .bind(id, email, hash, now, now + SIGN_IN_TTL, email, now).first();
   if (!inserted) return accepted;
   try {
     await adapter.send({ to: [email], subject: "Your Dropway sign-in code", text: `Your sign-in code is ${code}. It expires in 15 minutes. If you did not request it, ignore this email.`, kind: "sign_in" }, dc);
   } catch {
-    await dc.env.DB.prepare("UPDATE email_codes SET used_at = ? WHERE id = ?").bind(Date.now(), id).run();
-    throw new ApiError(503, "email_delivery_failed", "The sign-in email could not be delivered.", "Ask the owner for a login link or try again after 15 minutes.");
+    // Invalidate the undelivered proof and release only its delivery cooldown.
+    // Never reopen a consumed code or reset verification attempts.
+    await dc.env.DB.prepare("UPDATE email_codes SET code_hash = '', created_at = 0 WHERE id = ? AND code_hash = ? AND used_at IS NULL")
+      .bind(id, hash).run();
+    throw new ApiError(503, "email_delivery_failed", "The sign-in email could not be delivered.", "Try requesting a new code, or ask the owner for a login link.");
   }
   return accepted;
 }
 
 export async function verifyEmailCode(dc: DropwayContext, input: { email?: unknown; code?: unknown }, request: Request) {
   emailAdapter(dc);
+  requireSessionOrigin(dc, request);
   const email = emailAddress(input.email);
-  const code = typeof input.code === "string" ? input.code : "";
+  const code = typeof input.code === "string" ? input.code.trim() : "";
   const invalid = () => unauthorized("The code is invalid, expired or has no attempts left.", "Request a new code after 15 minutes.", "invalid_email_code");
   const member = await memberByEmail(dc, email);
   if (!member) throw invalid();

@@ -1,510 +1,182 @@
-/**
- * OpenAPI 3.1 description of every route this instance serves (served at /openapi.json).
- *
- * operationId = the MCP tool name (snake_case), so REST, MCP and docs use one vocabulary.
- * Each operation says how it maps to MCP: `x-mcp-tool` names the tool, or `x-mcp-exclude`
- * gives the reason it has none (raw bytes, bootstrap-only, browser pages).
- * A test checks that every Hono route has an entry here. Extensions add their own paths
- * by post-processing buildOpenApi()'s result.
- */
+import { createOperationRegistry } from "./operations/registry";
+import { schemaJson, type OperationDefinition } from "./operations";
+import { PAGE_PATHS } from "./page-openapi";
+import { resolveConfig, type DropwayContext } from "@dropway/core";
 
-type Json = Record<string, unknown>;
+type Json = Record<string, any>;
+const json = (schema: Json, example: unknown, description = "OK") => ({
+  description,
+  content: { "application/json": { schema, example } },
+});
 
-const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
-const json = (schema: Json, description = "OK") => ({ description, content: { "application/json": { schema } } });
-const text = (description: string, type = "text/plain") => ({ description, content: { [type]: { schema: { type: "string" } } } });
-const slugParam = { name: "slug", in: "path", required: true, schema: { type: "string" }, description: "Site slug, e.g. bright-otter-x7k2 (routes marked as such also accept a site id)." };
-const pathParam = (name: string, description: string) => ({ name, in: "path", required: true, schema: { type: "string" }, description });
-const query = (name: string, schema: Json, description?: string) => ({ name, in: "query", required: false, schema, ...(description ? { description } : {}) });
-const idempotencyHeader = { name: "Idempotency-Key", in: "header", required: false, schema: { type: "string", maxLength: 255 }, description: "Retry-safe writes: the same key and body within 24 h replays the first result." };
-const body = (schema: Json, required = true) => ({ required, content: { "application/json": { schema } } });
-const errors = { default: json(ref("Error"), "Error: { error: { code, message, hint?, details? }, requestId }") };
-
-interface OpOptions {
-  tags: string[];
-  description?: string;
-  params?: Json[];
-  requestBody?: Json;
-  responses?: Json;
-  /** false = no credential needed. */
-  security?: boolean;
-  /** MCP tool with the same behaviour (defaults to the operationId). */
-  mcpTool?: string;
-  /** Why there is no MCP tool. */
-  mcpExclude?: string;
-  deprecated?: boolean;
+function toolAvailable(op: OperationDefinition, context: DropwayContext): boolean {
+  if (!op.tool?.enabled) return true;
+  try { return op.tool.enabled(context); } catch { return true; }
 }
 
-function op(operationId: string, summary: string, o: OpOptions) {
-  return {
-    operationId,
-    summary,
-    tags: o.tags,
-    ...(o.description ? { description: o.description } : {}),
-    ...(o.params ? { parameters: o.params } : {}),
-    ...(o.requestBody ? { requestBody: o.requestBody } : {}),
-    ...(o.security === false ? { security: [] } : {}),
-    ...(o.deprecated ? { deprecated: true } : {}),
-    ...(o.mcpExclude ? { "x-mcp-exclude": o.mcpExclude } : { "x-mcp-tool": o.mcpTool ?? operationId }),
-    responses: { ...(o.responses ?? { 200: json({ type: "object" }) }), ...errors },
-  };
-}
-
-const settingsProps = {
-  title: { type: ["string", "null"], maxLength: 200 },
-  description: { type: ["string", "null"], maxLength: 2000 },
-  spa: { type: "boolean", description: "Serve index.html for unknown paths (single-page apps)." },
-  renderMarkdown: { type: "boolean", description: "Render .md files as HTML pages for browsers (default true)." },
-  crossOriginIsolation: { type: "boolean", description: "Send COOP/COEP headers (needed for SharedArrayBuffer, threaded WASM)." },
-  password: { type: ["string", "null"], description: "Visitor password; null removes it. Needs an API key." },
-};
-
-const fileInput = {
-  type: "object",
-  required: ["path"],
-  description: "A path plus exactly one source: content (+encoding), url (+headers), sha256 (+size) or copyFrom.",
-  properties: {
-    path: { type: "string" },
-    content: { type: "string" },
-    encoding: { enum: ["utf8", "base64"] },
-    url: { type: "string", format: "uri", description: "Public https URL the server downloads." },
-    headers: { type: "object", additionalProperties: { type: "string" } },
-    sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
-    size: { type: "integer", minimum: 0 },
-    copyFrom: { type: "object", properties: { site: { type: "string" }, version: { type: "string" }, path: { type: "string" } } },
-    contentType: { type: "string" },
-  },
-};
-
-/** The OpenAPI document for an instance at `origin`; anonymous publishing defaults to disabled. */
-export function buildOpenApi(origin: string, instanceName: string, anonymousPublish = false): Json {
+/** The boolean third argument remains supported; a definition array is also accepted. */
+export function buildOpenApi(origin: string, instanceName: string, anonymousOrOperations: boolean | readonly OperationDefinition[] = false, registry?: readonly OperationDefinition[], availableTools?: ReadonlySet<string>): Json {
+  const anonymousPublish = typeof anonymousOrOperations === "boolean" ? anonymousOrOperations : false;
+  const operations = typeof anonymousOrOperations === "boolean" ? registry ?? createOperationRegistry() : anonymousOrOperations;
+  // Static callers have configuration only. Request routes pass the actual visible inventory.
+  const discoveryContext = { config: resolveConfig({ ANONYMOUS_PUBLISH: String(anonymousPublish) }, { instanceName }) } as DropwayContext;
+  const paths: Json = Object.create(null);
+  for (const [path, item] of Object.entries(PAGE_PATHS)) paths[path] = Object.assign(Object.create(null), structuredClone(item));
+  for (const item of Object.values<Json>(paths))
+    for (const page of Object.values<Json>(item)) {
+      page.description ??= page.summary;
+      page.responses[404] ??= { description: "Page or resource not found." };
+    }
+  for (const op of operations) {
+    const input = schemaJson(op.http?.input ?? op.input);
+    const output = schemaJson(op.http?.output ?? op.output, "output");
+    const example = op.http?.examples?.[0] ?? op.examples?.[0];
+    const enabled = availableTools?.has(op.id) ?? toolAvailable(op, discoveryContext);
+    const excluded = op.mcp && "exclude" in op.mcp ? op.mcp.exclude : !enabled ? op.tool?.unavailableReason ?? "This MCP tool is not enabled for the instance; the REST operation remains available." : undefined;
+    for (const [index, route] of [{ method: op.method, path: op.path }, ...(op.aliases ?? [])].entries()) {
+      const parameters: Json[] = [];
+      const names = [...route.path.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!);
+      for (const name of names)
+        parameters.push({
+          name,
+          in: "path",
+          required: true,
+          description: input.properties?.[name]?.description ?? `The ${name} identifying this resource.`,
+          schema: input.properties?.[name] ?? { type: "string" },
+        });
+      const props = Object.fromEntries(Object.entries(input.properties ?? {}).filter(([key]) => !names.includes(key)));
+      const required = (input.required ?? []).filter((key: string) => !names.includes(key));
+      const method = route.method.toLowerCase();
+      if (method === "get" || method === "head" || (op.rawBody && !op.http?.handler)) {
+        for (const [name, schema] of Object.entries(props))
+          parameters.push({
+            name,
+            in: "query",
+            required: required.includes(name),
+            schema,
+          });
+      }
+      const contentTypes = op.http?.contentTypes ?? [op.rawBody ? "application/octet-stream" : "application/json"];
+      const requestBody =
+        !["get", "head", "delete"].includes(method) || (Object.keys(props).length > 0 && method === "delete")
+          ? {
+              required: required.length > 0 || !!op.rawBody,
+              content: Object.fromEntries(
+                contentTypes.map((type) => [
+                  type,
+                  {
+                    schema:
+                      type === "application/json"
+                        ? { ...input, properties: props, required }
+                        : type === "multipart/form-data"
+                          ? {
+                              type: "object",
+                              additionalProperties: {
+                                type: "string",
+                                format: "binary",
+                              },
+                            }
+                          : { type: "string", format: "binary" },
+                    ...(example
+                      ? {
+                          example:
+                            type === "application/json"
+                              ? Object.fromEntries(Object.entries(example.input as Record<string, unknown>).filter(([name]) => Object.hasOwn(props, name)))
+                              : type === "multipart/form-data"
+                                ? { "index.html": "Hello from Dropway" }
+                                : "Hello from Dropway",
+                        }
+                      : {}),
+                  },
+                ]),
+              ),
+            }
+          : undefined;
+      const success: Json = json(output, example?.output ?? {}, "Successful operation result");
+      if (op.http?.responseType)
+        success.content = {
+          [op.http.responseType]: {
+            schema: { type: "string", format: "binary" },
+            example: "Hello from Dropway",
+          },
+        };
+      const status = op.http?.status ?? 200;
+      const responses: Json = {
+        [status]: success,
+        default: json(
+          { $ref: "#/components/schemas/Error" },
+          {
+            error: {
+              code: "invalid_request",
+              message: "Invalid request.",
+              hint: "Correct the input and retry.",
+            },
+            requestId: "request-example",
+          },
+          "Error with a stable code and remediation hint",
+        ),
+      };
+      if (op.http?.statuses) {
+        delete responses[status];
+        for (const code of op.http.statuses) responses[code] = success;
+      }
+      responses[400] = responses.default;
+      paths[route.path] ??= Object.create(null);
+      paths[route.path][method] = {
+        operationId: index === 0 ? op.id : `${op.id}_alias_${index}`,
+        summary: op.summary,
+        description: op.description,
+        tags: [op.toolset],
+        ...(index > 0 ? { deprecated: true } : {}),
+        ...(op.anonymous ? { security: [] } : {}),
+        ...(parameters.length ? { parameters } : {}),
+        ...(requestBody ? { requestBody } : {}),
+        ...(excluded ? { "x-mcp-exclude": excluded } : { "x-mcp-tool": op.id }),
+        responses,
+      };
+    }
+  }
   return {
     openapi: "3.1.0",
     info: {
       title: `${instanceName} API`,
       version: "1.0.0",
       description:
-        "Publish files, folders and sites to live URLs. Authenticate with `Authorization: Bearer dw_...`. Errors always carry a stable `code` and a `hint` saying what to do next. Fastest path: POST /api/v1/publish with multipart files. See x-mcp-tool for available MCP twins at /mcp, or x-mcp-exclude for why an operation has none.",
-      license: { name: "MIT", url: "https://github.com/TogetherWeOwn/dropway/blob/main/LICENSE" },
+        "Publish files, folders and sites to live URLs. Authenticate with a scoped bearer API key. REST, MCP and CLI metadata are generated from the operation registry. Errors include a stable code and remediation hint.",
+      license: {
+        name: "MIT",
+        url: "https://github.com/TogetherWeOwn/dropway/blob/main/LICENSE",
+      },
     },
-    externalDocs: { description: "Agent docs (llms.txt)", url: `${origin}/llms.txt` },
     servers: [{ url: origin }],
+    externalDocs: { description: "Agent reference", url: `${origin}/llms.txt` },
     security: [{ bearer: [] }],
-    tags: [
-      { name: "publish", description: "One-shot publishing and partial updates" },
-      { name: "sites", description: "Sites, settings and access" },
-      { name: "files", description: "Read back published files" },
-      { name: "versions", description: "Immutable versions, uploads and restore" },
-      { name: "keys", description: "Scoped API keys" },
-      { name: "members", description: "Members of this instance" },
-      { name: "setup", description: "First run (bootstrap key)" },
-      { name: "agents", description: "MCP server and agent discovery documents" },
-      { name: "pages", description: "Browser pages on the app origin (dashboard and file browser). Agents use the API or MCP instead." },
-    ],
-    paths: {
-      // ------------------------------------------------------------------ discovery + identity
-      "/api/v1": {
-        get: op("api_index", "API index with links to the docs", { tags: ["agents"], security: false, mcpExclude: "discovery document; use whoami" }),
-      },
-      "/api/v1/login-links": {
-        post: op("create_login_link", "Create a one-use member login link (15 minutes)", { tags: ["members"], requestBody: body({ type: "object", properties: { memberId: { type: "string" } } }), responses: { 201: json({ type: "object", properties: { url: { type: "string" }, expiresAt: { type: "number" } } }) }, description: "Bearer-only. A full-role unrestricted key can mint for itself; minting for another member requires member administration and cannot grant greater authority. Treat the returned URL as a secret." }),
-      },
-      "/api/v1/auth/sessions": {
-        get: op("list_sessions", "List your active browser sessions", { tags: ["members"], security: false, mcpExclude: "explicit browser-session endpoint; requires __Host-dw_session, never used as REST resource authority" }),
-      },
-      "/api/v1/auth/sessions/{id}": {
-        delete: op("revoke_session", "Revoke one of your browser sessions", { tags: ["members"], params: [pathParam("id", "An id returned by list_sessions")], security: false, description: "Requires a live session cookie, exact app Origin AND Sec-Fetch-Site: same-origin.", mcpExclude: "browser-session operation" }),
-      },
-      "/api/v1/auth/logout": {
-        post: op("logout_session", "Revoke the current browser session and clear its cookie", { tags: ["members"], security: false, description: "Requires a live session cookie, exact app Origin AND Sec-Fetch-Site: same-origin.", mcpExclude: "browser-session operation" }),
-      },
-      "/api/v1/auth/email-code": {
-        post: op("request_email_code", "Send an existing member a sign-in code", { tags: ["members"], security: false, requestBody: body({ type: "object", required: ["email"], properties: { email: { type: "string" } } }), responses: { 202: json({ type: "object" }) }, description: "Optional EMAIL or EmailAdapter. Uniform response for unknown members, no signup. One challenge per email per 15 minutes; request does not reset the attempt budget.", mcpExclude: "browser sign-in operation" }),
-      },
-      "/api/v1/auth/email-code/verify": {
-        post: op("verify_email_code", "Exchange a delivered code for a browser session", { tags: ["members"], security: false, requestBody: body({ type: "object", required: ["email", "code"], properties: { email: { type: "string" }, code: { type: "string" } } }), description: "One use, 15 minutes, at most five tries. Requires exact app Origin AND Sec-Fetch-Site: same-origin. Sets a Secure, HttpOnly, host-only session cookie.", mcpExclude: "browser sign-in operation" }),
-      },
-      "/api/v1/me": {
-        get: op("whoami", "Who am I: principal, tenant, member, scopes", { tags: ["keys"], responses: { 200: json(ref("Whoami")) } }),
-      },
-      "/api/v1/setup": {
-        post: op("setup_instance", "First run: create the owner (bootstrap key only)", {
-          tags: ["setup"],
-          description: "Authorization: Bearer <ADMIN_BOOTSTRAP_KEY>. Creates the tenant, its owner and a full-scope owner API key. Works once on a single-tenant instance.",
-          requestBody: body({ type: "object", properties: { email: { type: "string" }, name: { type: "string" }, tenantName: { type: "string" } } }, false),
-          mcpExclude: "needs the bootstrap key, which MCP never accepts",
-          responses: { 201: json({ type: "object" }, "Owner created; apiKey.key is shown once") },
-        }),
-      },
-      "/api/v1/accounts": {
-        post: op("setup_instance_legacy", "Alias of POST /api/v1/setup", { tags: ["setup"], deprecated: true, mcpExclude: "alias of setup_instance" }),
-      },
-      "/api/v1/setup/recover": {
-        post: op("recover_owner_key", "Mint a new owner key (bootstrap key only)", { tags: ["setup"], mcpExclude: "needs the bootstrap key" }),
-      },
-
-      // ------------------------------------------------------------------ publish
-      "/api/v1/publish": {
-        post: op("publish_site", "Publish files in one call and get a live URL", {
-          tags: ["publish"],
-          description:
-            'Accepts multipart/form-data (field name = file path, e.g. -F "assets/app.js=@dist/assets/app.js"; or field `files[]` with filenames; a single .zip is unpacked), application/json ({"files":[{"path","content","encoding?":"base64"}]}), a .zip body, or one raw file body named by ?path= or X-Dropway-Path. Settings and `slug` may be sent as form fields, JSON fields or query parameters. With an existing `slug` you own, publishes a new version of it. Byte-identical content returns unchanged:true. The MCP tool publish_site also accepts url, sha256 and copyFrom file sources.',
-          requestBody: {
-            required: true,
-            content: {
-              "multipart/form-data": { schema: { type: "object", additionalProperties: { type: "string", format: "binary" } } },
-              "application/json": { schema: ref("JsonPublish") },
-              "application/zip": { schema: { type: "string", format: "binary" } },
-              "application/octet-stream": { schema: { type: "string", format: "binary" } },
-            },
-          },
-          params: [query("slug", { type: "string" }), query("path", { type: "string" }, "File name for a single raw body.")],
-          responses: { 201: json(ref("PublishResult"), "Created a new site"), 200: json(ref("PublishResult"), "Published a new version of an existing site") },
-          security: true,
-        }),
-      },
-
-      // ------------------------------------------------------------------ sites
-      "/api/v1/sites": {
-        get: op("list_sites", "List sites", {
-          tags: ["sites"],
-          params: [query("limit", { type: "integer", minimum: 1, maximum: 200 }), query("cursor", { type: "string" })],
-          responses: { 200: json({ type: "object", properties: { sites: { type: "array", items: ref("Site") }, nextCursor: { type: ["string", "null"] } } }) },
-        }),
-        post: op("create_site", "Create a site (optionally with a deploy manifest)", {
-          tags: ["sites"],
-          description: "Without Authorization (only when the instance allows anonymous publishing) the site expires and a claimToken is returned.",
-          requestBody: body({ type: "object", properties: { slug: { type: "string" }, files: { type: "array", items: ref("ManifestEntry") }, ...settingsProps } }, false),
-          responses: { 201: json({ type: "object", properties: { site: ref("Site"), url: { type: "string" }, claimToken: { type: "string" }, deploy: ref("Deploy") } }) },
-        }),
-      },
-      "/api/v1/sites/{slug}": {
-        get: op("get_site", "Get a site", { tags: ["sites"], params: [slugParam], responses: { 200: json({ type: "object", properties: { site: ref("Site") } }) } }),
-        patch: op("update_site_settings", "Update site settings", {
-          tags: ["sites"],
-          params: [slugParam],
-          requestBody: body({ type: "object", properties: settingsProps }),
-          responses: { 200: json({ type: "object", properties: { site: ref("Site") } }) },
-        }),
-        delete: op("delete_site", "Delete a site", { tags: ["sites"], params: [slugParam], description: "The MCP tool also requires confirm = slug." }),
-      },
-      "/api/v1/sites/{slug}/claim": {
-        post: op("claim_site", "Claim an anonymous site into your tenant", {
-          tags: ["sites"],
-          ...(anonymousPublish ? {} : { mcpExclude: "anonymous publishing is disabled; previously issued sites can still be claimed through REST" }),
-          params: [slugParam],
-          requestBody: body({ type: "object", required: ["claimToken"], properties: { claimToken: { type: "string" } } }),
-        }),
-      },
-      "/api/v1/sites/{slug}/rename": {
-        post: op("rename_site", "Give a site a new slug (its URL changes; the old URL stops working)", {
-          tags: ["sites"],
-          params: [slugParam],
-          requestBody: body({ type: "object", required: ["newSlug"], properties: { newSlug: { type: "string" } } }),
-          responses: { 200: json({ type: "object", properties: { renamed: { type: "boolean" }, oldSlug: { type: "string" }, slug: { type: "string" }, url: { type: "string" }, site: ref("Site") } }) },
-        }),
-      },
-      "/api/v1/sites/{slug}/access": {
-        put: op("set_site_access", "Set who can open a site (public or password)", {
-          tags: ["sites"],
-          description: 'mode "public" or "password" (with password). "restricted" and "private" answer 501 feature_unavailable on this edition.',
-          params: [slugParam],
-          requestBody: body({ type: "object", required: ["mode"], properties: { mode: { enum: ["public", "password", "restricted", "private"] }, password: { type: "string", minLength: 4, maxLength: 200 } } }),
-          responses: { 200: json({ type: "object", properties: { site: ref("Site"), access: { type: "object", properties: { mode: { type: "string" } } } } }) },
-        }),
-      },
-
-      // ------------------------------------------------------------------ files
-      "/api/v1/sites/{slug}/files": {
-        get: op("list_files", "List the files of the live (or ?version=) version", { tags: ["files"], params: [slugParam, query("version", { type: "string" }, "Version id.")] }),
-        patch: op("update_site_files", "Write, delete or move some files; everything else carries over", {
-          tags: ["publish"],
-          description:
-            "`files` uses the same sources as MCP publish_site (content, url, sha256+size, copyFrom). `delete` takes paths (trailing / = folder); `move` takes {from, to}. Pass baseVersionId to get 409 version_conflict instead of overwriting a newer publish. Answers 202 with upload items when sha256-only files still need uploading.",
-          params: [slugParam, idempotencyHeader],
-          requestBody: body({
-            type: "object",
-            properties: {
-              files: { type: "array", items: fileInput },
-              delete: { type: "array", items: { type: "string" } },
-              move: { type: "array", items: { type: "object", required: ["from", "to"], properties: { from: { type: "string" }, to: { type: "string" } } } },
-              baseVersionId: { type: "string", description: '"live", "v3", "3" or a version id.' },
-              message: { type: "string", maxLength: 200 },
-            },
-          }),
-          responses: { 200: json(ref("AgentPublishResult")), 202: json(ref("AgentPublishResult"), "Waiting for uploads (upload.items), then finalize") },
-        }),
-      },
-      "/api/v1/sites/{slug}/files/{path}": {
-        get: op("read_file", "Read one file's raw bytes (ETag = sha256)", {
-          tags: ["files"],
-          params: [slugParam, pathParam("path", "File path, segments percent-encoded"), query("version", { type: "string" })],
-          responses: { 200: { description: "Raw bytes. Text types are returned as text/plain; the stored type is in X-Dropway-Content-Type." } },
-          description: "The MCP tool read_file returns text or base64 in JSON and pages with offset/length.",
-        }),
-        head: op("read_file_head", "File metadata only (size, type, ETag)", {
-          tags: ["files"],
-          params: [slugParam, pathParam("path", "File path, segments percent-encoded"), query("version", { type: "string" })],
-          responses: { 200: { description: "Headers only." } },
-          mcpExclude: "HEAD variant of read_file",
-        }),
-      },
-
-      // ------------------------------------------------------------------ versions and uploads
-      "/api/v1/sites/{slug}/deploys": {
-        post: op("create_version", "Start a version from a file manifest (upload only what is missing)", {
-          tags: ["versions"],
-          description: "Send every file's path, size and sha256. The response lists only the files the server does not have yet (`uploads`). PUT each, then finalize.",
-          params: [slugParam],
-          requestBody: body({
-            type: "object",
-            required: ["files"],
-            properties: {
-              files: { type: "array", items: ref("ManifestEntry") },
-              message: { type: "string" },
-              baseVersionId: { type: "string", description: "Fail with 409 version_conflict if the live version is no longer this one." },
-              ...settingsProps,
-            },
-          }),
-          responses: { 201: json(ref("Deploy")), 200: json(ref("Deploy"), "unchanged: the manifest equals the live version") },
-          mcpExclude: "MCP publish_site covers it (sha256 sources return upload links)",
-        }),
-      },
-      "/api/v1/sites/{slug}/deploys/{id}": {
-        get: op("get_deploy", "Pending version status (missing files)", { tags: ["versions"], params: [slugParam, pathParam("id", "Version id")], mcpTool: "get_version", deprecated: true }),
-      },
-      "/api/v1/sites/{slug}/deploys/{id}/finalize": {
-        post: op("finalize_version", "Make an uploaded version live (atomic, idempotent)", { tags: ["versions"], params: [slugParam, pathParam("id", "Version id")] }),
-      },
-      "/api/v1/blobs/{sha256}": {
-        put: op("upload_blob", "Upload one file's raw bytes", {
-          tags: ["versions"],
-          description: "Body = the exact file bytes, with Content-Length. The SHA-256 is verified. Only files listed as missing by a pending version you control are accepted.",
-          params: [pathParam("sha256", "Lowercase hex SHA-256 of the file")],
-          requestBody: { required: true, content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } } },
-          mcpExclude: "raw bytes never pass through the model; PUT them from a shell (curl lines are in upload.items)",
-        }),
-        post: op("upload_blob_post", "Same as PUT", { tags: ["versions"], params: [pathParam("sha256", "Lowercase hex SHA-256 of the file")], deprecated: true, mcpExclude: "alias of upload_blob" }),
-      },
-      "/api/v1/sites/{slug}/versions": {
-        get: op("list_versions", "List versions (newest first)", { tags: ["versions"], params: [slugParam, query("limit", { type: "integer", minimum: 1, maximum: 500 })] }),
-      },
-      "/api/v1/sites/{slug}/versions/{id}": {
-        get: op("get_version", "Get one version: status, counts, missing uploads", {
-          tags: ["versions"],
-          params: [slugParam, pathParam("id", 'Version: "live", "v3", "3" or a version id')],
-          responses: { 200: json({ type: "object", properties: { site: { type: "string" }, version: ref("Version"), missing: { type: "array", items: { type: "string" } } } }) },
-        }),
-        delete: op("delete_version", "Permanently delete a non-live version", { tags: ["versions"], params: [slugParam, pathParam("id", "Version id")], description: "The MCP tool also requires confirm = slug." }),
-      },
-      "/api/v1/sites/{slug}/versions/{id}/restore": {
-        post: op("restore_version", "Make an older version live again", { tags: ["versions"], params: [slugParam, pathParam("id", "Version id")] }),
-      },
-
-      // ------------------------------------------------------------------ keys and members
-      "/api/v1/keys": {
-        get: op("list_api_keys", "List your API keys (?all=1 for the whole tenant with members:write)", { tags: ["keys"], params: [query("all", { type: "string", enum: ["1", "true"] })] }),
-        post: op("create_api_key", "Create an API key", {
-          tags: ["keys"],
-          description: "Keys are never wider than the caller's key or the target member's role. `site` restricts the key to one site.",
-          requestBody: body(
-            { type: "object", properties: { name: { type: "string" }, scopes: ref("Scopes"), expiresInDays: { type: "number" }, memberId: { type: "string" }, site: { type: "string" } } },
-            false,
-          ),
-          responses: { 201: json({ type: "object" }, "Created; key is shown once") },
-        }),
-      },
-      "/api/v1/keys/{id}": { delete: op("revoke_api_key", "Revoke an API key", { tags: ["keys"], params: [pathParam("id", "Key id")] }) },
-      "/api/v1/members": {
-        get: op("list_members", "List members", { tags: ["members"] }),
-        post: op("add_member", "Add a member (returns their first API key)", {
-          tags: ["members"],
-          requestBody: body({ type: "object", properties: { email: { type: "string" }, name: { type: "string" }, role: { enum: ["owner", "admin", "member"] }, scopes: ref("Scopes") } }),
-          responses: { 201: json({ type: "object" }, "Created; apiKey.key is shown once") },
-        }),
-      },
-      "/api/v1/members/{id}": {
-        patch: op("update_member", "Change a member's name or role", { tags: ["members"], params: [pathParam("id", "Member id")] }),
-        delete: op("remove_member", "Remove a member and revoke their keys", { tags: ["members"], params: [pathParam("id", "Member id")], description: "The MCP tool also requires confirm = the member's email." }),
-      },
-
-      // ------------------------------------------------------------------ app origin: MCP, docs, pages
-      "/mcp": {
-        post: op("mcp", "Remote MCP server (Streamable HTTP, stateless)", {
-          tags: ["agents"],
-          description:
-            "JSON-RPC over Streamable HTTP (MCP 2026-07-28, and 2025-era clients through the stateless lane). Same API keys as REST. Narrow the tool list with ?toolsets=core,sites,versions,keys,members and ?read_only=1. Example: claude mcp add --transport http dropway <origin>/mcp --header \"Authorization: Bearer dw_...\"",
-          requestBody: body({ type: "object", description: "A JSON-RPC 2.0 request." }),
-          responses: { 200: { description: "JSON-RPC response (application/json or text/event-stream)." }, 401: { description: "Missing or invalid API key (WWW-Authenticate: Bearer)." } },
-          mcpExclude: "this is the MCP endpoint itself",
-        }),
-      },
-      "/": { get: op("landing", "Landing page (HTML)", { tags: ["agents"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page" }) },
-      "/health": {
-        get: op("health", "Health check", { tags: ["agents"], security: false, responses: { 200: json({ type: "object", properties: { ok: { type: "boolean" }, service: { type: "string" } } }) }, mcpExclude: "monitoring" }),
-      },
-      "/claim": {
-        get: op("claim_page", "Claim page for anonymous sites (token in the URL fragment)", { tags: ["agents"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use claim_site" }),
-        post: op("claim_page_submit", "Claim with a browser session and anonymous site proof", { tags: ["pages"], security: false, description: "Form fields slug and claimToken. Live session plus exact app Origin AND Sec-Fetch-Site: same-origin required. Never accepts a proof on the page GET.", responses: { 303: { description: "Claimed; redirect to session page" } }, mcpExclude: "browser form; agents use claim_site with a bearer key" }),
-      },
-      "/__dropway/auth.js": { get: op("signin_script", "First-party browser session and claim script", { tags: ["pages"], security: false, responses: { 200: text("JavaScript", "text/javascript") }, mcpExclude: "browser asset" }) },
-      "/dashboard/sessions": { get: op("sessions_page", "Signed-in member sessions and logout", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page" }) },
-      "/login": {
-        get: op("login_page", "Sign-in page (API key; first-run setup)", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page" }),
-        post: op("login_form_fallback", "Where the sign-in forms post before the page script has loaded: redirects back to /login and ignores the body", { tags: ["pages"], security: false, responses: { 303: { description: "Redirect to /login?retry=1" } }, mcpExclude: "browser page" }),
-      },
-      "/dashboard": { get: op("dashboard_page", "Dashboard: sites list", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use list_sites" }) },
-      "/dashboard/": { get: op("dashboard_page_slash", "Redirects to /dashboard", { tags: ["pages"], security: false, responses: { 301: { description: "Redirect" } }, mcpExclude: "redirect" }) },
-      "/dashboard/sites/{slug}": { get: op("dashboard_site_page", "Dashboard: one site (versions, files, settings)", { tags: ["pages"], security: false, params: [slugParam], responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use get_site" }) },
-      "/dashboard/publish": { get: op("dashboard_publish_page", "Dashboard: drag-and-drop publish", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use publish_site" }) },
-      "/dashboard/keys": { get: op("dashboard_keys_page", "Dashboard: API keys and members", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use list_api_keys" }) },
-      "/dashboard/settings": { get: op("dashboard_settings_page", "Dashboard: instance settings", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page" }) },
-      "/v/{slug}": { get: op("file_browser_root", "Redirects to /v/{slug}/", { tags: ["pages"], security: false, params: [slugParam], responses: { 301: { description: "Redirect" } }, mcpExclude: "redirect" }) },
-      "/v/{slug}/{path}": {
-        get: op("file_browser_page", "File browser: file tree plus a rendered, source or raw view of one file (rendered in a sandboxed frame on the sites origin)", { tags: ["pages"], security: false, params: [slugParam, pathParam("path", "File path inside the site (may be empty or contain slashes)")], responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use read_file" }),
-      },
-      "/view/{slug}/{path}": { get: op("file_browser_legacy", "Redirects to /v/{slug}/{path}", { tags: ["pages"], security: false, params: [slugParam, pathParam("path", "File path")], responses: { 301: { description: "Redirect" } }, mcpExclude: "redirect" }) },
-      "/__dropway/ui/{file}": { get: op("dashboard_script", "Dashboard script (content-hashed name, cached immutable)", { tags: ["pages"], security: false, params: [pathParam("file", "Script file name")], responses: { 200: text("JavaScript", "text/javascript") }, mcpExclude: "static asset" }) },
-      "/openapi.json": { get: op("openapi", "This document", { tags: ["agents"], security: false, mcpExclude: "discovery document" }) },
-      "/llms.txt": { get: op("llms_txt", "Agent quick reference (llms.txt)", { tags: ["agents"], security: false, responses: { 200: text("Markdown", "text/markdown") }, mcpExclude: "discovery document" }) },
-      "/llms-full.txt": {
-        get: op("llms_full_txt", "Full agent reference: every endpoint, MCP tool and error code", { tags: ["agents"], security: false, responses: { 200: text("Markdown", "text/markdown") }, mcpExclude: "discovery document" }),
-      },
-      "/skill.md": {
-        get: op("skill", "Agent Skill (SKILL.md) for this instance", { tags: ["agents"], security: false, responses: { 200: text("Markdown", "text/markdown") }, mcpExclude: "discovery document" }),
-      },
-      "/.well-known/agent-skills/index.json": {
-        get: op("agent_skills_index", "Agent Skills discovery index (v0.2.0) for `npx skills add <origin>`", { tags: ["agents"], security: false, mcpExclude: "discovery document" }),
-      },
-      "/.well-known/agent-skills/{name}/SKILL.md": {
-        get: op("agent_skill_file", "A skill listed in the discovery index", { tags: ["agents"], security: false, params: [pathParam("name", "Skill name (dropway)")], responses: { 200: text("Markdown", "text/markdown") }, mcpExclude: "discovery document" }),
-      },
-      "/.well-known/skills/index.json": {
-        get: op("agent_skills_index_legacy", "Legacy skills discovery index (v0.1.0)", { tags: ["agents"], security: false, deprecated: true, mcpExclude: "discovery document" }),
-      },
-      "/.well-known/skills/{name}/SKILL.md": {
-        get: op("agent_skill_file_legacy", "A skill listed in the legacy index", { tags: ["agents"], security: false, deprecated: true, params: [pathParam("name", "Skill name (dropway)")], responses: { 200: text("Markdown", "text/markdown") }, mcpExclude: "discovery document" }),
-      },
-    },
+    tags: [...new Set([...operations.map((op) => op.toolset), "agents", "pages"])].map((name) => ({ name, description: `${name} operations` })),
+    paths,
     components: {
-      securitySchemes: { bearer: { type: "http", scheme: "bearer", description: "API key (dw_...), claim token (dwc_...) or, for setup only, the bootstrap key." } },
+      securitySchemes: {
+        bearer: {
+          type: "http",
+          scheme: "bearer",
+          description: "API key, scoped claim token, or the bootstrap key for setup only.",
+        },
+      },
       schemas: {
         Error: {
           type: "object",
+          required: ["error", "requestId"],
           properties: {
             error: {
               type: "object",
-              properties: { code: { type: "string" }, message: { type: "string" }, hint: { type: "string" }, details: { type: "object", description: "Validation errors list every bad field in details.fields." } },
               required: ["code", "message"],
+              properties: {
+                code: { type: "string" },
+                message: { type: "string" },
+                hint: { type: "string" },
+                details: { type: "object", additionalProperties: true },
+              },
             },
             requestId: { type: "string" },
-          },
-        },
-        Scopes: {
-          oneOf: [{ type: "array", items: { enum: ["sites:read", "sites:write", "keys:write", "members:write"] } }, { type: "string", description: '"*" or space-separated scopes' }],
-        },
-        Whoami: {
-          type: "object",
-          properties: { principal: { type: "string" }, tenant: { type: "object" }, member: { type: "object" }, keyId: { type: "string" }, scopes: { type: "array", items: { type: "string" } }, siteRestriction: { type: ["string", "null"] } },
-        },
-        ManifestEntry: {
-          type: "object",
-          required: ["path", "size", "sha256"],
-          properties: { path: { type: "string" }, size: { type: "integer" }, sha256: { type: "string", pattern: "^[a-f0-9]{64}$" }, contentType: { type: "string" } },
-        },
-        FileInput: fileInput,
-        JsonPublish: {
-          type: "object",
-          required: ["files"],
-          properties: {
-            slug: { type: "string" },
-            files: {
-              type: "array",
-              items: { type: "object", required: ["path", "content"], properties: { path: { type: "string" }, content: { type: "string" }, encoding: { enum: ["utf8", "base64"] }, contentType: { type: "string" } } },
-            },
-            message: { type: "string" },
-            baseVersionId: { type: "string" },
-            ...settingsProps,
-          },
-        },
-        Version: {
-          type: "object",
-          properties: {
-            id: { type: "string" },
-            number: { type: "integer" },
-            status: { enum: ["pending", "ready"] },
-            live: { type: "boolean" },
-            fileCount: { type: "integer" },
-            totalBytes: { type: "integer" },
-            source: { type: "string" },
-            client: { type: ["string", "null"] },
-            message: { type: ["string", "null"] },
-            createdAt: { type: "string" },
-            finalizedAt: { type: ["string", "null"] },
-          },
-        },
-        Site: {
-          type: "object",
-          properties: {
-            slug: { type: "string" },
-            url: { type: "string", description: "Share this URL as returned; never construct it." },
-            title: { type: ["string", "null"] },
-            description: { type: ["string", "null"] },
-            anonymous: { type: "boolean" },
-            expiresAt: { type: ["string", "null"] },
-            settings: { type: "object" },
-            currentVersionId: { type: ["string", "null"] },
-            currentVersion: { oneOf: [ref("Version"), { type: "null" }] },
-            createdAt: { type: "string" },
-            updatedAt: { type: "string" },
-            links: { type: "object" },
-          },
-        },
-        Deploy: {
-          type: "object",
-          properties: {
-            unchanged: { type: "boolean" },
-            deploy: ref("Version"),
-            missing: { type: "array", items: { type: "string" } },
-            uploads: {
-              type: "array",
-              items: { type: "object", properties: { sha256: { type: "string" }, size: { type: "integer" }, paths: { type: "array", items: { type: "string" } }, method: { const: "PUT" }, url: { type: "string" }, headers: { type: "object" } } },
-            },
-            finalizeUrl: { type: ["string", "null"] },
-            next: { type: "string", description: "Plain-English next step." },
-          },
-        },
-        PublishResult: {
-          type: "object",
-          properties: {
-            url: { type: "string" },
-            slug: { type: "string" },
-            created: { type: "boolean" },
-            unchanged: { type: "boolean" },
-            site: ref("Site"),
-            version: ref("Version"),
-            files: { type: "array", items: { type: "string" } },
-            uploaded: { type: "integer" },
-            reused: { type: "integer" },
-            warnings: { type: "array", items: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } } },
-            claimToken: { type: "string", description: "Anonymous publishes only; shown once." },
-            expiresAt: { type: ["string", "null"] },
-          },
-        },
-        AgentPublishResult: {
-          type: "object",
-          description: "Result of MCP publish_site / update_site_files and REST PATCH .../files.",
-          properties: {
-            status: { enum: ["live", "unchanged", "awaiting_upload"] },
-            url: { type: "string" },
-            slug: { type: "string" },
-            site: ref("Site"),
-            version: { oneOf: [ref("Version"), { type: "null" }] },
-            files: { type: "object", properties: { total: { type: "integer" }, stored: { type: "integer" }, reused: { type: "integer" }, fetched: { type: "integer" }, pending: { type: "integer" } } },
-            upload: { type: "object", properties: { versionId: { type: "string" }, expiresAt: { type: "string" }, items: { type: "array", items: { type: "object" } }, finalize: { type: "object" } } },
-            changes: { type: "object" },
-            warnings: { type: "array", items: { type: "object" } },
-            next: { type: "array", items: { type: "object" } },
           },
         },
       },

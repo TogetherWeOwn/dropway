@@ -8,9 +8,13 @@ export const SESSION_COOKIE = "__Host-dw_session";
 export const SESSION_TTL = 30 * 24 * 3600_000;
 export const SIGN_IN_TTL = 15 * 60_000;
 
+export function browserWriteAllowed(dc: DropwayContext, request: Request): boolean {
+  return request.headers.get("Origin") === appOrigin(dc) && request.headers.get("Sec-Fetch-Site") === "same-origin" && new URL(request.url).origin === appOrigin(dc);
+}
+
 /** Both checks are mandatory, including on same-site workers.dev siblings. */
 export function requireBrowserWrite(dc: DropwayContext, request: Request): void {
-  if (request.headers.get("Origin") !== appOrigin(dc) || request.headers.get("Sec-Fetch-Site") !== "same-origin" || new URL(request.url).origin !== appOrigin(dc)) {
+  if (!browserWriteAllowed(dc, request)) {
     throw forbidden("This browser operation requires the exact app origin and same-origin Fetch Metadata.", "Open the app directly and try again.", "cross_origin_request");
   }
 }
@@ -55,8 +59,12 @@ export async function createLoginLink(dc: DropwayContext, p: Principal, input: {
   return { url: `${appOrigin(dc)}/login?token=${token}`, expiresAt };
 }
 
-export async function issueSession(dc: DropwayContext, member: MemberRow, request: Request, via: string) {
+export function requireSessionOrigin(dc: DropwayContext, request: Request): void {
   if (new URL(request.url).protocol !== "https:" || new URL(request.url).origin !== appOrigin(dc)) throw forbidden("Sessions require the HTTPS app origin.", "Use the configured HTTPS app URL.", "insecure_session_origin");
+}
+
+export async function issueSession(dc: DropwayContext, member: MemberRow, request: Request, via: string) {
+  requireSessionOrigin(dc, request);
   const token = newSecret("dws_");
   const now = Date.now();
   await dc.env.DB.prepare("INSERT INTO sessions (id_hash, id, tenant_id, member_id, via, created_at, expires_at, last_seen_at, ip_hash, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -66,7 +74,7 @@ export async function issueSession(dc: DropwayContext, member: MemberRow, reques
 }
 
 /** Explicit browser surfaces only; ordinary REST and MCP never resolve cookies. */
-export async function resolveSession(dc: DropwayContext, request: Request): Promise<MemberPrincipal> {
+async function sessionState(dc: DropwayContext, request: Request) {
   if (!["GET", "HEAD"].includes(request.method)) requireBrowserWrite(dc, request);
   const token = sessionToken(request);
   if (!token || new URL(request.url).origin !== appOrigin(dc) || new URL(request.url).protocol !== "https:") throw unauthorized("Sign in to continue.", "Open /login.", "invalid_session");
@@ -76,15 +84,30 @@ export async function resolveSession(dc: DropwayContext, request: Request): Prom
   if (!row) throw unauthorized("This session expired or was revoked.", "Sign in again at /login.", "invalid_session");
   const member = await activeMember(dc, row.member_id);
   if (!member) throw unauthorized();
-  // Avoid writes on every read; still slide active sessions, without resurrecting revoked ones.
-  if (now - row.last_seen_at >= 3600_000) {
-    await dc.env.DB.prepare("UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ? AND revoked_at IS NULL AND expires_at > ?")
-      .bind(now, now + SESSION_TTL, row.id, now).run();
+  // Ordinary navigation omits Origin. It may read, but must not slide authority.
+  const refreshed = browserWriteAllowed(dc, request) && now - row.last_seen_at >= 3600_000;
+  if (refreshed) {
+    const changed = await dc.env.DB.prepare("UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ? AND revoked_at IS NULL AND expires_at > ? RETURNING id")
+      .bind(now, now + SESSION_TTL, row.id, now).first();
+    if (!changed) throw unauthorized("This session expired or was revoked.", "Sign in again at /login.", "invalid_session");
   }
-  return memberPrincipal(member, request.headers.get("cf-connecting-ip") ?? "0.0.0.0", "session");
+  return { principal: memberPrincipal(member, request.headers.get("cf-connecting-ip") ?? "0.0.0.0", "session"), refreshed };
 }
 
-export async function consumeLoginLink(dc: DropwayContext, token: unknown, request: Request) {
+export async function resolveSession(dc: DropwayContext, request: Request): Promise<MemberPrincipal> {
+  return (await sessionState(dc, request)).principal;
+}
+
+/** A first-party POST naturally carries Origin; cookie and D1 renew together. */
+export async function refreshSession(dc: DropwayContext, request: Request) {
+  requireBrowserWrite(dc, request);
+  const state = await sessionState(dc, request);
+  return { ...(state.refreshed ? { cookie: sessionSetCookie(sessionToken(request)!) } : {}) };
+}
+
+/** Inspect without consuming: browser confirmation must not spend the credential. */
+export async function inspectLoginLink(dc: DropwayContext, token: unknown, request: Request) {
+  requireSessionOrigin(dc, request);
   if (typeof token !== "string" || !/^dwl_[A-Za-z0-9_-]{43}$/.test(token)) throw badRequest("invalid_login_link", "This login link is invalid or expired.", "Request a new login link.");
   const hash = await sha256Hex(token);
   const link = await dc.env.DB.prepare("SELECT member_id FROM login_links WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?")
@@ -96,6 +119,11 @@ export async function consumeLoginLink(dc: DropwayContext, token: unknown, reque
     const current = await resolveSession(dc, request).catch(() => null);
     if (current && current.memberId !== member.id) throw forbidden("Sign out before using a link for a different member.", "Sign out deliberately, then reopen the link.", "session_account_mismatch");
   }
+  return { member, hash };
+}
+
+export async function consumeLoginLink(dc: DropwayContext, token: unknown, request: Request) {
+  const { member, hash } = await inspectLoginLink(dc, token, request);
   const now = Date.now();
   const consumed = await dc.env.DB.prepare("UPDATE login_links SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ? RETURNING member_id")
     .bind(now, hash, now).first();

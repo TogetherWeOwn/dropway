@@ -22,15 +22,42 @@
   and signed-in anonymous-site claiming. Ordinary REST resources remain bearer-only;
   explicit browser auth and claim writes require exact app `Origin` **and**
   `Sec-Fetch-Site: same-origin`. API-key sign-in stays cookie-free.
+- Browser Fetch Metadata selects deliberate identity confirmation before a login link
+  is consumed. Untrusted session reads cannot slide authority or refresh cookies;
+  first-party pages use a guarded POST to renew D1 and the same cookie after an hour.
+  Access-derived unsafe calls and enabled email-code requests enforce both browser
+  headers, regardless of Cookie presence. Explicit bearer clients remain independent.
+- Preserve proof on origin/transport refusal, redact diagnostic URL queries/tokens,
+  and let failed email delivery retry without resetting verification budgets.
 - Add migration `0004_sessions.sql`; apply it before upgrading the Worker.
   Numbers 0002 and 0003 remain reserved for their separate roadmap features.
 
 ### Extension API
 
-- Version 2 adds optional `EmailAdapter`, the optional Cloudflare Email Service
+- Also in version 2: optional `EmailAdapter`, the optional Cloudflare Email Service
   binding, and `emailFrom`, `accessTeamDomain`, `accessAud` configuration. Existing
   identity overrides and embedding-session slots remain independent of built-in
   browser auth; their deployments need their own cookie security verification.
+- Bump `EXTENSION_API_VERSION` to 2: add `defineOperation()`, typed operation
+  definitions/contexts, `createDropway({ operations })` and `dropway.operations`.
+  Operation input/output schemas drive REST validation, OpenAPI 3.1, MCP tools,
+  CLI command metadata and instance-local discovery documents. Existing route
+  and MCP-tool extension escape hatches remain available.
+- Keep pre-registry REST payloads, status codes, raw streaming and paths through
+  explicit transport adapters. Model-friendly JSON publishing and file reading
+  are also available at `/api/v1/publish-sources` and `/api/v1/read-file`.
+- Add public `GET /api/v1/operations` and Redocly validation in CI, including
+  required summaries, descriptions, examples and JSON error responses.
+- Enforce declared authorization before custom HTTP adapters; explicitly retain
+  bootstrap setup/recovery and anonymous publishing. Decode numeric/boolean URL
+  scalars, including nullable fields, without letting JSON override path resources.
+- Bound JSON metadata bodies before parsing (8 MiB default, configurable per
+  generated operation), cancel oversized streams and reject raw-body automatic
+  replay definitions that cannot distinguish changed bytes. Preserve Hono body
+  inspection by API middleware, rechecking cached bodies against the JSON budget.
+- Partition member idempotency replay by credential and current authorization,
+  including tenant/site restrictions, role and scopes. Older member records
+  expire unused; retries spanning the upgrade may execute again.
 
 - Export `EXTENSION_API_VERSION = 1` from `@dropway/server`, identifying the
   current public embedding contract. Extension API changes must update this

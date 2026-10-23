@@ -1,6 +1,7 @@
 import { appOrigin, sha256Hex, siteUrl, type DropwayConfig, type DropwayContext } from "@dropway/core";
 import type { McpToolDefinition } from "./extensions";
 import { buildOpenApi } from "./openapi";
+import type { OperationDefinition } from "./operations";
 
 /**
  * Agent discovery documents, all generated from the same sources so they cannot drift:
@@ -123,8 +124,8 @@ export function legacySkillsIndex(product = "Dropway") {
 
 type OpenApiOp = { operationId?: string; summary?: string; description?: string; deprecated?: boolean; parameters?: Array<Record<string, unknown>>; requestBody?: Record<string, any>; "x-mcp-tool"?: string; "x-mcp-exclude"?: string };
 
-function operations(origin: string, config: DropwayConfig) {
-  const doc = buildOpenApi(origin, config.instanceName, config.anonymous.enabled) as { paths: Record<string, Record<string, OpenApiOp>> };
+function operations(origin: string, config: DropwayConfig, registry?: readonly OperationDefinition[], availableTools?: ReadonlySet<string>) {
+  const doc = buildOpenApi(origin, config.instanceName, config.anonymous.enabled, registry, availableTools) as { paths: Record<string, Record<string, OpenApiOp>> };
   const out: Array<{ method: string; path: string; op: OpenApiOp }> = [];
   for (const [path, item] of Object.entries(doc.paths)) {
     for (const [method, op] of Object.entries(item)) out.push({ method: method.toUpperCase(), path, op });
@@ -156,9 +157,10 @@ function mcpLines(origin: string): string {
 }
 
 /** /llms.txt: what this is, how to connect, every endpoint and tool in one line each. */
-export function llmsTxt(origin: string, config: DropwayConfig, tools: readonly McpToolDefinition[] = []): string {
-  const ops = operations(origin, config).filter((o) => o.path.startsWith("/api/") && !o.op.deprecated);
-  const visibleTools = tools.filter((t) => toolEnabled(t, config));
+export function llmsTxt(origin: string, config: DropwayConfig, tools: readonly McpToolDefinition[] = [], registry?: readonly OperationDefinition[], availableTools?: ReadonlySet<string>): string {
+  const visibleTools = tools.filter((tool) => availableTools ? availableTools.has(tool.name) : toolEnabled(tool, config));
+  const available = availableTools ?? (tools.length ? new Set(visibleTools.map((tool) => tool.name)) : undefined);
+  const ops = operations(origin, config, registry, available).filter((o) => o.path.startsWith("/api/") && !o.op.deprecated);
   return `# ${config.instanceName}
 
 > Instant web hosting for AI agents (Dropway, open source, on Cloudflare). Publish a file, folder or site to a live URL with one call; every publish is an immutable version you can roll back. Use the REST API, the remote MCP server or the Agent Skill.
@@ -223,9 +225,10 @@ const ERROR_CODES: Array<[string, string]> = [
 ];
 
 /** /llms-full.txt: the complete agent reference. */
-export function llmsFullTxt(origin: string, config: DropwayConfig, tools: readonly McpToolDefinition[]): string {
-  const ops = operations(origin, config);
-  const visibleTools = tools.filter((t) => toolEnabled(t, config));
+export function llmsFullTxt(origin: string, config: DropwayConfig, tools: readonly McpToolDefinition[], registry?: readonly OperationDefinition[], availableTools?: ReadonlySet<string>): string {
+  const visibleTools = tools.filter((tool) => availableTools ? availableTools.has(tool.name) : toolEnabled(tool, config));
+  const available = availableTools ?? (tools.length ? new Set(visibleTools.map((tool) => tool.name)) : undefined);
+  const ops = operations(origin, config, registry, available);
   const opBlock = (o: (typeof ops)[number]) => {
     const lines = [`### ${o.method} ${o.path}`, "", `operationId \`${o.op.operationId}\`${o.op.deprecated ? " (deprecated alias)" : ""}. ${o.op.summary ?? ""}`];
     if (o.op["x-mcp-tool"]) lines.push(`MCP tool: \`${o.op["x-mcp-tool"]}\`.`);
@@ -242,7 +245,7 @@ export function llmsFullTxt(origin: string, config: DropwayConfig, tools: readon
     const hints = [a.readOnlyHint ? "read-only" : "writes", a.destructiveHint ? "destructive" : null, t.idempotent ? "accepts idempotencyKey" : null].filter(Boolean).join(", ");
     return `### ${t.name}\n\n${t.description}\n\nToolset \`${t.toolset ?? "extra"}\`; ${hints}${t.scopes?.length ? `; needs ${t.scopes.join(", ")}` : ""}.\n\nInput schema: \`${JSON.stringify(t.inputSchema)}\``;
   };
-  return `${llmsTxt(origin, config, tools).trimEnd()}
+  return `${llmsTxt(origin, config, tools, registry, availableTools).trimEnd()}
 
 ---
 
