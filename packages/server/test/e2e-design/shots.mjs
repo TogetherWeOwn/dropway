@@ -1025,6 +1025,17 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
     status = resp?.status() ?? 0;
     firstHtml = (await resp?.text().catch(() => "")) ?? "";
     if (sc.wait) await page.waitForSelector(sc.wait, { timeout: 15000 }).catch(() => {});
+    // Signed-in dashboard pages: wait until the script has filled the account area and the site picker,
+    // so a cell never captures a half-loaded header next to its twin.
+    if (sc.origin === "app" && sc.auth) {
+      await page
+        .waitForFunction(() => {
+          const acct = document.querySelector("#dw-account");
+          const picker = document.querySelector("#dw-pub-site");
+          return (!acct || /Sign out/.test(acct.textContent ?? "")) && (!picker || !/Loading sites/.test(picker.textContent ?? ""));
+        }, null, { timeout: 15000 })
+        .catch(() => {});
+    }
     if (sc.act) await sc.act(page, state);
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(sc.frame ? 900 : 200);
