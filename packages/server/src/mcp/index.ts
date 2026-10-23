@@ -13,6 +13,7 @@ import {
 import type { DropwayEnv } from "../env";
 import type { McpHandlerFactory, McpToolDefinition } from "../extensions";
 import { IDEMPOTENCY_KEY } from "./schemas";
+import { requireOperationScopes } from "../operations";
 
 /**
  * Remote MCP server at /mcp: Streamable HTTP, stateless, built with createMcpHandler
@@ -121,15 +122,7 @@ function toApiError(e: unknown, tool: string, requestId: string): ApiError {
 }
 
 function scopeCheck(principal: Principal, def: McpToolDefinition): void {
-  if (principal.kind !== "member" || !def.scopes) return;
-  for (const s of def.scopes) {
-    if (!principal.scopes.includes(s)) {
-      throw new ApiError(403, "insufficient_scope", `Your API key lacks the "${s}" scope needed for ${def.name}.`, "Ask the instance owner for a key with that scope (create_api_key).", {
-        required: s,
-        held: [...principal.scopes],
-      });
-    }
-  }
+  requireOperationScopes(principal, def.scopes ?? [], def.name);
 }
 
 function buildServer(compiled: CompiledTool[], ctx: { dw: DropwayContext; principal: Principal; request: Request; requestId: string }, options: McpEndpointOptions): McpServer {

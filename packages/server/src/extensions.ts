@@ -2,6 +2,7 @@ import type { Context, Hono, MiddlewareHandler } from "hono";
 import type { ConfigOverrides, DropwayAdapters, DropwayContext, DropwayHooks, Principal, Scope } from "@dropway/core";
 import type { DropwayEnv, ServerBindings } from "./env";
 import type { Viewer } from "./viewers";
+import type { OperationDefinition } from "./operations";
 
 /**
  * Extra REST routes. Called once at startup with the API router (mounted at
@@ -142,6 +143,8 @@ export interface CreateDropwayOptions {
   apiMiddleware?: MiddlewareHandler<DropwayEnv>[];
   /** Extra REST/app routes. */
   routes?: RouteExtension[];
+  /** Operations registered once for REST, OpenAPI, MCP and the CLI command table. */
+  operations?: OperationDefinition[];
   /** Extra MCP tools, appended to the core tools. */
   mcpTools?: McpToolDefinition[];
   /** The MCP endpoint implementation. Default: the built-in server, createMcpEndpoint() (packages/server/src/mcp). */

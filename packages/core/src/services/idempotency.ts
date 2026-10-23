@@ -45,9 +45,11 @@ export function validateIdempotencyKey(key: unknown): string | null {
   return key;
 }
 
-/** Who owns an idempotency record: the member, or the anonymous site a claim token controls. */
+/** Replay never crosses a credential or its current authorization restrictions. */
 export function idempotencyScope(p: Principal): string | null {
-  if (p.kind === "member") return `m:${p.memberId}`;
+  if (p.kind === "member") {
+    return `m:v2:${JSON.stringify([p.tenantId, p.memberId, p.keyId, p.siteId, p.role, [...new Set(p.scopes)].sort(), p.via])}`;
+  }
   if (p.kind === "claim") return `c:${p.siteId}`;
   return null;
 }
