@@ -81,7 +81,8 @@ terminal output, browser history, clipboard and link-sharing services.
 
 Filenames and plaintext hashes are inside the encrypted container; aggregate size, timestamps,
 site slug, explicitly supplied title/message and other site metadata remain visible. Avoid
-sensitive values in those settings. The CLI secret scan still applies. Old plaintext versions
+sensitive values in those settings. The existing heuristic secret scan still applies to small text
+files; it is not a guarantee that input contains no credentials. Old plaintext versions
 are **not** encrypted retroactively: use `--new` for a site previously published in plaintext.
 Each encrypted republish creates a fresh key and nonce even for identical input, so previous
 live links cannot decrypt the updated bundle (restoring an old version requires its original
@@ -89,22 +90,32 @@ link). There is no deduplication across encrypted publishes. Save each link secu
 does not persist encryption keys in `dropway.json` or credentials.
 
 Requires a current instance with the first-party decryptor, HTTPS (or localhost), WebCrypto and
-JavaScript. Up to **16 MiB** of source files are loaded/decrypted entirely in memory. ZIP uploads
-are refused before any upload: extract locally and publish the folder. SPA routing is not
-supported. The returned `url` opens the app-origin loader, which decrypts before sending content
-to an opaque sandbox without app cookies, storage or service workers. Use that complete URL,
-not the ordinary site URL returned by `site` or the dashboard (which expose ciphertext only).
+JavaScript. Up to **16 MiB** of source files and **10,000 files** are loaded/decrypted entirely
+in memory. The complete encoded container must also fit **24 MiB**, including filenames,
+base64, JSON and encryption framing; long paths can exceed that limit even below 16 MiB raw.
+ZIP uploads are refused before any upload: extract locally and publish the folder. SPA routing
+is not supported. The returned `url` opens the app-origin loader, which decrypts before sending
+content to an opaque sandbox without app cookies, storage or service workers. Use that complete
+URL, not the ordinary site URL returned by `site` or the dashboard (which expose ciphertext only).
+Password-protected sites are not supported by this loader: it fetches ciphertext without cookies
+or other credentials, so unlocking the ordinary site does not unlock the loader.
+
+`--encrypt --dry-run` lists original filenames, sizes and plaintext hashes locally and contacts
+nothing. It does not encrypt, generate a share key or validate encrypted capacity. Treat that
+local inventory as sensitive; a successful dry run does not guarantee encrypted input will fit.
 
 The initial viewer supports entry HTML (`index.html`/`index.htm`, otherwise the first file),
 relative classic scripts, styles, images, and read-only `fetch()` of original bundled bytes.
 Single text/images can be viewed and other files downloaded. Content has no external network;
 XHR, modules/imports, dynamically constructed resource URLs, nested frames, forms and multipage
 navigation are not supported. HTML links to bundled files download rather than navigate.
-CSS `url()` references are resolved locally; use simple relative asset paths. This is an
-encrypted static viewer, not transparent hosting for arbitrary applications.
+CSS `url()` references are resolved locally; use simple relative asset paths. HTML data-URL
+assets and CSS `@import` are not supported. This is an encrypted static viewer, not transparent
+hosting for arbitrary applications.
 
 Stable local errors: `encrypted_zip_unsupported` / `encrypted_spa_unsupported` (exit 2),
-`encrypted_input_too_large` (exit 6). These fail before creating a site or uploading data.
+`encrypted_input_too_large`, `encrypted_too_many_files` and `encrypted_container_too_large`
+(exit 6). These fail before creating a site or uploading data.
 
 ## Output for agents
 
