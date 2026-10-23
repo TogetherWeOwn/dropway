@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { diagnosticText } from "../diagnostics";
 import { cloneRawRequest } from "hono/request";
 import { ApiError, badRequest, requestIp } from "@dropway/core";
+import { withLegacyHeaderNames } from "../legacy-brand";
 import type { DropwayEnv } from "../env";
 
 /** Bound wire bytes before decoding or parsing an object body. Raw uploads use their own reader. */
@@ -76,9 +77,9 @@ export function installApiMiddleware(api: Hono<DropwayEnv>, middleware: Middlewa
     "*",
     cors({
       origin: "*",
-      allowHeaders: ["Authorization", "Content-Type", "X-Dropway-Path", "X-Dropway-Client", "If-None-Match", "Idempotency-Key"],
+      allowHeaders: withLegacyHeaderNames(["Authorization", "Content-Type", "X-Kofra-Path", "X-Kofra-Client", "If-None-Match", "Idempotency-Key"]),
       allowMethods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      exposeHeaders: ["ETag", "X-Request-Id", "X-Dropway-Version", "X-Dropway-Content-Type", "Retry-After"],
+      exposeHeaders: withLegacyHeaderNames(["ETag", "X-Request-Id", "X-Kofra-Version", "X-Kofra-Content-Type", "Retry-After"]),
       maxAge: 86400,
     }),
   );

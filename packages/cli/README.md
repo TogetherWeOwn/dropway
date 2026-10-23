@@ -1,20 +1,20 @@
-# dropway CLI
+# kofra CLI
 
-Publish a folder, a file or a `.zip` to a live URL on any [Dropway](https://github.com/TogetherWeOwn/dropway)
+Publish a folder, a file or a `.zip` to a live URL on any [Kofra](https://github.com/TogetherWeOwn/dropway)
 instance. Built for AI agents and scripts: one command, one JSON object on stdout, stable exit codes,
 and only the bytes the instance does not already have are uploaded.
 
 ```sh
-npx dropway login --api https://dropway.example.workers.dev   # paste an API key once
-npx dropway publish ./dist                                     # prints the live URL
-npx dropway publish ./dist --json                              # one JSON object for agents
+npx kofra login --api https://dropway.example.workers.dev   # paste an API key once
+npx kofra publish ./dist                                     # prints the live URL
+npx kofra publish ./dist --json                              # one JSON object for agents
 ```
 
 Zero runtime dependencies. Node.js 20 or newer.
 
 > The npm package is prepared but not published yet. Until it is, run the CLI from a clone of the
 > repository: `npm install`, then `node packages/cli/bin/dropway.mjs <command>` (Node 22.18+ runs the
-> TypeScript source directly; on older Node run `npm run build -w dropway` first).
+> TypeScript source directly; on older Node run `npm run build -w kofra` first).
 
 ## Commands
 
@@ -30,19 +30,19 @@ Zero runtime dependencies. Node.js 20 or newer.
 | `whoami` | The instance, your identity and your key's scopes |
 | `login` / `logout` | Save or forget an API key for an instance |
 | `setup --email <you>` | First run of a new instance: create the owner and save their key |
-| `api [METHOD] <path>` | Call any REST endpoint, e.g. `dropway api PATCH /sites/my-site --data '{"spa":true}'` |
+| `api [METHOD] <path>` | Call any REST endpoint, e.g. `kofra api PATCH /sites/my-site --data '{"spa":true}'` |
 
-`dropway help <command>` shows every option.
+`kofra help <command>` shows every option.
 
 ## Publishing
 
 ```sh
-dropway publish ./dist                         # new site with a generated name
-dropway publish ./dist --site team-report      # update team-report, or create it with that name
-dropway publish report.md                      # one file: served at the site root
-dropway publish site.zip                       # the instance unpacks it (one request, 25 MB by default)
-dropway publish ./dist --wait --json           # return only once the URL serves the new version
-dropway publish ./dist --dry-run               # list what would be uploaded; contacts nothing
+kofra publish ./dist                         # new site with a generated name
+kofra publish ./dist --site team-report      # update team-report, or create it with that name
+kofra publish report.md                      # one file: served at the site root
+kofra publish site.zip                       # the instance unpacks it (one request, 25 MB by default)
+kofra publish ./dist --wait --json           # return only once the URL serves the new version
+kofra publish ./dist --dry-run               # list what would be uploaded; contacts nothing
 ```
 
 How it works: the CLI hashes every file (SHA-256), sends the list, uploads only the files the
@@ -57,7 +57,7 @@ Use `--new` for a fresh site, `--no-save` to skip writing it.
 Never published: `.git`, `node_modules`, `.env*`, `.dev.vars*`, `.npmrc`, `*.pem`, `*.key`, `*.p12`,
 SSH keys, `.dropway/`, `.DS_Store`, and anything matched by `<path>/.dropwayignore` (gitignore-style;
 `!pattern` re-includes). Text files (up to 4 MB) that contain credentials (private keys, cloud and API
-tokens, Dropway keys) stop the publish with exit code 2 unless you pass `--allow-secrets`.
+tokens, Kofra keys) stop the publish with exit code 2 unless you pass `--allow-secrets`.
 
 Anonymous publishing (`--anonymous`) works only on instances that turned it on. The site expires and
 the output includes a `claimToken`: keep it to update the site (`--key <claimToken> --site <name>`) or
@@ -66,8 +66,8 @@ to claim it into an account.
 ## Encrypted publishing
 
 ```sh
-dropway publish ./private-site --encrypt --json --no-save
-dropway publish ./private-site --encrypt --dry-run --json
+kofra publish ./private-site --encrypt --json --no-save
+kofra publish ./private-site --encrypt --dry-run --json
 ```
 
 With `--encrypt`, source files are encrypted locally with **AES-256-GCM** into a single
@@ -167,8 +167,8 @@ Errors (also on stdout with `--json`):
 | 0 | Success | |
 | 1 | Unexpected error | Report it with the output |
 | 2 | Usage error, refused without `--yes`, or files that look like secrets | Fix the command or the files |
-| 3 | No key, invalid key, or missing scope | `dropway login`, or a key with the right scope |
-| 4 | Not found (site, version, file) | Check the name with `dropway list` |
+| 3 | No key, invalid key, or missing scope | `kofra login`, or a key with the right scope |
+| 4 | Not found (site, version, file) | Check the name with `kofra list` |
 | 5 | Conflict: the live version moved (`--base`), or the name is taken | Re-read, then publish again |
 | 6 | Invalid or over a limit (file too large, too many files) | Change the content |
 | 7 | Retryable: rate limited, server error, network error | Retry later |
@@ -178,22 +178,22 @@ Errors (also on stdout with `--json`):
 
 | Setting | Flag | Environment | Saved |
 |---|---|---|---|
-| Instance URL | `--api <url>` | `DROPWAY_API` (or `DROPWAY_URL`) | `./dropway.json`, then your last `login` |
-| API key | `--key <key>` | `DROPWAY_API_KEY` | `<config dir>/credentials.json` (mode 0600, one key per instance) |
-| Bootstrap key (setup only) | | `DROPWAY_BOOTSTRAP_KEY` | never |
-| Attribution shown per version | | `DROPWAY_CLIENT` (e.g. `my-agent/1.2`) | |
+| Instance URL | `--api <url>` | `KOFRA_API` (or `KOFRA_URL`) | `./dropway.json`, then your last `login` |
+| API key | `--key <key>` | `KOFRA_API_KEY` | `<config dir>/credentials.json` (mode 0600, one key per instance) |
+| Bootstrap key (setup only) | | `KOFRA_BOOTSTRAP_KEY` | never |
+| Attribution shown per version | | `KOFRA_CLIENT` (e.g. `my-agent/1.2`) | |
 
-Config dir: `$DROPWAY_CONFIG_DIR`, else `$XDG_CONFIG_HOME/dropway`, else `~/.config/dropway`
-(`%APPDATA%\dropway` on Windows). `DROPWAY_API_KEY` applies to whichever instance you target, so set
+Config dir: `$KOFRA_CONFIG_DIR`, else `$XDG_CONFIG_HOME/dropway`, else `~/.config/dropway`
+(`%APPDATA%\dropway` on Windows). `KOFRA_API_KEY` applies to whichever instance you target, so set
 it per instance in CI. The CLI never prompts when stdin is not a terminal: pipe keys on stdin
-(`echo "$KEY" | dropway login --api <url>`), and pass `--yes` for deletions.
+(`echo "$KEY" | kofra login --api <url>`), and pass `--yes` for deletions.
 
 ## Development
 
 ```sh
 npm install                 # at the repository root
 npm run test:cli            # unit tests + end-to-end tests against a local Worker
-npm run build -w dropway    # bundle to packages/cli/dist/dropway.mjs
+npm run build -w kofra    # bundle to packages/cli/dist/dropway.mjs
 ```
 
 Source layout: `src/client.ts` (HTTP + errors), `src/publish.ts` (the upload protocol; runtime-neutral and

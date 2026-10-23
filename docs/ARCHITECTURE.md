@@ -1,6 +1,6 @@
-# Dropway architecture
+# Kofra architecture
 
-Dropway publishes files, folders and sites to live URLs. It runs entirely on
+Kofra publishes files, folders and sites to live URLs. It runs entirely on
 Cloudflare: one Worker, D1 for metadata, R2 for file bytes, KV for the hot
 "what is live" cache, Analytics Engine for hits.
 
@@ -40,8 +40,8 @@ packages/server           @dropway/server: createDropway() Hono app factory
   src/openapi.ts          OpenAPI 3.1 document for every route (operationId = MCP tool name)
   src/discovery.ts        /llms.txt, /llms-full.txt, /skill.md, /.well-known/agent-skills (generated)
   src/extensions.ts       Types for routes, MCP tools, UI slots, createDropway options
-packages/cli              `dropway` CLI (npm package "dropway", Node 20+, zero runtime dependencies)
-skills/dropway/SKILL.md   Agent Skill (`npx skills add TogetherWeOwn/dropway`); generated, `npm run skill:sync`
+packages/cli              `kofra` CLI (npm package "kofra", Node 20+, zero runtime dependencies)
+skills/kofra/SKILL.md   Agent Skill (`npx skills add TogetherWeOwn/dropway`); generated, `npm run skill:sync`
 scripts/guard-open-core.mjs  CI guard: no billing, pricing, payment or hosted-service code in this repo
 test/                     vitest + @cloudflare/vitest-plugin (runs inside workerd)
 ```
@@ -399,7 +399,7 @@ No public registration route or core migration is added.
 - **CLI:** `packages/cli` talks to the REST API (it runs on users' machines). The upload protocol
   (`src/publish.ts`, `src/client.ts`) uses only `fetch`, so `test/cli-publish.test.ts` runs it against
   the real Worker inside workerd; `packages/cli/test` covers the rest, end to end against a local Worker.
-  A new REST endpoint usually needs no CLI change: `dropway api <METHOD> <path>` reaches it.
+  A new REST endpoint usually needs no CLI change: `kofra api <METHOD> <path>` reaches it.
 
 ## Built-in member sign-in
 
@@ -462,5 +462,5 @@ cookie adapters and `uiSlots.session` remain separate and require their own secu
 
 - Self-host: Deploy to Cloudflare button, or `npm run deploy` (see `docs/SELF_HOST.md`).
 - Maintainers: the root `wrangler.jsonc` is the self-host template. Do not deploy
-  it to an account that runs a hosted Dropway: its worker and resource names
+  it to an account that runs a hosted Kofra: its worker and resource names
   (`dropway`, `dropway-files`) may collide. Use a separate config for test instances.

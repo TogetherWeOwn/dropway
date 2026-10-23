@@ -206,7 +206,7 @@ export function resolveConfig(vars: DropwayVars, overrides: ConfigOverrides = {}
   };
   const adminBootstrapKey = overrides.adminBootstrapKey !== undefined ? overrides.adminBootstrapKey : vars.ADMIN_BOOTSTRAP_KEY?.trim() || null;
   return {
-    instanceName: overrides.instanceName ?? (vars.INSTANCE_NAME?.trim() || "Dropway"),
+    instanceName: overrides.instanceName ?? (vars.INSTANCE_NAME?.trim() || "Kofra"),
     emailFrom: overrides.emailFrom ?? (vars.EMAIL_FROM?.trim() || null),
     accessTeamDomain: overrides.accessTeamDomain ?? (vars.ACCESS_TEAM_DOMAIN?.trim() || null),
     accessAud: overrides.accessAud ?? (vars.ACCESS_AUD?.trim() || null),

@@ -1,9 +1,9 @@
 /**
- * The open-source, single-tenant Dropway Worker.
+ * The open-source, single-tenant Kofra Worker.
  *
  * One tenant (an owner plus optional members and scoped API keys), no signup,
  * no plans or billing. Configuration comes from wrangler.jsonc vars and secrets.
- * To build on top of Dropway, call createDropway() with your own adapters,
+ * To build on top of Kofra, call createDropway() with your own adapters,
  * hooks, routes, MCP tools and UI slots instead of editing the packages.
  */
 import { createDropway, type ServerBindings } from "@dropway/server";

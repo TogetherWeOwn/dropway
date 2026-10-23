@@ -1,6 +1,6 @@
 /**
  * Optional negative controls, not the normal test command:
- * DROPWAY_ENCRYPTED_MUTANT=constant-key|spa-guard|wait-url|loader-cap \
+ * KOFRA_ENCRYPTED_MUTANT=constant-key|spa-guard|wait-url|loader-cap \
  *   node_modules/.bin/vitest run -c packages/cli/test/encrypted/mutation.config.ts \
  *   test/encrypted/acceptance.test.ts -t 'fresh keys|SPA refusal|encrypted wait|loader stream cap'
  * Run one mutant and its corresponding test at a time. Every run must fail its
@@ -9,7 +9,7 @@
 import { defineConfig, mergeConfig } from "vitest/config";
 import base from "../../vitest.config.ts";
 
-const mutant = process.env.DROPWAY_ENCRYPTED_MUTANT;
+const mutant = process.env.KOFRA_ENCRYPTED_MUTANT;
 const mutations = {
   "constant-key": { path: "/packages/cli/src/encrypt.ts", before: "const rawKey = randomBytes(32);", after: "const rawKey = Buffer.alloc(32, 7);" },
   "spa-guard": { path: "/packages/cli/src/main.ts", before: 'if (encrypt && bool(p, "spa"))', after: 'if (false && encrypt && bool(p, "spa"))' },

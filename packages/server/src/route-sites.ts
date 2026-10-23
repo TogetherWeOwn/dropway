@@ -147,7 +147,7 @@ export function redirectResponse(route: Extract<SiteRoute, { kind: "redirect" }>
   if (route.byReferer) {
     h.set("Cache-Control", "no-store");
     h.set("Vary", "Referer");
-    h.set("X-Dropway-Resolved-By", "referer");
+    h.set("X-Kofra-Resolved-By", "referer");
   }
   // 308 = a legacy origin moved: not cached, so moving back works at once.
   if (route.status === 308) h.set("Cache-Control", "no-store");

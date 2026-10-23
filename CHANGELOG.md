@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Renamed: Dropway is now Kofra
+
+- User-visible names: product name, docs, UI copy, the default `INSTANCE_NAME` (`Kofra`), the CLI
+  command `kofra` (the `dropway` command stays as an alias), environment variables `KOFRA_*`,
+  response and request headers `X-Kofra-*`, the Agent Skill and MCP server name `kofra`.
+- Still accepted: `DROPWAY_*` variables (a `KOFRA_*` variable wins), `X-Dropway-*` request headers,
+  and the skill URLs under `dropway`. Responses send every `X-Kofra-*` header as `X-Dropway-*` too.
+- Unchanged on purpose: Worker, D1, R2, KV and Analytics names, database tables, cookie and storage
+  names, reserved paths (`/__dropway/`), CLI files (`dropway.json`, `.dropwayignore`,
+  `~/.config/dropway`), the `@dropway/*` workspace packages and `createDropway()`.
+- `scripts/rebrand.mjs` applies the rename and can be re-run after a rebase.
+
 ### Moving the app to a new origin
 
 - `LEGACY_APP_ORIGINS` (and `LEGACY_DEPRECATED_AT`): former app origins keep serving the REST API,
@@ -12,7 +24,8 @@
   New config fields `legacyAppOrigins` and `legacyDeprecatedAt`.
 - The CLI notes once per run when an instance answers with those headers, naming the new address.
 - The product name comes from `INSTANCE_NAME` in the served skill (heading, description, homepage),
-  both skills indexes and the MCP server instructions. The skill's `name` stays `dropway`.
+  both skills indexes and the MCP server instructions. The skill's `name` does not follow
+  `INSTANCE_NAME` (it is `kofra` after the rename above).
 
 ### Member browser sign-in
 

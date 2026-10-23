@@ -2,7 +2,7 @@ export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }
 
-/** Shared CSS for Dropway-generated pages (system pages, viewers, landing). Viewers can append their own. */
+/** Shared CSS for Kofra-generated pages (system pages, viewers, landing). Viewers can append their own. */
 export const BASE_CSS = `
 :root{color-scheme:light dark;--bg:#fbfaf8;--fg:#1d1b19;--muted:#6b665f;--line:#e6e1da;--card:#fff;--accent:#d9480f;--code:#f3f0eb}
 @media (prefers-color-scheme:dark){:root{--bg:#141312;--fg:#ece8e2;--muted:#a19a90;--line:#2c2a27;--card:#1b1a18;--accent:#ff8a4c;--code:#22201d}}
@@ -32,7 +32,7 @@ export function systemPage(opts: { code: string; title: string; message: string;
   });
 }
 
-/** CSP for pages Dropway generates on the app origin: no scripts at all. */
+/** CSP for pages Kofra generates on the app origin: no scripts at all. */
 export const APP_PAGE_CSP = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
 export function formatBytes(n: number): string {

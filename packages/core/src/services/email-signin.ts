@@ -55,7 +55,7 @@ export async function requestEmailCode(dc: DropwayContext, input: { email?: unkn
       .bind(id, email, hash, now, now + SIGN_IN_TTL, email, now, now - 60_000).first();
   if (!inserted) return accepted;
   try {
-    await adapter.send({ to: [email], subject: "Your Dropway sign-in code", text: `Your sign-in code is ${code}. It expires in 15 minutes. If you did not request it, ignore this email.`, kind: "sign_in" }, dc);
+    await adapter.send({ to: [email], subject: "Your Kofra sign-in code", text: `Your sign-in code is ${code}. It expires in 15 minutes. If you did not request it, ignore this email.`, kind: "sign_in" }, dc);
   } catch {
     // Invalidate the undelivered proof and release only its delivery cooldown.
     // Never reopen a consumed code or reset verification attempts.

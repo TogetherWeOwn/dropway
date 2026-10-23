@@ -35,7 +35,7 @@ export default createDropway({ operations: [echo] });
 ```
 
 The resolved handler context also contains the original `request`, `client`
-(`X-Dropway-Client` or MCP clientInfo), `idempotencyKey`, and the optional
+(`X-Kofra-Client` or MCP clientInfo), `idempotencyKey`, and the optional
 `transport` (`rest` or `mcp`) for attribution. Services must still
 check resource ownership and site restrictions: a scope is not permission to
 access somebody else's site. Throw `ApiError` with a stable snake_case code and
@@ -101,7 +101,7 @@ changing tool order. Duplicate method/path registrations are rejected. Existing
 `GET /api/v1/operations` is public metadata, not an authorization grant. Each row
 contains `id`, `method`, `path`, `scopes`, a JSON `inputSchema`, and optional `cli`
 metadata. No handlers, Zod internals, credentials or tenant data are returned.
-`dropway api METHOD PATH` remains the escape hatch for operations without a
+`kofra api METHOD PATH` remains the escape hatch for operations without a
 convenience CLI command.
 
 Core definitions live in `packages/server/src/operations/`, with stable order in

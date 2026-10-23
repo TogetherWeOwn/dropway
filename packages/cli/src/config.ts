@@ -2,10 +2,10 @@
  * Where the CLI keeps state. Node only.
  *
  * - Credentials: <config dir>/credentials.json, mode 0600, one API key per
- *   instance origin plus the default instance. Config dir: $DROPWAY_CONFIG_DIR,
+ *   instance origin plus the default instance. Config dir: $KOFRA_CONFIG_DIR,
  *   else $XDG_CONFIG_HOME/dropway, else ~/.config/dropway (%APPDATA%\dropway on Windows).
  * - Project link: ./dropway.json (no secrets, safe to commit) remembers which
- *   site each published path maps to, so re-running `dropway publish dist`
+ *   site each published path maps to, so re-running `kofra publish dist`
  *   updates the same site instead of creating a new one.
  */
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -13,7 +13,7 @@ import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 export function configDir(env: NodeJS.ProcessEnv = process.env): string {
-  if (env.DROPWAY_CONFIG_DIR) return resolve(env.DROPWAY_CONFIG_DIR);
+  if (env.KOFRA_CONFIG_DIR) return resolve(env.KOFRA_CONFIG_DIR);
   if (env.XDG_CONFIG_HOME) return join(env.XDG_CONFIG_HOME, "dropway");
   if (process.platform === "win32" && env.APPDATA) return join(env.APPDATA, "dropway");
   return join(homedir(), ".config", "dropway");
@@ -119,7 +119,7 @@ export function linkKey(cwd: string, target: string): string {
 export async function writeLink(cwd: string, api: string, key: string, slug: string): Promise<{ path: string; created: boolean }> {
   const existing = await readLink(cwd);
   const created = !existing;
-  const link: ProjectLink = existing ?? { $comment: "Written by the dropway CLI: which site each published path updates. Safe to commit (no secrets)." };
+  const link: ProjectLink = existing ?? { $comment: "Written by the kofra CLI: which site each published path updates. Safe to commit (no secrets)." };
   if (link.api && link.api !== api) return { path: linkPath(cwd), created: false };
   link.api = api;
   link.sites = { ...(link.sites ?? {}), [key]: slug };

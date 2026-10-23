@@ -8,6 +8,7 @@ import { agentSkillsIndex, legacySkillsIndex, llmsFullTxt, llmsTxt, skillInstanc
 import { homePage, installUi } from "./ui";
 import { claimPage, claimSubmission } from "./ui/signin";
 import { installEncrypted } from "./encrypted";
+import { LEGACY_SKILL_NAME } from "./legacy-brand";
 
 /**
  * App-origin pages: home, /openapi.json, /llms.txt, /health, /claim, /mcp,
@@ -48,7 +49,7 @@ export function createAppRouter(opts: { app: Hono<DropwayEnv>; uiSlots: UiSlots;
   });
   const skill = (c: Context<DropwayEnv>) => {
     const name = c.req.param("name");
-    if (name !== undefined && name !== SKILL_NAME) return c.notFound();
+    if (name !== undefined && name !== SKILL_NAME && name !== LEGACY_SKILL_NAME) return c.notFound();
     return c.body(skillMarkdown(skillInstance(c.get("dw"))), 200, { ...markdown, ...describedBy(appOrigin(c.get("dw"))) });
   };
   app.get("/skill.md", skill);

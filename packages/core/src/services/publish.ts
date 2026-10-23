@@ -37,7 +37,7 @@ function isZip(bytes: Uint8Array): boolean {
  *   or a generic name (file, files[]) to use the uploaded file name; a single .zip part is unpacked;
  * - application/json: {"files":[{"path","content","encoding?":"base64","contentType?"}], ...settings};
  * - a .zip body (Content-Type: application/zip);
- * - one raw file body, named by ?path=, X-Dropway-Path or Content-Disposition (default index.html / index.md).
+ * - one raw file body, named by ?path=, X-Kofra-Path or Content-Disposition (default index.html / index.md).
  * Metadata may also come as query parameters.
  */
 export async function parsePublishRequest(dc: DropwayContext, req: Request, maxBytes: number): Promise<PublishInput> {
@@ -93,7 +93,7 @@ export async function parsePublishRequest(dc: DropwayContext, req: Request, maxB
     if (bytes.length === 0) {
       throw badRequest("empty_body", "The request body is empty.", 'Send files as multipart (-F "index.html=@index.html"), JSON, a .zip, or one raw file.');
     }
-    const named = (fields.path ?? fields.filename ?? req.headers.get("x-dropway-path") ?? filenameFromDisposition(req.headers.get("content-disposition"))) as string | null;
+    const named = (fields.path ?? fields.filename ?? req.headers.get("x-kofra-path") ?? filenameFromDisposition(req.headers.get("content-disposition"))) as string | null;
     if (ctype.includes("zip") || (isZip(bytes) && !named)) {
       files = unzipFiles(bytes, maxBytes);
       source = "zip";
@@ -138,7 +138,7 @@ function defaultNameFor(ctype: string): string {
   if (t === "text/html" || t === "") return "index.html";
   if (t === "text/markdown" || t === "text/x-markdown") return "index.md";
   if (t === "text/plain") return "index.txt";
-  throw badRequest("path_required", `Cannot pick a file name for a ${t} body.`, "Add ?path=<name.ext> (or an X-Dropway-Path header) to say what the file is called.");
+  throw badRequest("path_required", `Cannot pick a file name for a ${t} body.`, "Add ?path=<name.ext> (or an X-Kofra-Path header) to say what the file is called.");
 }
 
 function unzipFiles(bytes: Uint8Array, maxBytes: number): InlineFile[] {

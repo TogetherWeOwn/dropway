@@ -1,7 +1,7 @@
 {
   "name": "@dropway/core",
   "version": "0.1.0",
-  "description": "Dropway service layer: storage, publish protocol, versions, manifests, file-type detection, auth interfaces. Runs on Cloudflare Workers (D1, R2, KV).",
+  "description": "Kofra service layer: storage, publish protocol, versions, manifests, file-type detection, auth interfaces. Runs on Cloudflare Workers (D1, R2, KV).",
   "license": "MIT",
   "type": "module",
   "repository": {

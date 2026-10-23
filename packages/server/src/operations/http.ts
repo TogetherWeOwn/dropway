@@ -49,7 +49,7 @@ export const HTTP_OPERATIONS = [
           version: "v1",
           openapi: `${o}/openapi.json`,
           llms: `${o}/llms.txt`,
-          quickstart: `curl -H "Authorization: Bearer $DROPWAY_API_KEY" -F "index.html=@index.html" ${o}/api/v1/publish`,
+          quickstart: `curl -H "Authorization: Bearer $KOFRA_API_KEY" -F "index.html=@index.html" ${o}/api/v1/publish`,
         });
       },
     },
@@ -57,7 +57,7 @@ export const HTTP_OPERATIONS = [
       {
         input: {},
         output: {
-          name: "Dropway API",
+          name: "Kofra API",
           version: "v1",
           openapi: "https://dropway.example/openapi.json",
         },
@@ -177,7 +177,7 @@ export const HTTP_OPERATIONS = [
     scopes: ["sites:write"],
     summary: "Publish files in one call and get a live URL",
     description:
-      'Accepts multipart/form-data (field name = file path, e.g. -F "assets/app.js=@dist/assets/app.js"; or field `files[]` with filenames; a single .zip is unpacked), application/json ({"files":[{"path","content","encoding?":"base64"}]}), a .zip body, or one raw file body named by ?path= or X-Dropway-Path. Settings and `slug` may be sent as form fields, JSON fields or query parameters. With an existing `slug` you own, publishes a new version of it. Byte-identical content returns unchanged:true. The MCP tool publish_site also accepts url, sha256 and copyFrom file sources.',
+      'Accepts multipart/form-data (field name = file path, e.g. -F "assets/app.js=@dist/assets/app.js"; or field `files[]` with filenames; a single .zip is unpacked), application/json ({"files":[{"path","content","encoding?":"base64"}]}), a .zip body, or one raw file body named by ?path= or X-Kofra-Path. Settings and `slug` may be sent as form fields, JSON fields or query parameters. With an existing `slug` you own, publishes a new version of it. Byte-identical content returns unchanged:true. The MCP tool publish_site also accepts url, sha256 and copyFrom file sources.',
     input: fromSchema({
       type: "object",
       required: ["files"],
@@ -483,8 +483,8 @@ export const HTTP_OPERATIONS = [
         const headers: Record<string, string> = {
           // Never render user content on the app origin: textual types come back as text/plain.
           "Content-Type": isTextual(file.content_type) || isHtml(file.content_type) ? "text/plain; charset=utf-8" : file.content_type,
-          "X-Dropway-Content-Type": file.content_type,
-          "X-Dropway-Version": versionId ?? "",
+          "X-Kofra-Content-Type": file.content_type,
+          "X-Kofra-Version": versionId ?? "",
           "Content-Length": String(file.size),
           ETag: `"${file.sha256}"`,
           "Cache-Control": "private, no-store",
