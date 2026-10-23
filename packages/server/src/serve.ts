@@ -25,6 +25,7 @@ import { renderListing } from "./viewers/listing";
 import { MAX_CSS_REWRITE_BYTES, rewriteCss, rewriteHtml, type PathRewrite } from "./path-rewrite";
 import { PATH_SHIM_VERSION, pathShimScript } from "./path-shim";
 import { injectReportLink, REPORT_LINK_VERSION } from "./report-link";
+import { serveTransfer } from "./transfers";
 
 /**
  * How a site is being served.
@@ -321,6 +322,13 @@ export async function serveSite(
   const started = Date.now();
   const url = new URL(req.url);
   const method = req.method.toUpperCase();
+  // Transfer gates never depend on an eventually consistent live manifest.
+  const transfer = await dw.env.DB.prepare("SELECT mode FROM sites WHERE slug = ? UNION ALL SELECT 'transfer' AS mode FROM transfer_slug_tombstones WHERE slug = ? AND NOT EXISTS (SELECT 1 FROM sites WHERE slug = ?) LIMIT 1").bind(slug, slug, slug).first<{ mode: string }>();
+  if (transfer?.mode === "transfer") {
+    const path = requestPathToFilePath(pathname);
+    if (path === null) return new Response("Not found", { status: 404 });
+    return serveTransfer(req, dw, slug, path);
+  }
   if (method === "OPTIONS") {
     // Password-protected sites are not readable cross-origin, so their preflights grant nothing.
     const gated = !!(await getLiveSite(dw, slug))?.passwordHash;

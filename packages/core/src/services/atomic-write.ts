@@ -18,7 +18,7 @@ export async function atomicWrite(
 
 /** Do not confuse another table's UNIQUE constraint with a site-name collision. */
 export function siteSlugError(error: unknown, slug: string, hint: string): ApiError | undefined {
-  if (/\bUNIQUE constraint failed: sites\.slug(?=:|$)/.test(String(error))) {
+  if (/\bUNIQUE constraint failed: sites\.slug(?=:|$)/.test(String(error)) || /\btransfer_slug_reserved(?=:|$)/.test(String(error))) {
     return conflict("slug_taken", `The site name "${slug}" is taken.`, hint);
   }
   return undefined;

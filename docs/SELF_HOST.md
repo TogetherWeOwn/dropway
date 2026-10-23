@@ -59,6 +59,28 @@ Name clashes: Wrangler connects to an existing D1 database or R2 bucket with the
 of creating one. If your account already has a `dropway` database or a `dropway-files` bucket that
 belongs to something else, change `name`, `database_name` and `bucket_name` in `wrangler.jsonc` first.
 
+## File deliveries
+
+Deliveries require a separate files origin (`SITES_ORIGIN`, or subdomain serving);
+shared-origin `/s/` mode cannot create them. Optional password grants last 15 minutes
+and are bound to the current password digest. Recipient links attribute download
+counts but do not verify email identity. Messages are plain text. Expiry ranges
+from one hour to the configured maximum: `TRANSFER_MAX_EXPIRY_DAYS` defaults to 30
+and is capped at 3,650 days; an embedding policy can lower it. No email is sent.
+
+Set a strong `SIGNING_SECRET` before enabling password deliveries. The app's
+HttpOnly cookie is not shared with the files host: after unlock, the app page
+renders signed download links, valid for at most 15 minutes. Treat their query
+strings as bearer credentials and do not log or share them. Every request still
+checks current expiry, revocation, takedown, limit and password digest in D1.
+
+Delivery file manifests are immutable. Ordinary site publishing, settings and
+version APIs cannot replace them or change their password. Use `update_transfer`
+for permitted metadata changes and `revoke_transfers` to stop downloads at once.
+Cleanup claims expiry hourly, retains closed bytes for 24 hours, then removes
+manifest references only if there is no hold or takedown. Storage accounting is
+released once at purge, never at revoke. Sender metadata remains readable.
+
 ## First run: create the owner
 
 With the CLI (it saves the owner key in `~/.config/dropway/credentials.json`, mode 0600):

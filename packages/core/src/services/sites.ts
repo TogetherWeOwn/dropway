@@ -11,6 +11,7 @@ import { atomicWrite, siteSlugError } from "./atomic-write";
 
 export interface SiteRow {
   id: string;
+  mode?: "site" | "transfer";
   slug: string;
   tenant_id: string | null;
   created_by: string | null;
@@ -60,7 +61,8 @@ export interface SiteSettingsInput {
 const iso = (t: number | null | undefined) => (t ? new Date(t).toISOString() : null);
 
 /** May `p` read (sites:read) or change (sites:write) this site? */
-export function canAccess(p: Principal, site: Pick<SiteRow, "id" | "tenant_id">, scope: Scope): boolean {
+export function canAccess(p: Principal, site: Pick<SiteRow, "id" | "tenant_id"> & Partial<Pick<SiteRow, "mode" | "created_by">>, scope: Scope): boolean {
+  if (site.mode === "transfer" && (p.kind !== "member" || site.created_by !== p.memberId)) return false;
   if (p.kind === "member") return site.tenant_id === p.tenantId && hasScope(p, scope) && (!p.siteId || p.siteId === site.id);
   if (p.kind === "claim") return site.id === p.siteId && site.tenant_id === null;
   return false;
@@ -226,6 +228,7 @@ export async function createSite(
   for (let attempt = 0; attempt < 6; attempt++) {
     const site: SiteRow = {
       id: newId("site"),
+      mode: "site",
       slug: wanted ?? generateSlug(),
       tenant_id: tenantId,
       created_by: p.kind === "member" ? p.memberId : "anonymous",
@@ -290,11 +293,11 @@ export async function listSites(dc: DropwayContext, p: Principal, opts: { limit?
             v.manifest_hash AS v_manifest_hash, v.base_version_id AS v_base_version_id, v.source AS v_source, v.client AS v_client,
             v.message AS v_message, v.created_by AS v_created_by, v.created_at AS v_created_at, v.finalized_at AS v_finalized_at
        FROM sites s LEFT JOIN versions v ON v.id = s.current_version_id
-      WHERE s.tenant_id = ? AND s.deleted_at IS NULL ${p.siteId ? "AND s.id = ?" : ""}
+      WHERE s.tenant_id = ? AND s.deleted_at IS NULL AND (s.mode <> 'transfer' OR s.created_by = ?) ${p.siteId ? "AND s.id = ?" : ""}
         AND (s.created_at < ? OR (s.created_at = ? AND s.id < ?))
       ORDER BY s.created_at DESC, s.id DESC LIMIT ?`,
   )
-    .bind(...[p.tenantId, ...(p.siteId ? [p.siteId] : []), before, before, beforeId, limit + 1])
+    .bind(...[p.tenantId, p.memberId, ...(p.siteId ? [p.siteId] : []), before, before, beforeId, limit + 1])
     .all<SiteRow & Record<string, unknown>>();
   const page = results.slice(0, limit);
   const last = page[page.length - 1];
@@ -326,6 +329,7 @@ export async function listSites(dc: DropwayContext, p: Principal, opts: { limit?
 
 export async function updateSite(dc: DropwayContext, p: Principal, slug: string, input: SiteSettingsInput): Promise<SiteRow> {
   const site = await getSiteFor(dc, p, slug, "sites:write");
+  if (site.mode === "transfer") throw conflict("transfer_immutable", "Use update_transfer to change delivery settings.", "Transfer passwords need current-password proof in the same call.");
   if (input.password && site.tenant_id === null) throw forbidden("Password protection needs an account. Claim the site first.");
   const sets: string[] = [];
   const binds: unknown[] = [];
@@ -350,9 +354,11 @@ export async function updateSite(dc: DropwayContext, p: Principal, slug: string,
 export async function deleteSite(dc: DropwayContext, p: Principal, slug: string): Promise<{ deleted: true; slug: string }> {
   const site = await getSiteFor(dc, p, slug, "sites:write");
   const now = Date.now();
-  await dc.env.DB.prepare("UPDATE sites SET deleted_at = ?, deleted_slug = slug, slug = ?, claim_token_hash = NULL WHERE id = ?")
+  const deleted = await dc.env.DB.prepare(`UPDATE sites SET deleted_at = ?, deleted_slug = slug, slug = ?, claim_token_hash = NULL
+    WHERE id = ? AND NOT EXISTS (SELECT 1 FROM transfers WHERE site_id = sites.id AND legal_hold <> 0)`)
     .bind(now, `~deleted~${site.id}`, site.id)
     .run();
+  if (!deleted.meta.changes) throw conflict("transfer_conflict", "This delivery is held.", "Release the hold before deleting it; revocation remains available.");
   await dropLive(dc, site.slug);
   emit(dc, "onDelete", { site: { id: site.id, slug: site.slug, tenantId: site.tenant_id, url: siteUrl(dc, site.slug) }, principal: p, reason: "api", at: now });
   meter(dc, { type: "site_deleted", tenantId: site.tenant_id, siteId: site.id, at: now });
@@ -368,17 +374,20 @@ export async function deleteSite(dc: DropwayContext, p: Principal, slug: string)
  */
 export async function discardNewSite(dc: DropwayContext, site: Pick<SiteRow, "id" | "slug" | "tenant_id">): Promise<boolean> {
   const db = dc.env.DB;
-  const neverLive = "EXISTS (SELECT 1 FROM sites WHERE id = ? AND current_version_id IS NULL)";
+  const neverLive = `EXISTS (SELECT 1 FROM sites s WHERE s.id = ? AND s.current_version_id IS NULL
+    AND NOT EXISTS (SELECT 1 FROM transfers t WHERE t.site_id = s.id AND (t.legal_hold <> 0 OR t.takedown_at IS NOT NULL)))`;
   try {
     const results = await db.batch([
       db.prepare(`DELETE FROM version_files WHERE version_id IN (SELECT id FROM versions WHERE site_id = ?) AND ${neverLive}`).bind(site.id, site.id),
       db.prepare(`DELETE FROM versions WHERE site_id = ? AND ${neverLive}`).bind(site.id, site.id),
       db.prepare(`DELETE FROM blob_scopes WHERE scope = ? AND ${neverLive}`).bind(`s:${site.id}`, site.id),
-      db.prepare("DELETE FROM sites WHERE id = ? AND current_version_id IS NULL").bind(site.id),
+      db.prepare(`DELETE FROM sites WHERE id = ? AND ${neverLive}`).bind(site.id, site.id),
     ]);
-    await dropLive(dc, site.slug);
     const removed = (results[3]?.meta.changes ?? 0) > 0;
-    if (removed) meter(dc, { type: "site_deleted", tenantId: site.tenant_id, siteId: site.id, at: Date.now() });
+    if (removed) {
+      await dropLive(dc, site.slug);
+      meter(dc, { type: "site_deleted", tenantId: site.tenant_id, siteId: site.id, at: Date.now() });
+    }
     return removed;
   } catch (e) {
     // Never mask the error that made the create fail; the site is left for its owner to delete.
@@ -395,7 +404,7 @@ export async function claimSite(dc: DropwayContext, p: Principal, slug: string, 
     throw badRequest("claim_token_required", "Send the claimToken returned when the anonymous site was created.", 'Body: {"claimToken": "dwc_..."}');
   }
   const site = await findSite(dc, slug);
-  if (site && site.tenant_id === p.tenantId && site.claim_token_hash === null) return site; // retry-safe
+  if (site && site.mode !== "transfer" && site.tenant_id === p.tenantId && site.claim_token_hash === null) return site; // retry-safe
   if (!site || site.claim_token_hash !== (await sha256Hex(claimToken))) {
     throw notFound("site_not_found", `No anonymous site "${slug}" matches this claim token.`);
   }

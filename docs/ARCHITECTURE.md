@@ -67,6 +67,9 @@ throws `ApiError` with a stable `code` and a `hint` for the caller.
 | `live.ts` | `live:<slug>` manifest in KV (D1 fallback, per-isolate 5 s cache) |
 | `cleanup.ts` | Hourly cron: expire anonymous sites, purge deleted sites, drop stale uploads, delete orphan blobs |
 | `events.ts` | Runs hooks and metering after the response (never throws) |
+| `transfers.ts` | Sender-owned deliveries: create/read/update/revoke, revision fencing and permanent slug reservations |
+| `transfer-downloads.ts` | Live D1 download gates, digest-bound unlock grants, per-IP/transfer unlock budgets, range and recipient accounting |
+| `transfer-cleanup.ts` | Idempotent expiry and live hold-fenced manifest purge, separate from owner readability |
 
 The registry operations (`packages/server/src/operations/`) only parse input,
 call a service and shape JSON. **The MCP server and the CLI's server side must call

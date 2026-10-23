@@ -15,6 +15,8 @@ export interface Limits {
   maxSiteBytes: number;
   /** Largest request body for one-shot POST /api/v1/publish (held in memory). */
   oneShotMaxBytes: number;
+  /** Maximum delivery lifetime; embedding policies may lower it. */
+  transferMaxExpiryDays?: number;
 }
 
 export interface AnonymousConfig {
@@ -112,6 +114,7 @@ export interface DropwayVars {
   ONESHOT_MAX_BYTES?: string;
   ADMIN_BOOTSTRAP_KEY?: string;
   SIGNING_SECRET?: string;
+  TRANSFER_MAX_EXPIRY_DAYS?: string;
 }
 
 const num = (v: string | undefined, d: number) => {
@@ -183,6 +186,7 @@ export function resolveConfig(vars: DropwayVars, overrides: ConfigOverrides = {}
     maxFiles: num(vars.MAX_FILES, 2500),
     maxSiteBytes: num(vars.MAX_SITE_BYTES, 10 * 1024 * MB),
     oneShotMaxBytes: num(vars.ONESHOT_MAX_BYTES, 25 * MB),
+    transferMaxExpiryDays: Math.min(3650, num(vars.TRANSFER_MAX_EXPIRY_DAYS, 30)),
     ...overrides.limits,
   };
   const anonymous: AnonymousConfig = {
