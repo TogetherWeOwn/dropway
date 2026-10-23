@@ -14,6 +14,7 @@ let primary: SigningKey;
 let rotated: SigningKey;
 let impostor: SigningKey;
 let sequence = 0;
+let nextEpoch = Date.UTC(2030, 0, 1);
 let now: number;
 let endpoints: Map<string, Endpoint>;
 let unexpected: string[];
@@ -36,7 +37,10 @@ beforeAll(async () => {
   impostor = await key("shared-kid");
 });
 beforeEach(() => {
-  now = Date.UTC(2030, 0, 1);
+  // Module cache outlives each case. Separate epochs by more than every case's
+  // elapsed time and trust window so earlier cooldown states cannot fill slots.
+  now = nextEpoch;
+  nextEpoch += 600_000;
   vi.spyOn(Date, "now").mockImplementation(() => now);
   endpoints = new Map();
   unexpected = [];
