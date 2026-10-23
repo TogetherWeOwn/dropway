@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { env } from "cloudflare:test";
 import {
   ApiError, claimSite, clearLiveMemoryCache, createSite, createTenant, createTenantWithOwner,
-  defaultPolicy, deleteSite, insertMember, renameSite, setupInstance, sha256Hex,
+  defaultPolicy, deleteSite, insertMember, refreshLive, renameSite, setupInstance, sha256Hex,
   type CreateTenantWithOwnerInput, type CreateTenantWithOwnerOptions, type DropwayContext, type MemberRow,
   type Principal, type SiteNameMutation, type TenantRow,
 } from "@dropway/core";
@@ -21,9 +21,9 @@ type OwnerRows = { tenant: Readonly<TenantRow>; owner: Readonly<MemberRow> };
 const empty: PrepareName = () => ({ statements: [] });
 const refusal = () => new ApiError(451, "fixture_refused", "This mutation was refused.", "Use a permitted name.");
 
-async function publish(dw: Awaited<ReturnType<typeof harness>>["dw"], slug: string) {
+async function publish(dw: Awaited<ReturnType<typeof harness>>["dw"], slug: string, content = "unchanged-content") {
   const r = await dw.json("/api/v1/publish", {
-    method: "POST", key: dw.ownerKey, body: form({ "index.txt": "unchanged-content" }, { slug }),
+    method: "POST", key: dw.ownerKey, body: form({ "index.txt": content }, { slug }),
   });
   expect(r.status).toBe(201);
   return (await site(slug))!;
@@ -35,6 +35,17 @@ async function coreSnapshot() {
     members: (await env.DB.prepare("SELECT * FROM members ORDER BY id").all<MemberRow>()).results,
     profiles: (await env.DB.prepare("SELECT * FROM fixture_profiles ORDER BY tenant_id").all()).results,
   };
+}
+
+async function siteMutationSnapshot() {
+  const tables = [
+    ["tenants", "id"], ["members", "id"], ["api_keys", "id"], ["folders", "id"],
+    ["sites", "id"], ["versions", "id"], ["version_files", "version_id, path"],
+    ["blobs", "sha256"], ["blob_scopes", "scope, sha256"],
+  ] as const;
+  return Object.fromEntries(await Promise.all(tables.map(async ([table, order]) => [
+    table, (await env.DB.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all()).results,
+  ])));
 }
 
 async function tenantFixture() {
@@ -714,6 +725,90 @@ describe("rename cache and stale-write fencing", () => {
       expect((await h.dw.call("/s/stale-source/")).status).toBe(404);
       if (overtaker === "rename") expect(await (await h.dw.call("/s/stale-winner/")).text()).toBe("unchanged-content");
       else expect(await count("sites")).toBe(1); // soft-delete retained, never resurrected
+    } finally { release.resolve(); await pending; await h.flush(); }
+  });
+
+  it.each(["same-slug replacement", "tenant transfer"] as const)("paused rename overtaken by %s preserves identity, ownership and live cache", async (overtaker) => {
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    const h = await harness(async (_p, input, dc) => {
+      if (input.operation === "rename" && input.slug === "fence-target") {
+        entered.resolve();
+        await release.promise;
+        // Audit only: a receipt's identity trigger must not mask a missing core fence.
+        return { statements: [audit(dc, `stale:${input.siteId}`)] };
+      }
+      return receipt(dc, input);
+    }, { multiTenant: true });
+    await extensionSchema();
+    const foreign = await createTenant(h.dc, { name: "Other tenant" });
+    const original = await publish(h.dw, "fence-source");
+    const sentinel = await publish(h.dw, "fence-sentinel", "sentinel-content");
+    expect(await (await h.dw.call("/s/fence-source/")).text()).toBe("unchanged-content");
+    expect(await (await h.dw.call("/s/fence-sentinel/")).text()).toBe("sentinel-content");
+    const pending = outcome(renameSite(h.dc, h.principal, original.id, "fence-target"));
+    try {
+      await mustReachPreparation(entered.promise, pending);
+      let survivor = original;
+      let content = "unchanged-content";
+      if (overtaker === "same-slug replacement") {
+        await deleteSite(h.dc, h.principal, original.slug);
+        content = "replacement-content";
+        survivor = await publish(h.dw, original.slug, content);
+        expect(survivor.id).not.toBe(original.id);
+        expect(survivor.current_version_id).not.toBe(original.current_version_id);
+        expect(survivor.tenant_id).toBe(original.tenant_id);
+      } else {
+        await env.DB.prepare("UPDATE sites SET tenant_id = ? WHERE id = ?").bind(foreign.id, original.id).run();
+        survivor = (await site(original.slug))!;
+        expect(survivor).toEqual({ ...original, tenant_id: foreign.id });
+        // The fixture transfer owns this allowed cache write, not the refused rename.
+        await refreshLive(h.dc, survivor.id);
+      }
+      await h.flush();
+      clearLiveMemoryCache();
+      expect(await (await h.dw.call("/s/fence-source/")).text()).toBe(content);
+      const beforeCore = await siteMutationSnapshot();
+      const beforeReceipts = await receiptRows();
+      const beforeAudit = await auditRows();
+      const cached = await env.CACHE.get("live:fence-source");
+      const sentinelCache = await env.CACHE.get("live:fence-sentinel");
+      expect(cached).not.toBeNull();
+      expect(JSON.parse(cached!)).toMatchObject({ siteId: survivor.id, tenantId: survivor.tenant_id,
+        versionId: survivor.current_version_id, slug: original.slug });
+      expect(sentinelCache).not.toBeNull();
+      expect(await site("fence-target")).toBeNull();
+      expect(await env.CACHE.get("live:fence-target")).toBeNull();
+      h.events.length = 0;
+      // Only observe effects after the overtaker and its warm-cache reads settle.
+      const put = vi.spyOn(env.CACHE, "put");
+      const remove = vi.spyOn(env.CACHE, "delete");
+      release.resolve();
+      const result = await pending;
+      expect(result.ok).toBe(false);
+      if (!result.ok) expectApiError(result.error, 409, "site_changed");
+      await h.flush();
+      expect(await siteMutationSnapshot()).toEqual(beforeCore);
+      expect(await site(original.slug)).toEqual(survivor);
+      expect(await site(sentinel.slug)).toEqual(sentinel);
+      expect(await receiptRows()).toEqual(beforeReceipts);
+      expect(await auditRows()).toEqual(beforeAudit);
+      expect(h.events).toEqual([]);
+      expect(await env.CACHE.get("live:fence-source")).toBe(cached);
+      expect(await env.CACHE.get("live:fence-sentinel")).toBe(sentinelCache);
+      expect(await site("fence-target")).toBeNull();
+      expect(await env.CACHE.get("live:fence-target")).toBeNull();
+      const live = await h.dw.call("/s/fence-source/");
+      expect(live.status).toBe(200);
+      expect(await live.text()).toBe(content);
+      clearLiveMemoryCache();
+      const fromCache = await h.dw.call("/s/fence-source/");
+      expect(fromCache.status).toBe(200);
+      expect(await fromCache.text()).toBe(content);
+      expect(await (await h.dw.call("/s/fence-sentinel/")).text()).toBe("sentinel-content");
+      expect((await h.dw.call("/s/fence-target/")).status).toBe(404);
+      expect(put).not.toHaveBeenCalled();
+      expect(remove).not.toHaveBeenCalled();
     } finally { release.resolve(); await pending; await h.flush(); }
   });
 });
