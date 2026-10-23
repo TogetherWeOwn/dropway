@@ -2,6 +2,13 @@
 type Json = Record<string, any>;
 const page = (operationId: string, summary: string, metadata: Json): Json => ({ operationId, summary, description: summary, ...metadata });
 export const PAGE_PATHS: Json = {
+  "/t/{slug}": Object.fromEntries(["get", "head", "post"].map((method) => [method, page(`transfer_page_${method}`, method === "post" ? "Unlock a file delivery" : "Open a file delivery", {
+    tags: ["pages"], security: [], "x-mcp-exclude": "browser page; use get_transfer for sender state",
+    parameters: [{ name: "slug", in: "path", required: true, schema: { type: "string" } }],
+    ...(method === "post" ? { requestBody: { required: true, content: { "application/x-www-form-urlencoded": { schema: { type: "object", properties: { password: { type: "string" } }, required: ["password"] } } } } } : {}),
+    responses: { "200": { description: "Plain-text message and download links on the app origin." }, "303": { description: "Unlocked; redirect with a digest-bound cookie." }, "403": { description: "Password required." }, "410": { description: "Delivery closed." }, "451": { description: "Delivery unavailable." } },
+  })])),
+
   "/mcp": {
     post: page("mcp", "Remote MCP server (Streamable HTTP, stateless)", {
       tags: ["agents"],

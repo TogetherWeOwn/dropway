@@ -1,8 +1,8 @@
-import type { DeleteEvent, DropwayHooks, PublishEvent, SiteRequestEvent, UsageEvent } from "../adapters";
+import type { DeleteEvent, DropwayHooks, PublishEvent, SiteRequestEvent, TransferEvent, UsageEvent } from "../adapters";
 import type { DropwayContext } from "../context";
 
 type HookName = keyof DropwayHooks;
-type HookEvent<K extends HookName> = K extends "onPublish" ? PublishEvent : K extends "onDelete" ? DeleteEvent : SiteRequestEvent;
+type HookEvent<K extends HookName> = K extends "onPublish" ? PublishEvent : K extends "onDelete" ? DeleteEvent : K extends "onEvent" ? TransferEvent : SiteRequestEvent;
 
 function logFailure(what: string, e: unknown) {
   console.error(JSON.stringify({ event: "extension_error", what, error: String(e), stack: (e as Error)?.stack }));

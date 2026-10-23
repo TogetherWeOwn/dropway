@@ -631,7 +631,7 @@ The owner API key is saved like \`dropway login\` (the full key is printed only 
 
 const apiCmd: Command = {
   summary: "Call any REST endpoint (escape hatch)",
-  usage: "dropway api [METHOD] <path> [--data <json> | --data @file.json | --data -]",
+  usage: "dropway api <operationId | [METHOD] path> [--data <json> | --data @file.json | --data -]",
   flags: { data: { kind: "string", short: "d" } },
   details: `Paths are relative to /api/v1 (e.g. /me, /sites, /keys). Examples:
   dropway api /sites/my-site
@@ -639,6 +639,7 @@ const apiCmd: Command = {
   dropway api POST /keys --data '{"name":"ci","scopes":["sites:read","sites:write"]}'`,
   async run(p, io, out) {
     let [method, path] = p.positionals;
+    const operationId = method && !path && /^[a-z][a-z0-9_]+$/.test(method) ? method : null;
     if (method && !path) {
       path = method;
       method = "GET";
@@ -656,6 +657,31 @@ const apiCmd: Command = {
         json = JSON.parse(text);
       } catch {
         throw new UsageError("--data must be JSON.");
+      }
+    }
+    if (operationId) {
+      const { data: catalog } = await client.get<{ operations: { id: string; method: string; path: string }[] }>("/operations");
+      const operation = catalog.operations.find((entry) => entry.id === operationId);
+      if (!operation) {
+        // Preserve the original `api sites` shorthand for GET /sites.
+        method = "GET";
+        path = operationId;
+      } else {
+        if (json !== undefined && (!json || typeof json !== "object" || Array.isArray(json))) throw new UsageError("Operation --data must be a JSON object.");
+        const args = { ...(json as Record<string, unknown> | undefined) };
+        method = operation.method.toUpperCase();
+        path = operation.path.replace(/\{([^}]+)\}/g, (_, name: string) => {
+          if (args[name] === undefined) throw new UsageError(`Operation ${operationId} requires ${name}.`);
+          const value = encodeURIComponent(String(args[name]));
+          delete args[name];
+          return value;
+        });
+        if (method === "GET" || method === "HEAD") {
+          const query = new URLSearchParams();
+          for (const [key, value] of Object.entries(args)) if (value !== undefined) query.set(key, typeof value === "object" ? JSON.stringify(value) : String(value));
+          if (query.size) path += `?${query}`;
+          json = undefined;
+        } else json = args;
       }
     }
     const { data } = await client.request(method, path, { json, retry: method === "GET" || method === "HEAD" ? "safe" : "rate-limit" });

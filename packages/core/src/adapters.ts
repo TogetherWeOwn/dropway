@@ -94,7 +94,15 @@ export interface SiteRequestEvent {
  * Event hooks. All run after the response is sent (waitUntil); errors are
  * logged and never affect the request. Use PolicyAdapter to block things.
  */
+export interface TransferEvent {
+  id: string;
+  type: "transfer.created" | "transfer.updated" | "transfer.revoked" | "transfer.expired";
+  transferId: string;
+  at: number;
+}
+
 export interface DropwayHooks {
+  onEvent?(event: TransferEvent, dc: DropwayContext): void | Promise<void>;
   onPublish?(event: PublishEvent, dc: DropwayContext): void | Promise<void>;
   onDelete?(event: DeleteEvent, dc: DropwayContext): void | Promise<void>;
   /** Every request served for a site (including 404s). Keep it cheap. */

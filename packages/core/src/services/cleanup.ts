@@ -3,12 +3,15 @@ import { siteUrl } from "../context";
 import { blobKey } from "./blobs";
 import { emit, meter } from "./events";
 import { dropLive } from "./live";
+import { cleanupTransfers } from "./transfer-cleanup";
 
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
 
 export interface CleanupReport {
   expiredSites: number;
+  expiredTransfers: number;
+  purgedTransfers: number;
   purgedSites: number;
   abandonedDeploys: number;
   deletedBlobs: number;
@@ -23,12 +26,12 @@ export interface CleanupReport {
  * Each step is bounded so one run stays well inside Worker limits.
  */
 export async function runCleanup(dc: DropwayContext, now = Date.now()): Promise<CleanupReport> {
-  const report: CleanupReport = { expiredSites: 0, purgedSites: 0, abandonedDeploys: 0, deletedBlobs: 0 };
+  const report: CleanupReport = { expiredSites: 0, purgedSites: 0, abandonedDeploys: 0, deletedBlobs: 0, ...await cleanupTransfers(dc, now) };
   const db = dc.env.DB;
 
   // 1. Expire anonymous sites.
   const { results: expired } = await db
-    .prepare("SELECT id, slug, tenant_id FROM sites WHERE expires_at IS NOT NULL AND expires_at < ? AND deleted_at IS NULL LIMIT 200")
+    .prepare("SELECT id, slug, tenant_id FROM sites WHERE mode = 'site' AND expires_at IS NOT NULL AND expires_at < ? AND deleted_at IS NULL LIMIT 200")
     .bind(now)
     .all<{ id: string; slug: string; tenant_id: string | null }>();
   for (const s of expired) {
@@ -44,7 +47,7 @@ export async function runCleanup(dc: DropwayContext, now = Date.now()): Promise<
 
   // 2. Purge deleted sites (rows only; their blobs become orphans for step 4).
   const { results: gone } = await db
-    .prepare("SELECT id FROM sites WHERE deleted_at IS NOT NULL AND deleted_at < ? LIMIT 50")
+    .prepare("SELECT id FROM sites WHERE mode = 'site' AND deleted_at IS NOT NULL AND deleted_at < ? LIMIT 50")
     .bind(now - HOUR)
     .all<{ id: string }>();
   for (const s of gone) {

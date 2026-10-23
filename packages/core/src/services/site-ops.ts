@@ -101,7 +101,7 @@ export async function renameSite(dc: DropwayContext, p: Principal, ref: unknown,
   try {
     await dc.env.DB.prepare("UPDATE sites SET slug = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").bind(wanted, Date.now(), site.id).run();
   } catch (e) {
-    if (String(e).includes("UNIQUE")) throw conflict("slug_taken", `The site name "${wanted}" is taken.`, "Pick another name.");
+    if (String(e).includes("UNIQUE") || String(e).includes("transfer_slug_reserved")) throw conflict("slug_taken", `The site name "${wanted}" is taken.`, "Pick another name.");
     throw e;
   }
   await dropLive(dc, site.slug);

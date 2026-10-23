@@ -1,0 +1,74 @@
+import {
+  ApiError, appOrigin, checkTransferGate, describeTransfer, makeTransferGrant, openTransferDownload,
+  publicTransfer, transferCookieName, transferFileUrl, transferMissing, transferPageUrl, transferRecipients,
+  transferUnlocked, unlockTransfer, type DropwayContext, type PublicTransfer,
+} from "@dropway/core";
+import type { Hono } from "hono";
+import type { DropwayEnv } from "./env";
+import { APP_PAGE_CSP, escapeHtml, htmlPage } from "./html";
+
+const headers = {
+  "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+  "X-Robots-Tag": "noindex, nofollow", "Content-Security-Policy": APP_PAGE_CSP, "X-Frame-Options": "DENY",
+};
+function page(t: PublicTransfer, body: string, status = 200) {
+  return new Response(htmlPage({ title: "File delivery", body: `<main class="dw-system"><h1>File delivery</h1>${body}</main>` }), {
+    status, headers: { ...headers, "Content-Type": "text/html; charset=utf-8" },
+  });
+}
+function passwordPage(dc: DropwayContext, t: PublicTransfer, recipient?: string) {
+  return page(t, `<p>This delivery is password protected.</p><form method="post" action="${escapeHtml(transferPageUrl(dc, t.slug, recipient))}"><label>Password <input type="password" name="password" minlength="8" maxlength="1024" required autocomplete="current-password"></label><button type="submit">Unlock delivery</button></form>`, 403);
+}
+export function transferError(error: unknown): Response {
+  if (!(error instanceof ApiError)) throw error;
+  return Response.json(error.toJSON(), { status: error.status, headers: { ...headers, ...(error.status === 429 ? { "Retry-After": String(error.details?.retryAfterSeconds ?? 60) } : {}) } });
+}
+export function installTransferPages(app: Hono<DropwayEnv>) {
+  app.on(["GET", "HEAD", "POST"], "/t/:slug", async (c) => {
+    const dc = c.get("dw");
+    try {
+      if (new URL(c.req.url).origin !== new URL(appOrigin(dc)).origin) throw transferMissing();
+      const t = await publicTransfer(dc, c.req.param("slug"));
+      checkTransferGate(t);
+      const recipient = c.req.query("recipient");
+      if (recipient && !transferRecipients(t).some((r) => r.token === recipient)) throw transferMissing();
+      if (c.req.method === "POST") {
+        if (c.req.header("Origin") !== appOrigin(dc) || ["cross-site", "same-site"].includes(c.req.header("Sec-Fetch-Site") ?? "")) return new Response("Origin refused", { status: 403, headers });
+        if (Number(c.req.header("Content-Length") ?? 0) > 16_384) return new Response("Form too large", { status: 413, headers });
+        const text = new TextDecoder().decode(await c.req.arrayBuffer());
+        if (new TextEncoder().encode(text).length > 16_384) return new Response("Form too large", { status: 413, headers });
+        const grant = await unlockTransfer(dc, t, new URLSearchParams(text).get("password"), c.req.header("CF-Connecting-IP") ?? "unknown");
+        return new Response(null, { status: 303, headers: { ...headers, Location: transferPageUrl(dc, t.slug, recipient),
+          "Set-Cookie": `${transferCookieName(t)}=${grant}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=900` } });
+      }
+      if (!await transferUnlocked(dc, t, c.req.raw)) return passwordPage(dc, t, recipient);
+      const description = await describeTransfer(dc, t);
+      const grant = t.password_hash ? await makeTransferGrant(dc, t) : null;
+      const files = description.files.map((f) => {
+        const url = new URL(transferFileUrl(dc, t.slug, f.path, recipient));
+        if (grant) url.searchParams.set("grant", grant);
+        return `<li><a href="${escapeHtml(url.href)}" rel="noreferrer">${escapeHtml(f.path)}</a> — ${f.size} bytes, ${escapeHtml(f.contentType)}<br><code>SHA-256 ${f.sha256}</code></li>`;
+      }).join("");
+      const response = page(t, `<p style="white-space:pre-wrap">${escapeHtml(t.message ?? "")}</p><ul>${files}</ul><p>Available until ${escapeHtml(new Date(t.expires_at).toISOString())}.</p>`);
+      return c.req.method === "HEAD" ? new Response(null, response) : response;
+    } catch (error) { return transferError(error); }
+  });
+}
+
+export async function serveTransfer(request: Request, dc: DropwayContext, slug: string, path: string): Promise<Response> {
+  try {
+    if (!["GET", "HEAD"].includes(request.method)) return new Response("Method not allowed", { status: 405, headers: { ...headers, Allow: "GET, HEAD" } });
+    const out = await openTransferDownload(dc, request, slug, path);
+    if (out.locked) {
+      if ((request.headers.get("Accept") ?? "").includes("text/html")) return page(out.transfer, `<p><a href="${escapeHtml(transferPageUrl(dc, slug))}">Unlock this delivery</a> on the application.</p>`, 403);
+      throw new ApiError(403, "transfer_locked", "Password required.", "Unlock the delivery on its app-origin page.");
+    }
+    const filename = out.file.path.split("/").pop()!;
+    const disposition = `attachment; filename="${filename.replace(/[^\x20-\x7e]|["\\]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(filename).replace(/['()*]/g, (s) => `%${s.charCodeAt(0).toString(16)}`)}`;
+    return new Response(out.body, { status: out.ranged ? 206 : 200, headers: {
+      ...headers, "Content-Type": out.file.content_type, "Content-Disposition": disposition,
+      "Content-Length": String(out.length), "Accept-Ranges": "bytes",
+      ...(out.ranged ? { "Content-Range": `bytes ${out.offset}-${out.offset + out.length - 1}/${out.file.size}` } : {}),
+    } });
+  } catch (error) { return transferError(error); }
+}

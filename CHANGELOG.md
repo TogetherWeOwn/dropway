@@ -14,7 +14,28 @@
 - The product name comes from `INSTANCE_NAME` in the served skill (heading, description, homepage),
   both skills indexes and the MCP server instructions. The skill's `name` stays `dropway`.
 
+### File deliveries
+
+- Add `create_transfer`, `get_transfer`, `update_transfer` and `revoke_transfers` to
+  the operation registry. `dropway api <operationId> --data ...` now uses the
+  advertised operation instead of treating its name as a URL.
+- Transfer messages and password forms stay on the app origin; immutable files
+  download from a separate sites host, with attachment, nosniff and no-store headers.
+  Password grants expire after 15 minutes and are bound to the current digest.
+- Add sender-owned slug reservations, per-file and recipient counts, conditional
+  lifecycle mutations, hourly expiry claims and held-byte retention. Revocation
+  does not release storage; manifest purge does, once, after a 24-hour retention.
+- `TRANSFER_MAX_EXPIRY_DAYS` defaults to 30 and is capped at 3,650. Policy adapters
+  may lower it. Transfer creation is refused without an isolated sites origin.
+- MCP discovery uses operation summaries to preserve the tool inventory budget;
+  full descriptions remain in OpenAPI and the full agent reference.
+
 ### Extension API
+
+- Bump `EXTENSION_API_VERSION` to 3: add optional `Limits.transferMaxExpiryDays`,
+  `DropwayHooks.onEvent` for transfer lifecycle events, public transfer services
+  and transfer expiry/purge counts in `CleanupReport`. Existing adapters keep
+  working; omitted delivery limits use the instance ceiling.
 
 - Bump `EXTENSION_API_VERSION` to 2: add `defineOperation()`, typed operation
   definitions/contexts, `createDropway({ operations })` and `dropway.operations`.
