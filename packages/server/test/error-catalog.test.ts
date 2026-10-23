@@ -110,7 +110,7 @@ describe("R-03 error catalog", () => {
       if (cells[0]) cells[0] = cells[0].replace(/^`|`$/g, "");
       return cells.length === 4 && /^\d{3}$/.test(cells[1]!) ? [cells] : [];
     });
-    const expected = Object.entries(entries).map(([code, entry]) => [code, String(entry.status), String(entry.retryable), entry.hint.replace(/\|/g, "\\|")]);
+    const expected = Object.entries(entries).map(([code, entry]) => [code, String(entry.status), String(entry.retryable), entry.hint.replace(/\\/g, "\\\\").replace(/\|/g, "\\|")]);
     expect(rows.sort((a, b) => a[0]!.localeCompare(b[0]!))).toEqual(expected.sort((a, b) => a[0]!.localeCompare(b[0]!)));
   });
 });
