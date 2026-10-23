@@ -153,7 +153,8 @@ pass extra viewers in `createDropway({ viewers })`; they run first.
 
 | Path | Page |
 |---|---|
-| `/` | Home: what this instance is, publish from the browser, curl/CLI/MCP snippets (`uiSlots.landing` replaces it) |
+| `/` | First-run setup form until the owner exists; then home with browser publishing and curl/CLI/MCP snippets (`uiSlots.landing` replaces it) |
+| `/connect` | CLI, MCP and skill instructions for this instance; the explicit next step after saving the first owner key |
 | `/login` | Sign in with an API key; first-run setup and owner recovery with the bootstrap secret |
 | `/dashboard` | Sites |
 | `/dashboard/sites/:slug` | Versions (restore, delete), files of any version (view, download), settings, delete |

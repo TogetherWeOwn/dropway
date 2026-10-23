@@ -2,7 +2,7 @@ import type { Hono } from "hono";
 import type { DropwayEnv } from "../env";
 import type { UiSlots } from "../extensions";
 import { clientScriptResponse } from "./assets";
-import { keysPage, loginPage, publishPage, settingsPage, sitePage, sitesPage, viewerPage } from "./pages";
+import { connectPage, keysPage, loginPage, publishPage, settingsPage, sitePage, sitesPage, viewerPage } from "./pages";
 
 /**
  * App-origin UI routes: sign-in, dashboard, file viewer and the dashboard
@@ -13,6 +13,7 @@ import { keysPage, loginPage, publishPage, settingsPage, sitePage, sitesPage, vi
 export function installUi(app: Hono<DropwayEnv>, slots: UiSlots) {
   app.get("/__dropway/ui/:file", (c) => clientScriptResponse(c.req.param("file")) ?? c.notFound());
   app.get("/login", (c) => loginPage(c));
+  app.get("/connect", (c) => connectPage(c));
   // The sign-in forms post here only if the dashboard script has not loaded yet: never echo or
   // store what was sent (it may be a key), just send the person back. Secrets never land in a URL.
   app.post("/login", (c) => c.redirect("/login?retry=1", 303));

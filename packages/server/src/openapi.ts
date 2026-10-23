@@ -323,8 +323,9 @@ export function buildOpenApi(origin: string, instanceName: string, anonymousPubl
       },
       "/": { get: op("landing", "Landing page (HTML)", { tags: ["agents"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page" }) },
       "/health": {
-        get: op("health", "Health check", { tags: ["agents"], security: false, responses: { 200: json({ type: "object", properties: { ok: { type: "boolean" }, service: { type: "string" } } }) }, mcpExclude: "monitoring" }),
+        get: op("health", "Health check", { tags: ["agents"], security: false, responses: { 200: json({ type: "object", required: ["ok", "service", "version", "build"], properties: { ok: { type: "boolean" }, service: { type: "string" }, version: { type: "string", description: "Package version." }, build: { type: "string", description: "Deploy-time BUILD_SHA; dev when unset." } } }) }, mcpExclude: "monitoring" }),
       },
+      "/connect": { get: op("connect_page", "Connect an agent using this instance's CLI, MCP endpoint and skill", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; see instance_info" }) },
       "/claim": { get: op("claim_page", "Claim page for anonymous sites (token in the URL fragment)", { tags: ["agents"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use claim_site" }) },
       "/login": {
         get: op("login_page", "Sign-in page (API key; first-run setup)", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page" }),

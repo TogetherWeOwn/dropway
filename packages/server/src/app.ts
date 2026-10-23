@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { version } from "../../../package.json";
 import { appOrigin } from "@dropway/core";
 import type { DropwayEnv } from "./env";
 import type { McpHandlerFactory, McpToolDefinition, UiSlots } from "./extensions";
@@ -29,7 +30,7 @@ export function createAppRouter(opts: { app: Hono<DropwayEnv>; uiSlots: UiSlots;
   installUi(app, opts.uiSlots);
 
   app.get("/", (c) => (opts.uiSlots.landing ? opts.uiSlots.landing(c) : homePage(c)));
-  app.get("/health", (c) => c.json({ ok: true, service: "dropway" }));
+  app.get("/health", (c) => c.json({ ok: true, service: "dropway", version, build: typeof c.env.BUILD_SHA === "string" && c.env.BUILD_SHA ? c.env.BUILD_SHA : "dev" }, 200, { "Cache-Control": "no-store" }));
   app.get("/openapi.json", (c) => {
     const dw = c.get("dw");
     return c.json(buildOpenApi(appOrigin(dw), dw.config.instanceName, dw.config.anonymous.enabled), 200, { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300" });

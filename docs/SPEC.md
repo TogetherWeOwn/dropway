@@ -159,7 +159,7 @@ Full matrix in section 10.
 
 | ID | Feature | Pri | Status |
 |---|---|---|---|
-| ID-01 | First-run setup with the `ADMIN_BOOTSTRAP_KEY` secret creates the owner and a full-scope key; recovery mints a new owner key | P0 | Done (browser setup page in R-16) |
+| ID-01 | First-run setup with the `ADMIN_BOOTSTRAP_KEY` secret creates the owner and a full-scope key; recovery mints a new owner key | P0 | Implemented (setup form on `/`, one-time key, `/connect`); real-browser acceptance pending in R-16 |
 | ID-02 | Members with roles `owner`, `admin`, `member` | P1 | Done (REST); tools R-25; dashboard R-22 |
 | ID-03 | Scoped API keys: named, scopes, optional single-site restriction, optional path prefix, optional expiry, last-used time; shown once, stored as SHA-256; 50 per member | P0 | Done (path prefix R-32; new scopes R-17) |
 | ID-04 | Claim tokens (`dwc_`) for anonymous sites | P0 | Done |
@@ -254,7 +254,7 @@ Full matrix in section 10.
 | OBS-02 | Daily rollups in D1 (beyond Analytics Engine's 3-month retention, and as a fallback when no Analytics Engine API token is configured) | P1 | R-29 |
 | OBS-03 | Post-publish job pipeline on Queues, with job status visible to agents | P1 | R-19 |
 | OBS-04 | Screenshots and Open Graph images per version (Browser Run) | P1 | R-20 |
-| OBS-05 | Structured JSON logs; `/health` with build and version | P0 | Partial |
+| OBS-05 | Structured JSON logs; `/health` with build and version | P0 | Partial: `/health` returns package version and `BUILD_SHA` (`dev` when unset); deploy verification pending |
 
 ### 4.14 Collaboration (COL)
 
@@ -268,7 +268,7 @@ Full matrix in section 10.
 
 | ID | Feature | Pri | Status |
 |---|---|---|---|
-| OPS-01 | Deploy to Cloudflare button: provisions D1, R2, KV and Analytics Engine, applies migrations, prompts for secrets | P0 | Done (fresh-account check in R-16) |
+| OPS-01 | Deploy to Cloudflare button: provisions D1, R2, KV and Analytics Engine, applies migrations, prompts for secrets | P0 | Implemented; fresh Free/Paid-account acceptance pending in R-16 (see SELF_HOST.md) |
 | OPS-02 | Hourly cleanup cron: expired anonymous sites, deleted sites, stale uploads, orphan blobs | P0 | Done |
 | OPS-03 | Optional features switch off cleanly when their binding is absent and report it in `whoami.capabilities` | P0 | R-17 |
 | OPS-04 | Runtime instance settings (anonymous publish, limits) editable without a redeploy | P2 | R-42 |
