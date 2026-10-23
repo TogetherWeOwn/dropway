@@ -86,8 +86,12 @@ export function validateManifest(files: unknown, lim: Limits): { entries: Normal
     }
     const sha256 = String(f.sha256 ?? "").toLowerCase();
     if (!SHA256_RE.test(sha256)) invalid(badRequest("invalid_sha256", `sha256 for "${path}" must be 64 hex characters.`, "Compute it with `sha256sum <file>` or `shasum -a 256 <file>`."), `${field}.sha256`);
+    if (f.contentType != null && typeof f.contentType !== "string") {
+      invalid(badRequest("invalid_manifest", `contentType for "${path}" must be a string or null.`, "Send a MIME type string, null, or omit contentType to infer it from the path."), `${field}.contentType`);
+    } else {
+      entries.push({ path, size, sha256, contentType: normaliseContentType(f.contentType, path) });
+    }
     totalBytes += size;
-    entries.push({ path, size, sha256, contentType: normaliseContentType(f.contentType, path) });
   });
   if (firstError) {
     throw Object.assign(firstError, { details: { ...firstError.details, fields } });

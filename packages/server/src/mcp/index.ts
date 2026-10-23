@@ -14,8 +14,7 @@ import type { DropwayEnv } from "../env";
 import type { McpHandlerFactory, McpToolDefinition } from "../extensions";
 import { IDEMPOTENCY_KEY } from "./schemas";
 import { requireOperationScopes } from "../operations";
-import { fromSchema } from "../operations/shared";
-import type { z } from "zod";
+import { Validator, type OutputUnit } from "@cfworker/json-schema";
 
 /**
  * Remote MCP server at /mcp: Streamable HTTP, stateless, built with createMcpHandler
@@ -46,7 +45,7 @@ export interface McpEndpointOptions {
 type CompiledTool = {
   def: McpToolDefinition;
   input: ReturnType<typeof fromJsonSchema>;
-  validate: z.ZodType<any>;
+  validate: Validator;
   output: ReturnType<typeof fromJsonSchema> | undefined;
 };
 
@@ -79,11 +78,35 @@ function compile(tools: readonly McpToolDefinition[]): CompiledTool[] {
       schema = { ...schema, properties: { ...props, idempotencyKey: IDEMPOTENCY_KEY } };
     }
     const input = fromJsonSchema(schema);
-    // Keep the advertised schema, but validate inside our error boundary so SDK
-    // validation failures have the same complete details.fields as REST errors.
+    // Reuse the SDK's edge validation engine, but collect all structured errors
+    // inside our boundary. JSON Schema defaults are annotations, not input values.
+    // fromJsonSchema above checks the supported dialect; mirror its edge mapping.
+    const dialect = typeof schema.$schema === "string" ? schema.$schema.replace(/#$/, "") : "";
+    const draft = /\/draft-0[67]\/schema$/.test(dialect) ? "7" : dialect.endsWith("/2019-09/schema") ? "2019-09" : "2020-12";
     const wireInput = { "~standard": { ...input["~standard"], validate: (value: unknown) => ({ value }) } };
-    return { def, input: wireInput, validate: fromSchema(schema), output: def.outputSchema ? fromJsonSchema(def.outputSchema) : undefined };
+    return { def, input: wireInput, validate: new Validator(schema, draft, false), output: def.outputSchema ? fromJsonSchema(def.outputSchema) : undefined };
   });
+}
+
+function validationFields(errors: OutputUnit[]): Array<{ path: string; message: string }> {
+  const fields = errors.map((issue) => {
+    const path = decodeURI(issue.instanceLocation).slice(1).split("/").slice(1).map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
+    // The pinned engine locates missing properties at their containing object;
+    // only its diagnostic names the missing key (including quotes in key names).
+    const missing = issue.keyword === "required"
+      ? /^Instance does not have required property "(.*)"\.$/s.exec(issue.error)
+      : issue.keyword === "dependentRequired" || issue.keyword === "dependencies" ? /^Instance has ".*" but does not have "(.*)"\.$/s.exec(issue.error) : null;
+    if (missing) path.push(missing[1]!);
+    return { path: path.join("."), message: issue.error, keyword: issue.keyword };
+  });
+  const wrappers = new Set(["properties", "additionalProperties", "items", "prefixItems", "dependentSchemas"]);
+  const result = new Map<string, { path: string; message: string }>();
+  for (const field of fields) {
+    if (wrappers.has(field.keyword) && fields.some((other) => other.path !== field.path && (!field.path || other.path.startsWith(`${field.path}.`)))) continue;
+    // Prefer the first specific failure over follow-on unevaluated-property noise.
+    if (!result.has(field.path)) result.set(field.path, { path: field.path, message: field.message });
+  }
+  return [...result.values()];
 }
 
 function truthy(v: string | null | undefined): boolean {
@@ -152,13 +175,13 @@ function buildServer(compiled: CompiledTool[], ctx: { dw: DropwayContext; princi
       async (rawArgs: unknown) => {
         try {
           scopeCheck(principal, def);
-          const parsed = validate.safeParse(rawArgs ?? {});
-          if (!parsed.success) {
+          const parsed = validate.validate(rawArgs ?? {});
+          if (!parsed.valid) {
             throw new ApiError(400, "invalid_request", `Invalid input for ${def.name}.`, "Correct the listed fields and retry.", {
-              fields: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })),
+              fields: validationFields(parsed.errors),
             });
           }
-          const args = { ...(parsed.data as Record<string, unknown>) };
+          const args = { ...((rawArgs ?? {}) as Record<string, unknown>) };
           const idempotencyKey = def.idempotent ? validateIdempotencyKey(args.idempotencyKey) : null;
           delete args.idempotencyKey;
           const toolCtx = { dw, principal, request, client: clientName(server, request), idempotencyKey };
