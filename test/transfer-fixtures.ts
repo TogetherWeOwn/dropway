@@ -88,6 +88,14 @@ export async function op(dw: Instance, name: string, args: Record<string, unknow
     body.slug = body.site;
     delete body.site;
   }
+  if (name === "publish_site" && body.slug !== undefined) {
+    body.site = body.slug;
+    delete body.slug;
+  }
+  if (name === "delete_site" && body.site !== undefined) {
+    body.slug = body.site;
+    delete body.site;
+  }
   const path = operation!.path.replace(/\{([^}]+)\}/g, (_, field: string) => {
     expect(body[field], `${name} needs path parameter ${field}`).toBeDefined();
     const value = encodeURIComponent(String(body[field]));
