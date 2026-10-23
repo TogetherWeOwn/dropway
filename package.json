@@ -31,7 +31,8 @@
     "@modelcontextprotocol/sdk": "1.32.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.0",
-    "wrangler": "^4.152.0"
+    "wrangler": "^4.152.0",
+    "yaml": "2.9.1"
   },
   "engines": {
     "node": ">=20"

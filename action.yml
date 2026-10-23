@@ -1,0 +1,34 @@
+name: Dropway PR previews
+description: Publish a folder to a Dropway preview, update its PR comment, and clean up on close.
+inputs:
+  folder:
+    description: Folder to publish, relative to the caller workspace (not needed on close).
+    default: dist
+  api:
+    description: Origin of your Dropway instance.
+    required: true
+  token:
+    description: Dropway API key for a dedicated preview account with sites read/write access.
+    required: true
+  github-token:
+    description: GitHub token with permission to write pull-request comments.
+    default: ${{ github.token }}
+outputs:
+  url:
+    description: Published preview URL (empty on cleanup or skip).
+    value: ${{ steps.preview.outputs.url }}
+  slug:
+    description: Preview site slug (empty on cleanup or skip).
+    value: ${{ steps.preview.outputs.slug }}
+runs:
+  using: composite
+  steps:
+    - name: Publish or remove PR preview
+      id: preview
+      shell: bash
+      env:
+        DROPWAY_ACTION_FOLDER: ${{ inputs.folder }}
+        DROPWAY_ACTION_API: ${{ inputs.api }}
+        DROPWAY_ACTION_TOKEN: ${{ inputs.token }}
+        DROPWAY_ACTION_GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: node "$GITHUB_ACTION_PATH/scripts/pr-preview.mjs"

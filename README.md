@@ -56,6 +56,12 @@ something is wrong, and `--wait` returns only once the URL serves the new versio
 [packages/cli/README.md](packages/cli/README.md). (The npm package is being prepared; until it is
 published, run `node packages/cli/bin/dropway.mjs` from a clone after `npm install`.)
 
+### GitHub pull-request previews
+
+Use this repository's composite action to publish a build folder, update one PR
+comment, and remove the preview on close. It uses your own Dropway instance and
+supports trusted same-repository PRs only. See [setup, permissions and cleanup](docs/PR_PREVIEWS.md).
+
 ### curl
 
 ```sh
