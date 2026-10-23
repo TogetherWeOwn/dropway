@@ -88,12 +88,12 @@ describe("client helpers", () => {
       stderrIsTTY: false,
       readStdin: async () => "",
       prompt: async () => "",
-      env: { DROPWAY_CONFIG_DIR: await tmp() },
+      env: { KOFRA_CONFIG_DIR: await tmp() },
       cwd: await tmp(),
       fetch: async () => new Response(JSON.stringify({ principal: "member", member: { email: "a@b.c", role: "owner" }, scopes: [] }), { headers: moved }),
     };
     expect(await run(["whoami", "--api", "https://old.test", "--key", "dw_x", "--json"], io)).toBe(EXIT.ok);
-    expect(stderr).toBe("Note: https://old.test has moved to https://kofra.test. The old address still works for now; make the new one your default with: dropway login --api https://kofra.test\n");
+    expect(stderr).toBe("Note: https://old.test has moved to https://kofra.test. The old address still works for now; make the new one your default with: kofra login --api https://kofra.test\n");
   });
 
   it("keeps VERSION in sync with package.json", async () => {
@@ -183,12 +183,12 @@ describe("collectFiles", () => {
 
 describe("config", () => {
   it("resolves the config dir from env", () => {
-    expect(configDir({ DROPWAY_CONFIG_DIR: "/x/y" })).toBe("/x/y");
+    expect(configDir({ KOFRA_CONFIG_DIR: "/x/y" })).toBe("/x/y");
     expect(configDir({ XDG_CONFIG_HOME: "/cfg" })).toBe("/cfg/dropway");
   });
 
   it("saves credentials owner-only and removes them", async () => {
-    const env = { DROPWAY_CONFIG_DIR: await tmp() };
+    const env = { KOFRA_CONFIG_DIR: await tmp() };
     const path = await saveCredentials("https://a.example", { key: "dw_x", email: "a@example.com" }, env);
     expect((await stat(path)).mode & 0o777).toBe(0o600);
     const creds = await readCredentials(env);

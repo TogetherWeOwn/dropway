@@ -83,7 +83,7 @@ export async function codePage(vc: ViewerContext, opts: { text: string; truncate
     css: CODE_CSS + HIGHLIGHT_CSS,
     script: CODE_SCRIPT,
     csp: viewerCsp({ scriptHashes: [await scriptHash(CODE_SCRIPT)] }),
-    headers: { "X-Dropway-Render-Cache": cache },
+    headers: { "X-Kofra-Render-Cache": cache },
   });
 }
 

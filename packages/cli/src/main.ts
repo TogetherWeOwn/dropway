@@ -1,5 +1,5 @@
 /**
- * The `dropway` command line. Every command:
+ * The `kofra` command line. Every command:
  * - prints human text by default, or exactly one JSON object on stdout with --json;
  * - writes progress and prompts to stderr only;
  * - exits with a stable code (see EXIT in client.ts), so agents can branch on it.
@@ -12,6 +12,7 @@ import { CliError, DropwayClient, EXIT, normaliseApi, type FetchLike } from "./c
 import { linkKey, linkPath, readCredentials, readLink, removeCredentials, saveCredentials, writeLink, type ProjectLink } from "./config.ts";
 import { collectFiles } from "./files.ts";
 import { encryptFiles } from "./encrypt.ts";
+import { withLegacyEnv } from "./legacy-brand.ts";
 import { formatBytes, plural, shortTime, table } from "./output.ts";
 import { publish, publishZip, waitForVersion, type ProgressEvent, type PublishResult, type VersionInfo } from "./publish.ts";
 import { VERSION } from "./version.ts";
@@ -48,8 +49,8 @@ interface Command {
 }
 
 const HELP_FOOTER = `Global options:
-  --api <url>      Instance URL (default: $DROPWAY_API, then ./dropway.json, then your last login)
-  --key <key>      API key or claim token (default: $DROPWAY_API_KEY, then the saved key for the instance)
+  --api <url>      Instance URL (default: $KOFRA_API, then ./dropway.json, then your last login)
+  --key <key>      API key or claim token (default: $KOFRA_API_KEY, then the saved key for the instance)
   --json           Print exactly one JSON object on stdout (for scripts and agents)
   -q, --quiet      No progress output
   -h, --help       Help for a command
@@ -124,27 +125,27 @@ interface Instance {
 async function resolveInstance(p: Parsed, io: Io): Promise<Instance> {
   const link = await readLink(io.cwd);
   const creds = await readCredentials(io.env);
-  const raw = str(p, "api") ?? (io.env.DROPWAY_API || io.env.DROPWAY_URL || undefined) ?? link?.api ?? creds.default ?? undefined;
+  const raw = str(p, "api") ?? (io.env.KOFRA_API || io.env.KOFRA_URL || undefined) ?? link?.api ?? creds.default ?? undefined;
   if (!raw) {
     throw new CliError({
       code: "no_instance",
-      message: "No Dropway instance is configured.",
-      hint: "Pass --api https://<your-instance>, set DROPWAY_API, or run `dropway login --api https://<your-instance>` once.",
+      message: "No Kofra instance is configured.",
+      hint: "Pass --api https://<your-instance>, set KOFRA_API, or run `kofra login --api https://<your-instance>` once.",
       exitCode: EXIT.usage,
     });
   }
   const api = normaliseApi(raw);
   const flagKey = str(p, "key");
   if (flagKey) return { api, key: flagKey, keySource: "flag", link };
-  if (io.env.DROPWAY_API_KEY) return { api, key: io.env.DROPWAY_API_KEY, keySource: "env", link };
+  if (io.env.KOFRA_API_KEY) return { api, key: io.env.KOFRA_API_KEY, keySource: "env", link };
   const saved = creds.instances[api]?.key;
   return { api, key: saved ?? null, keySource: saved ? "saved" : null, link };
 }
 
 function clientName(env: NodeJS.ProcessEnv): string {
-  if (env.DROPWAY_CLIENT) return env.DROPWAY_CLIENT.slice(0, 120);
-  if (env.CLAUDECODE === "1") return `claude-code/dropway-cli-${VERSION}`;
-  return `dropway-cli/${VERSION}`;
+  if (env.KOFRA_CLIENT) return env.KOFRA_CLIENT.slice(0, 120);
+  if (env.CLAUDECODE === "1") return `claude-code/kofra-cli-${VERSION}`;
+  return `kofra-cli/${VERSION}`;
 }
 
 /** Instances already reported as moved, per Io (one note per run). */
@@ -156,7 +157,7 @@ function makeClient(io: Io, api: string, token: string | null): DropwayClient {
     movedNoted.set(io, seen);
     if (seen.has(api)) return;
     seen.add(api);
-    io.stderr(`Note: ${api} has moved to ${to}. The old address still works for now; make the new one your default with: dropway login --api ${to}\n`);
+    io.stderr(`Note: ${api} has moved to ${to}. The old address still works for now; make the new one your default with: kofra login --api ${to}\n`);
   };
   return new DropwayClient({ api, token, fetch: io.fetch, client: clientName(io.env), onMoved });
 }
@@ -166,7 +167,7 @@ function requireKey(inst: Instance, what = "This command"): string {
   throw new CliError({
     code: "not_logged_in",
     message: `${what} needs an API key for ${inst.api}.`,
-    hint: "Run `dropway login`, set DROPWAY_API_KEY, or pass --key. (To publish without a key, use --anonymous if the instance allows it.)",
+    hint: "Run `kofra login`, set KOFRA_API_KEY, or pass --key. (To publish without a key, use --anonymous if the instance allows it.)",
     exitCode: EXIT.auth,
   });
 }
@@ -195,14 +196,14 @@ async function resolveVersion(client: DropwayClient, slug: string, ref: string |
     const live = versions.find((v) => v.id === currentVersionId);
     const previous = versions.filter((v) => v.id !== currentVersionId && (!live || v.number < live.number)).sort((a, b) => b.number - a.number)[0];
     if (!previous) {
-      throw new CliError({ code: "no_previous_version", message: `${slug} has no version older than the live one.`, hint: `List versions with: dropway versions ${slug}`, exitCode: EXIT.notFound });
+      throw new CliError({ code: "no_previous_version", message: `${slug} has no version older than the live one.`, hint: `List versions with: kofra versions ${slug}`, exitCode: EXIT.notFound });
     }
     return previous;
   }
   const m = /^v?(\d+)$/i.exec(ref.trim());
   const found = m ? versions.find((v) => v.number === Number(m[1])) : versions.find((v) => v.id === ref.trim());
   if (!found) {
-    throw new CliError({ code: "version_not_found", message: `${slug} has no finalized version "${ref}".`, hint: `List versions with: dropway versions ${slug}`, exitCode: EXIT.notFound });
+    throw new CliError({ code: "version_not_found", message: `${slug} has no finalized version "${ref}".`, hint: `List versions with: kofra versions ${slug}`, exitCode: EXIT.notFound });
   }
   return found;
 }
@@ -233,7 +234,7 @@ const versionLabel = (v: VersionInfo | null | undefined) => (v ? `v${v.number}` 
 
 const publishCmd: Command = {
   summary: "Publish a folder, a file or a .zip to a live URL",
-  usage: "dropway publish <path> [--site <name>] [--json]",
+  usage: "kofra publish <path> [--site <name>] [--json]",
   flags: {
     site: { kind: "string", short: "s" },
     new: { kind: "boolean" },
@@ -400,7 +401,7 @@ running the same command again updates that site.`,
 
 const listCmd: Command = {
   summary: "List your sites",
-  usage: "dropway list [--limit <n>] [--all]",
+  usage: "kofra list [--limit <n>] [--all]",
   flags: { limit: { kind: "string" }, all: { kind: "boolean" }, cursor: { kind: "string" } },
   async run(p, io, out) {
     const inst = await resolveInstance(p, io);
@@ -418,10 +419,10 @@ const listCmd: Command = {
       if (!bool(p, "all") || !cursor) break;
     }
     out.result({ sites, nextCursor: cursor }, () => {
-      if (!sites.length) return "No sites yet. Publish one with: dropway publish <path>";
+      if (!sites.length) return "No sites yet. Publish one with: kofra publish <path>";
       const rows = sites.map((s) => [s.slug, versionLabel(s.currentVersion), String(s.currentVersion?.fileCount ?? 0), shortTime(s.updatedAt), s.url]);
       let text = table(rows, ["SITE", "LIVE", "FILES", "UPDATED", "URL"]);
-      if (cursor) text += `\nMore: dropway list --cursor ${cursor} (or --all)`;
+      if (cursor) text += `\nMore: kofra list --cursor ${cursor} (or --all)`;
       return text;
     });
     return EXIT.ok;
@@ -430,7 +431,7 @@ const listCmd: Command = {
 
 const siteCmd: Command = {
   summary: "Show one site",
-  usage: "dropway site <name>",
+  usage: "kofra site <name>",
   flags: {},
   async run(p, io, out) {
     const slug = positional(p, 0, "name", this.usage);
@@ -454,7 +455,7 @@ const siteCmd: Command = {
 
 const filesCmd: Command = {
   summary: "List the files of a site's live (or given) version",
-  usage: "dropway files <name> [--version <v>]",
+  usage: "kofra files <name> [--version <v>]",
   flags: { version: { kind: "string" } },
   async run(p, io, out) {
     const slug = positional(p, 0, "name", this.usage);
@@ -474,7 +475,7 @@ const filesCmd: Command = {
 
 const versionsCmd: Command = {
   summary: "List a site's versions",
-  usage: "dropway versions <name>",
+  usage: "kofra versions <name>",
   flags: {},
   async run(p, io, out) {
     const slug = positional(p, 0, "name", this.usage);
@@ -495,7 +496,7 @@ const versionsCmd: Command = {
 
 const restoreCmd: Command = {
   summary: "Make an older version live again (default: the one before the live version)",
-  usage: "dropway restore <name> [v<N> | <N> | <versionId>]",
+  usage: "kofra restore <name> [v<N> | <N> | <versionId>]",
   flags: {},
   async run(p, io, out) {
     const slug = positional(p, 0, "name", this.usage);
@@ -510,7 +511,7 @@ const restoreCmd: Command = {
 
 const deleteCmd: Command = {
   summary: "Delete a site (or one non-live version with --version)",
-  usage: "dropway delete <name> [--version <v>] --yes",
+  usage: "kofra delete <name> [--version <v>] --yes",
   flags: { yes: { kind: "boolean", short: "y" }, version: { kind: "string" } },
   async run(p, io, out) {
     const slug = positional(p, 0, "name", this.usage);
@@ -533,7 +534,7 @@ const deleteCmd: Command = {
 
 const whoamiCmd: Command = {
   summary: "Show the instance and the identity of your key",
-  usage: "dropway whoami",
+  usage: "kofra whoami",
   flags: {},
   async run(p, io, out) {
     const inst = await resolveInstance(p, io);
@@ -550,7 +551,7 @@ const whoamiCmd: Command = {
         ].join("\n");
       }
       if (data.principal === "claim_token") return `Instance: ${inst.api}\nUsing a claim token for one anonymous site (${data.siteId}).`;
-      return `Instance: ${inst.api}\nNot signed in. Anonymous publishing is ${data.anonymousPublish ? "on" : "off"} here.\nRun: dropway login --api ${inst.api}`;
+      return `Instance: ${inst.api}\nNot signed in. Anonymous publishing is ${data.anonymousPublish ? "on" : "off"} here.\nRun: kofra login --api ${inst.api}`;
     });
     return signedIn ? EXIT.ok : EXIT.auth;
   },
@@ -558,19 +559,19 @@ const whoamiCmd: Command = {
 
 const loginCmd: Command = {
   summary: "Save an API key for an instance",
-  usage: "dropway login [--api <url>] [--key <dw_...>]   (or pipe the key on stdin)",
+  usage: "kofra login [--api <url>] [--key <dw_...>]   (or pipe the key on stdin)",
   flags: {},
   details: `The key is checked against the instance, then saved to ${"<config dir>/credentials.json"}
-(mode 0600; config dir: $DROPWAY_CONFIG_DIR, $XDG_CONFIG_HOME/dropway or ~/.config/dropway).
+(mode 0600; config dir: $KOFRA_CONFIG_DIR, $XDG_CONFIG_HOME/dropway or ~/.config/dropway).
 The instance becomes your default. Get a key from the instance owner, or create
-the owner key on a new instance with: dropway setup --api <url> --email <you>`,
+the owner key on a new instance with: kofra setup --api <url> --email <you>`,
   async run(p, io, out) {
-    let raw = str(p, "api") ?? (io.env.DROPWAY_API || io.env.DROPWAY_URL || undefined);
+    let raw = str(p, "api") ?? (io.env.KOFRA_API || io.env.KOFRA_URL || undefined);
     if (!raw) {
       const link = await readLink(io.cwd);
       raw = link?.api ?? (await readCredentials(io.env)).default ?? undefined;
     }
-    if (!raw && io.stdinIsTTY && io.stderrIsTTY) raw = (await io.prompt("Dropway URL (e.g. https://dropway.example.workers.dev): ")).trim();
+    if (!raw && io.stdinIsTTY && io.stderrIsTTY) raw = (await io.prompt("Kofra URL (e.g. https://dropway.example.workers.dev): ")).trim();
     if (!raw) throw new UsageError("Missing the instance URL: pass --api <url>.");
     const api = normaliseApi(raw);
     const key = str(p, "key") ?? (await readSecretInput(io, "API key (dw_...): "));
@@ -589,11 +590,11 @@ the owner key on a new instance with: dropway setup --api <url> --email <you>`,
 
 const logoutCmd: Command = {
   summary: "Forget the saved key for an instance",
-  usage: "dropway logout [--api <url>]",
+  usage: "kofra logout [--api <url>]",
   flags: {},
   async run(p, io, out) {
     const creds = await readCredentials(io.env);
-    const raw = str(p, "api") ?? (io.env.DROPWAY_API || io.env.DROPWAY_URL || undefined) ?? creds.default ?? undefined;
+    const raw = str(p, "api") ?? (io.env.KOFRA_API || io.env.KOFRA_URL || undefined) ?? creds.default ?? undefined;
     if (!raw) throw new UsageError("Not logged in anywhere.");
     const api = normaliseApi(raw);
     const removed = await removeCredentials(api, io.env);
@@ -604,17 +605,17 @@ const logoutCmd: Command = {
 
 const setupCmd: Command = {
   summary: "First run of a new instance: create the owner and save their API key",
-  usage: "dropway setup --api <url> --email <you@example.com>   (bootstrap key from $DROPWAY_BOOTSTRAP_KEY, stdin or a prompt)",
+  usage: "kofra setup --api <url> --email <you@example.com>   (bootstrap key from $KOFRA_BOOTSTRAP_KEY, stdin or a prompt)",
   flags: { email: { kind: "string" }, name: { kind: "string" }, "show-key": { kind: "boolean" }, save: { kind: "boolean" } },
   details: `Uses the instance's ADMIN_BOOTSTRAP_KEY secret once to create the owner.
-The owner API key is saved like \`dropway login\` (the full key is printed only with
+The owner API key is saved like \`kofra login\` (the full key is printed only with
 --show-key, or when --no-save skips saving it).`,
   async run(p, io, out) {
-    const raw = str(p, "api") ?? (io.env.DROPWAY_API || io.env.DROPWAY_URL || undefined);
+    const raw = str(p, "api") ?? (io.env.KOFRA_API || io.env.KOFRA_URL || undefined);
     if (!raw) throw new UsageError("Missing --api <url> (the instance to set up).");
     const api = normaliseApi(raw);
-    const bootstrap = io.env.DROPWAY_BOOTSTRAP_KEY || (await readSecretInput(io, "Bootstrap key (ADMIN_BOOTSTRAP_KEY): "));
-    if (!bootstrap) throw new UsageError("Missing the bootstrap key: set DROPWAY_BOOTSTRAP_KEY, pipe it on stdin, or run in a terminal.");
+    const bootstrap = io.env.KOFRA_BOOTSTRAP_KEY || (await readSecretInput(io, "Bootstrap key (ADMIN_BOOTSTRAP_KEY): "));
+    if (!bootstrap) throw new UsageError("Missing the bootstrap key: set KOFRA_BOOTSTRAP_KEY, pipe it on stdin, or run in a terminal.");
     const client = makeClient(io, api, bootstrap);
     const body: Record<string, string> = {};
     const email = str(p, "email");
@@ -632,8 +633,8 @@ The owner API key is saved like \`dropway login\` (the full key is printed only 
         savedTo ? `Owner API key saved to ${savedTo}.` : "",
         showKey
           ? `Owner API key (shown once): ${key}`
-          : `The key is not printed (--show-key prints it). For CI or an MCP client, create a separate key: dropway api POST /keys --data '{"name":"ci"}'`,
-        `Next: dropway publish <folder>`,
+          : `The key is not printed (--show-key prints it). For CI or an MCP client, create a separate key: kofra api POST /keys --data '{"name":"ci"}'`,
+        `Next: kofra publish <folder>`,
       ]
         .filter(Boolean)
         .join("\n"),
@@ -644,12 +645,12 @@ The owner API key is saved like \`dropway login\` (the full key is printed only 
 
 const apiCmd: Command = {
   summary: "Call any REST endpoint (escape hatch)",
-  usage: "dropway api [METHOD] <path> [--data <json> | --data @file.json | --data -]",
+  usage: "kofra api [METHOD] <path> [--data <json> | --data @file.json | --data -]",
   flags: { data: { kind: "string", short: "d" } },
   details: `Paths are relative to /api/v1 (e.g. /me, /sites, /keys). Examples:
-  dropway api /sites/my-site
-  dropway api PATCH /sites/my-site --data '{"spa": true}'
-  dropway api POST /keys --data '{"name":"ci","scopes":["sites:read","sites:write"]}'`,
+  kofra api /sites/my-site
+  kofra api PATCH /sites/my-site --data '{"spa": true}'
+  kofra api POST /keys --data '{"name":"ci","scopes":["sites:read","sites:write"]}'`,
   async run(p, io, out) {
     let [method, path] = p.positionals;
     if (method && !path) {
@@ -704,17 +705,17 @@ const ALIASES: Record<string, string> = {
 
 function mainHelp(): string {
   const rows = Object.entries(COMMANDS).map(([name, c]) => [`  ${name}`, c.summary]);
-  return `dropway ${VERSION}: publish files, folders and sites to a live URL on a Dropway instance.
+  return `kofra ${VERSION}: publish files, folders and sites to a live URL on a Kofra instance.
 
-Usage: dropway <command> [options]
+Usage: kofra <command> [options]
 
 Commands:
 ${table(rows)}
 
 Quick start:
-  dropway login --api https://<your-instance>    # paste an API key once
-  dropway publish ./dist                          # prints the live URL
-  dropway publish ./dist --json                   # one JSON object for agents
+  kofra login --api https://<your-instance>    # paste an API key once
+  kofra publish ./dist                          # prints the live URL
+  kofra publish ./dist --json                   # one JSON object for agents
 
 ${HELP_FOOTER}
 
@@ -722,7 +723,7 @@ Docs: https://github.com/TogetherWeOwn/dropway/tree/main/packages/cli`;
 }
 
 function commandHelp(name: string, c: Command): string {
-  return `dropway ${name}: ${c.summary}
+  return `kofra ${name}: ${c.summary}
 
 Usage: ${c.usage}
 ${c.details ? `\n${c.details}\n` : ""}
@@ -731,6 +732,7 @@ ${HELP_FOOTER}`;
 
 /** Run the CLI. Returns the exit code (never calls process.exit). */
 export async function run(argv: string[], io: Io): Promise<number> {
+  io = { ...io, env: withLegacyEnv(io.env) };
   const first = argv[0];
   if (!first || first === "help" || first === "--help" || first === "-h") {
     const topic = first === "help" ? argv[1] : undefined;
@@ -748,7 +750,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   const wantsJson = argv.includes("--json");
   const out = new Output(io, wantsJson, argv.includes("--quiet") || argv.includes("-q"));
   if (!command) {
-    out.error(new CliError({ code: "unknown_command", message: `Unknown command "${first}".`, hint: "Run `dropway help` for the list of commands.", exitCode: EXIT.usage }));
+    out.error(new CliError({ code: "unknown_command", message: `Unknown command "${first}".`, hint: "Run `kofra help` for the list of commands.", exitCode: EXIT.usage }));
     return EXIT.usage;
   }
   try {
@@ -763,7 +765,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       e instanceof CliError
         ? e
         : e instanceof UsageError
-          ? new CliError({ code: "usage", message: e.message, hint: `Run \`dropway ${name} --help\`.`, exitCode: EXIT.usage })
+          ? new CliError({ code: "usage", message: e.message, hint: `Run \`kofra ${name} --help\`.`, exitCode: EXIT.usage })
           : new CliError({ code: "unexpected_error", message: (e as Error)?.message ?? String(e), exitCode: EXIT.error });
     out.error(err);
     return err.exitCode;

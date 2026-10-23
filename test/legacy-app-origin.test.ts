@@ -55,7 +55,7 @@ const SERVED_READS: Array<[path: string, status: number, withKey: boolean]> = [
   ["/mcp/x", 401, false], // sub-paths, mounted with app.all("/mcp/*")
   ["/health", 200, false],
   ["/.well-known/agent-skills/index.json", 200, false],
-  ["/.well-known/agent-skills/dropway/SKILL.md", 200, false],
+  ["/.well-known/agent-skills/kofra/SKILL.md", 200, false],
   ["/llms.txt", 200, false],
   ["/llms-full.txt", 200, false],
   ["/openapi.json", 200, false],
@@ -121,7 +121,7 @@ describe("legacy app origin: agents keep working, pages move", () => {
     expect(index.status).toBe(200);
     expectDeprecated(index, `${NEW}/.well-known/agent-skills/index.json`);
     const skills = ((await index.json()) as any).skills;
-    expect(skills[0].url).toBe(`${NEW}/.well-known/agent-skills/dropway/SKILL.md`);
+    expect(skills[0].url).toBe(`${NEW}/.well-known/agent-skills/kofra/SKILL.md`);
     expect(skills[0].description).toContain("with Kofra");
   });
 
@@ -155,9 +155,9 @@ describe("legacy app origin: agents keep working, pages move", () => {
     expect(skill.status).toBe(200);
     const md = await skill.text();
     expect(md).toContain("\n# Kofra\n\nKofra turns files into a live URL.");
-    expect(md).toMatch(/^name: dropway$/m);
+    expect(md).toMatch(/^name: kofra$/m);
     expect(md).toContain(`homepage: ${NEW}`);
-    expect(md).toContain(`claude mcp add --transport http dropway ${NEW}/mcp`);
+    expect(md).toContain(`claude mcp add --transport http kofra ${NEW}/mcp`);
     expect(md).not.toContain(ORIGIN);
   });
 
@@ -240,6 +240,6 @@ describe("instance name", () => {
     const instructions = mcpInstructions({ config: resolveConfig({ INSTANCE_NAME: "Kofra", APP_ORIGIN: NEW }), requestUrl: null } as never);
     expect(instructions).toMatch(/^Kofra publishes files/);
     expect(instructions).toContain(`${NEW}/llms.txt`);
-    expect(mcpInstructions({ config: resolveConfig({}), requestUrl: null } as never)).toMatch(/^Dropway publishes files/);
+    expect(mcpInstructions({ config: resolveConfig({}), requestUrl: null } as never)).toMatch(/^Kofra publishes files/);
   });
 });

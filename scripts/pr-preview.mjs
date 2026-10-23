@@ -20,7 +20,7 @@ function httpUrl(value) {
 
 async function preview() {
   if (process.env.GITHUB_EVENT_NAME !== "pull_request") {
-    console.log("Dropway preview skipped: only pull_request events are supported.");
+    console.log("Kofra preview skipped: only pull_request events are supported.");
     return;
   }
   const event = JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, "utf8"));
@@ -31,23 +31,23 @@ async function preview() {
       pr?.head?.repo?.full_name !== repository ||
       !Number.isSafeInteger(event.number) || event.number < 1 || pr.number !== event.number ||
       !["opened", "synchronize", "reopened", "closed"].includes(event.action)) {
-    console.log("Dropway preview skipped: untrusted or unsupported PR context.");
+    console.log("Kofra preview skipped: untrusted or unsupported PR context.");
     return;
   }
 
-  const token = process.env.DROPWAY_ACTION_TOKEN;
-  const githubToken = process.env.DROPWAY_ACTION_GITHUB_TOKEN;
-  const apiInput = process.env.DROPWAY_ACTION_API;
+  const token = process.env.KOFRA_ACTION_TOKEN;
+  const githubToken = process.env.KOFRA_ACTION_GITHUB_TOKEN;
+  const apiInput = process.env.KOFRA_ACTION_API;
   if (!token?.trim() || !githubToken?.trim() || !apiInput?.trim()) {
     fail("Set api, token and github-token before running a preview (no anonymous fallback).");
   }
   // Run this revision's dependency-free CLI source, not a registry package or PR code.
   const [major, minor] = process.versions.node.split(".").map(Number);
   if (major < 22 || (major === 22 && minor < 18) || !process.features.typescript) {
-    fail("The Dropway action requires Node 22.18+ with native TypeScript support; use actions/setup-node.");
+    fail("The Kofra action requires Node 22.18+ with native TypeScript support; use actions/setup-node.");
   }
   const api = httpUrl(apiInput);
-  if (api.pathname !== "/" || api.search || api.hash) fail("api must be the Dropway instance origin.");
+  if (api.pathname !== "/" || api.search || api.hash) fail("api must be the Kofra instance origin.");
   const githubApi = httpUrl(process.env.GITHUB_API_URL ?? "https://api.github.com");
   if (githubApi.search || githubApi.hash) fail("Invalid GitHub API URL.");
   const namespace = createHash("sha256").update(repository.toLowerCase()).digest("hex").slice(0, 20);
@@ -109,9 +109,9 @@ async function preview() {
 
   let folder;
   if (event.action !== "closed") {
-    if (!process.env.DROPWAY_ACTION_FOLDER?.trim()) fail("Set folder to a built directory within the workspace.");
+    if (!process.env.KOFRA_ACTION_FOLDER?.trim()) fail("Set folder to a built directory within the workspace.");
     const workspace = await realpath(process.env.GITHUB_WORKSPACE);
-    folder = await realpath(resolve(workspace, process.env.DROPWAY_ACTION_FOLDER));
+    folder = await realpath(resolve(workspace, process.env.KOFRA_ACTION_FOLDER));
     const path = relative(workspace, folder);
     if (isAbsolute(path) || path === ".." || path.startsWith(`..${sep}`) || !(await stat(folder)).isDirectory()) {
       fail("folder must be a directory within the caller workspace.");
@@ -128,7 +128,7 @@ async function preview() {
         ...args, "--api", api.origin, "--json",
       ], {
         cwd: temp, timeout: 10 * 60_000, maxBuffer: 1024 * 1024,
-        env: { HOME: temp, DROPWAY_CONFIG_DIR: join(temp, "config"), DROPWAY_API_KEY: token },
+        env: { HOME: temp, KOFRA_CONFIG_DIR: join(temp, "config"), KOFRA_API_KEY: token },
       });
       return { code: 0, data: JSON.parse(result.stdout) };
     } catch (error) {
@@ -144,7 +144,7 @@ async function preview() {
         }
         return { code: error.code, errorCode };
       }
-      fail("Dropway CLI could not complete. Check the instance, folder and runtime.");
+      fail("Kofra CLI could not complete. Check the instance, folder and runtime.");
     }
   }
 
@@ -153,41 +153,41 @@ async function preview() {
       // A bare "not found" exit is not proof of absence: a key without
       // sites:read, a wrong instance, or a proxy 404 all exit 4 while the
       // preview stays public. Verify the key first, then only tolerate a
-      // verified Dropway site_not_found, and confirm successful deletions.
+      // verified Kofra site_not_found, and confirm successful deletions.
       const identity = await cli(["whoami"]);
-      if (identity.code !== 0) fail(`Dropway cleanup failed: the preview key was rejected (CLI exit ${identity.code}). Check the key and instance.`);
+      if (identity.code !== 0) fail(`Kofra cleanup failed: the preview key was rejected (CLI exit ${identity.code}). Check the key and instance.`);
       const scopes = identity.data?.scopes;
       if (identity.data?.principal !== "member" || !Array.isArray(scopes) ||
           !scopes.includes("sites:read") || !scopes.includes("sites:write") ||
           identity.data?.siteRestriction) {
-        fail("Dropway cleanup failed: the preview key needs unrestricted sites:read and sites:write. Check the key and instance.");
+        fail("Kofra cleanup failed: the preview key needs unrestricted sites:read and sites:write. Check the key and instance.");
       }
       const result = await cli(["delete", slug, "--yes"]);
       if (result.code === 4 && result.errorCode === "site_not_found") {
-        console.log("Dropway preview removed (or already absent).");
+        console.log("Kofra preview removed (or already absent).");
         return;
       }
-      if (result.code !== 0) fail(`Dropway cleanup failed (CLI exit ${result.code}); only a verified missing site is ignored.`);
+      if (result.code !== 0) fail(`Kofra cleanup failed (CLI exit ${result.code}); only a verified missing site is ignored.`);
       if (result.data?.deleted !== true || result.data?.slug !== slug) {
-        fail("Dropway cleanup failed: the instance did not confirm deletion. Check the instance.");
+        fail("Kofra cleanup failed: the instance did not confirm deletion. Check the instance.");
       }
-      console.log("Dropway preview removed (or already absent).");
+      console.log("Kofra preview removed (or already absent).");
       return;
     }
 
     // Read comments first: missing GitHub permission must not leave a new preview.
     const commentId = await findComment();
     const result = await cli(["publish", folder, "--site", slug, "--no-save"]);
-    if (result.code !== 0) fail(`Dropway publish failed (CLI exit ${result.code}). Check the key, instance and build output.`);
+    if (result.code !== 0) fail(`Kofra publish failed (CLI exit ${result.code}). Check the key, instance and build output.`);
     const url = httpUrl(result.data.url);
     if (result.data.slug !== slug || url.search || url.hash ||
         [token, githubToken].some((secret) => result.data.url.includes(secret))) {
-      fail("Dropway returned an invalid preview result; no URL was exposed.");
+      fail("Kofra returned an invalid preview result; no URL was exposed.");
     }
-    const body = `${marker}\n**Dropway preview:** <${url.href}>`;
+    const body = `${marker}\n**Kofra preview:** <${url.href}>`;
     await github(commentId ? "PATCH" : "POST", commentId ? `/repos/${repository}/issues/comments/${commentId}` : commentsPath, { body });
     await appendFile(process.env.GITHUB_OUTPUT, `url=${url.href}\nslug=${slug}\n`);
-    console.log("Dropway preview published and PR comment updated.");
+    console.log("Kofra preview published and PR comment updated.");
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
@@ -197,6 +197,6 @@ try {
   await preview();
 } catch (error) {
   // Only messages authored above are safe to print; never stringify arbitrary errors.
-  console.error(error instanceof PreviewError ? error.message : "Dropway preview failed. Check the event, inputs, network and Node runtime.");
+  console.error(error instanceof PreviewError ? error.message : "Kofra preview failed. Check the event, inputs, network and Node runtime.");
   process.exitCode = 1;
 }

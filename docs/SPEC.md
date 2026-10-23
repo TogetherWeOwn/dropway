@@ -1,7 +1,7 @@
-# Dropway specification (open-source edition)
+# Kofra specification (open-source edition)
 
 Status: draft 1, 2026-10-22. This is the technical source of truth for the open-source, single-tenant
-Dropway in this repository. `docs/ARCHITECTURE.md` explains how the current code is laid out;
+Kofra in this repository. `docs/ARCHITECTURE.md` explains how the current code is laid out;
 `docs/SELF_HOST.md` is the operator guide; `docs/ROADMAP.md` orders the work. When this file and the
 code disagree, the code describes what exists today and this file describes where it is going. Fix
 whichever is wrong in the same pull request.
@@ -23,7 +23,7 @@ Placeholders: `<app>` is the app origin (app, REST API, MCP), for example
 
 ## 1. Product summary
 
-Dropway publishes a file, a folder or a whole static site to a live URL in one call, then lets you
+Kofra publishes a file, a folder or a whole static site to a live URL in one call, then lets you
 manage it: immutable versions with instant rollback, a rendered or raw view of every file type,
 passwords and private links, analytics, and small-app features (a record store and secret-injecting
 proxy routes) that need no backend. It is built for AI agents first (REST API, remote MCP server,
@@ -38,12 +38,12 @@ strangers, no plans, no prices, no billing and no payment code. Limits are whate
 configures. An embedding application can add those things from outside through `createDropway()`
 (section 6); nothing in this repository depends on such an application.
 
-What Dropway is not:
+What Kofra is not:
 
 - Not a build service. Agents build locally (or in CI) and publish the output.
 - Not a general compute platform. Sites are static. Dynamic behaviour comes from Site Data, proxy
   routes and, later, sandboxed per-site functions (P2).
-- Not a code host. Use git for source; use Dropway for what a person or agent should look at.
+- Not a code host. Use git for source; use Kofra for what a person or agent should look at.
 
 ---
 
@@ -51,9 +51,9 @@ What Dropway is not:
 
 | Persona | Typical jobs | Main surface | "Good" means |
 |---|---|---|---|
-| **Coding agent with a shell** (Claude Code, Codex, Cursor, OpenCode, CI bots) | Publish a build or a report, update a few files, check the result, roll back, share privately | CLI `npx dropway`, local or remote MCP, REST | One command publishes; no file bytes pass through the model; JSON on stdout; errors say what to do next; the URL works when the command returns |
+| **Coding agent with a shell** (Claude Code, Codex, Cursor, OpenCode, CI bots) | Publish a build or a report, update a few files, check the result, roll back, share privately | CLI `npx kofra`, local or remote MCP, REST | One command publishes; no file bytes pass through the model; JSON on stdout; errors say what to do next; the URL works when the command returns |
 | **Chat or IDE agent without a shell** (Claude.ai, Claude Desktop, ChatGPT, VS Code) | Publish a page it just wrote, publish files that are already online, read back what it published | Remote MCP (OAuth or API key) | Small default toolset, inline text and URL sources, a preview card in the chat |
-| **Developer** | Self-host for their team, script publishes, embed Dropway in their own product, extend it | REST + OpenAPI, CLI, `createDropway()` | One-click deploy, stable typed API, documented extension points, tests that run locally |
+| **Developer** | Self-host for their team, script publishes, embed Kofra in their own product, extend it | REST + OpenAPI, CLI, `createDropway()` | One-click deploy, stable typed API, documented extension points, tests that run locally |
 | **Non-technical user** | Open a link, read a report, view a PDF, CSV or image, enter a password, drop a folder in the dashboard | Browser: sites origin and dashboard | Every file type looks right in the browser with a "raw" and "download" option; nothing to install |
 | **Small team self-hosting** | Share internal prototypes and documents safely; give each person and agent its own key; keep everything on their own Cloudflare account | Dashboard, API keys, members | Private by default for sensitive sites, audit of who published what, near-zero running cost |
 
@@ -72,7 +72,7 @@ What Dropway is not:
 5. **Never make the caller build URLs.** Responses carry `url`, and per file `viewUrl`, `rawUrl` and
    `downloadUrl`. URL shapes differ between modes and will change when an instance gets a domain.
 6. **Same names everywhere.** The MCP tool `list_versions` is the OpenAPI `operationId: list_versions`
-   and the CLI command `dropway versions ls`.
+   and the CLI command `kofra versions ls`.
 7. **The live instance is the truth.** Each instance describes itself (`whoami`, `/openapi.json`,
    `/llms.txt`, its skill), so self-hosted instances with fewer optional features are described correctly.
 8. **Agents check their own work** (`check_site`, read-back, version preview URLs, `--wait`).
@@ -100,7 +100,7 @@ What Dropway is not:
 | PUB-06 | Stale-write protection: `baseVersionId` returns `409 version_conflict` naming the live version, who published it and when | P0 | Done (richer details in R-03) |
 | PUB-07 | Partial update `PATCH /api/v1/sites/{site}/files` (`update_site_files`): write, delete and move paths relative to a base version; everything else carries over by hash | P0 | R-05 |
 | PUB-08 | `Idempotency-Key` on every create (24 h); finalize, restore and delete are idempotent | P0 | Partial (finalize replay done); R-04 |
-| PUB-09 | Client attribution: `X-Dropway-Client: <harness>/<detail>` header or MCP `clientInfo`, stored per version | P0 | Done (header); MCP in R-06 |
+| PUB-09 | Client attribution: `X-Kofra-Client: <harness>/<detail>` header or MCP `clientInfo`, stored per version | P0 | Done (header); MCP in R-06 |
 | PUB-10 | Version message (like a commit message, up to 200 chars) | P0 | Done |
 | PUB-11 | Pending versions expire after 1 hour; finalizing with missing bytes returns `409 missing_blobs` with fresh upload links | P0 | Partial (expiry done); R-05 |
 | PUB-12 | Publish warnings: root-absolute paths in path mode, SPA without a base path, browser storage on a sandboxed origin, `.wasm` without cross-origin isolation, possible secrets, invalid config files | P0 | R-12 |
@@ -110,7 +110,7 @@ What Dropway is not:
 | PUB-16 | TTL for keyed sites (`ttlSeconds`, `null` clears) | P1 | R-27 |
 | PUB-17 | Dry run: `dryRun: true` returns added, changed, removed and skipped files and the resulting size without creating a version | P1 | R-20 |
 | PUB-18 | Drag-and-drop publish in the dashboard (folder, zip or file) | P1 | R-22 |
-| PUB-19 | `dropway watch` republishes on change | P1 | R-10 |
+| PUB-19 | `kofra watch` republishes on change | P1 | R-10 |
 | PUB-20 | GitHub Action and per-pull-request preview sites with cleanup | P2 | Done: [composite action](PR_PREVIEWS.md), trusted same-repository PRs |
 
 ### 4.2 Serving and URLs (SRV)
@@ -120,7 +120,7 @@ What Dropway is not:
 | SRV-01 | Three serving modes: subdomain (each site its own origin), path on a dedicated sites origin, path on the app origin (always sandboxed). Section 11.2 | P0 | Done |
 | SRV-02 | Path mode keeps sites inside `/<slug>/`: HTML and CSS root-relative URLs are rewritten; URLs built at runtime are resolved by `Referer` with a 307 (unsandboxed pages) or by an injected run-time shim (sandboxed pages, which send no Referer); navigations inside an SPA fall back to the SPA. Interim until an instance has a domain | P0 | Done (SPA navigation fallback in R-12) |
 | SRV-03 | Index resolution: `index.html`, `index.htm`, `index.md`, `README.md`; a one-file site serves that file at `/`; folders without an index get a listing; `404.html`; SPA fallback | P0 | Done |
-| SRV-04 | Headers: `ETag` (sha256), `Range`/206, pre-compressed `.br`/`.gz` with `Content-Encoding`, `X-Dropway-Version`, `X-Robots-Tag: noindex` on expiring sites, `X-Content-Type-Options: nosniff` | P0 | Done |
+| SRV-04 | Headers: `ETag` (sha256), `Range`/206, pre-compressed `.br`/`.gz` with `Content-Encoding`, `X-Kofra-Version`, `X-Robots-Tag: noindex` on expiring sites, `X-Content-Type-Options: nosniff` | P0 | Done |
 | SRV-05 | Cache policy matrix (HTML and unfingerprinted files revalidate; fingerprinted files immutable; gated sites `private, no-store`; sites with `.wasm` revalidate) | P0 | Partial; R-27 |
 | SRV-06 | Content-addressed edge cache (Cache API by sha256, pointer memo). Live URL shows a new version within about 60 s worldwide, the version URL at once | P0 | R-14 |
 | SRV-07 | Version preview URLs `<slug>--v<N>` for the owner (signed links for others) | P0 | R-13 |
@@ -209,8 +209,8 @@ Full matrix in section 10.
 | AX-01 | REST API v1 and OpenAPI 3.1, generated from one operation registry | P0 | Done (R-02); legacy wire adapters preserved |
 | AX-02 | Remote MCP server, Streamable HTTP, stateless, API-key auth, `core` toolset | P0 | R-06 |
 | AX-03 | MCP: OAuth, every toolset, `?toolsets=`, read-only mode, single-site scope, resources, prompts, an MCP Apps site card | P1 | R-24, R-25 |
-| AX-04 | CLI `npx dropway`: `publish --json --wait`, management commands, exit codes, `dropway api` escape hatch | P0 | R-09, R-10 |
-| AX-05 | Local stdio MCP (`npx dropway mcp`) with local-path sources | P1 | R-26 |
+| AX-04 | CLI `npx kofra`: `publish --json --wait`, management commands, exit codes, `kofra api` escape hatch | P0 | R-09, R-10 |
+| AX-05 | Local stdio MCP (`npx kofra mcp`) with local-path sources | P1 | R-26 |
 | AX-06 | Discovery: `llms.txt` v2, a skill templated with the instance's own URLs, `/.well-known/agent-skills/index.json`, `/.well-known/api-catalog`, `/connect` | P0 | Partial (`llms.txt`, OpenAPI); R-11 |
 | AX-07 | Error envelope with `code`, `hint`, `retryable`, `retryAfterSeconds`, `docs`, `next`, `details.fields` | P0 | Partial; R-03 |
 | AX-08 | `whoami` reports principal, instance, capabilities, limits and usage | P0 | Partial; R-06, R-17 |
@@ -377,7 +377,7 @@ Notes that shape the design:
 
 Because bytes are addressed by hash, a publish never purges a cache: it only moves the pointer.
 Freshness: the live URL shows a new version within about 60 s worldwide (KV propagation); the version
-URL in the publish response is correct at once; `X-Dropway-Version` on every site response lets the CLI's
+URL in the publish response is correct at once; `X-Kofra-Version` on every site response lets the CLI's
 `--wait` confirm. A later experiment (R-44) reads the pointer from D1 read replicas behind the 10 s memo.
 
 ### 5.5 Upload protocol
@@ -400,7 +400,7 @@ URL in the publish response is correct at once; `X-Dropway-Version` on every sit
 
 Producer: finalize enqueues `{ kind, siteId, versionId }` messages on `JOBS`. Consumer (same Worker,
 batch 10, retries 3, dead-letter queue `dropway-jobs-dlq`). Kinds: `metadata`, `screenshot`, `index`,
-`webhook`, `rollup`. There is no `scan` kind: Dropway never scans file contents (owner decision
+`webhook`, `rollup`. There is no `scan` kind: Kofra never scans file contents (owner decision
 2026-10-22). Each job writes a `jobs` row so agents can poll `get_version` for
 `jobs: { screenshot: "done", ... }`. Without a Queue binding the same handlers run in `waitUntil`.
 
@@ -418,7 +418,7 @@ packages/core             @dropway/core   service layer: storage, publish protoc
                                           file-type detection, auth interfaces, tenant services, migrations
 packages/server           @dropway/server createDropway(): Hono app factory, operation registry, REST, MCP,
                                           serving, viewers, dashboard, Durable Object classes, testing kit
-packages/cli              dropway         CLI and local stdio MCP (npm package "dropway")
+packages/cli              kofra         CLI and local stdio MCP (npm package "kofra")
 packages/client (R-45)    @dropway/client typed REST client generated from the registry
 ```
 
@@ -643,7 +643,7 @@ export interface OperationDefinition<I extends z.ZodTypeAny = z.ZodTypeAny, O ex
 }
 export interface OperationContext {
   dw: DropwayContext; principal: Principal; request: Request;
-  client: string | null;              // X-Dropway-Client or MCP clientInfo
+  client: string | null;              // X-Kofra-Client or MCP clientInfo
   idempotencyKey: string | null;
 }
 ```
@@ -1067,7 +1067,7 @@ are sampled, not written one by one. Reads use the SQL API when the operator set
 - Pagination: `?limit=` (1-200, default 50) and `?cursor=`; responses carry `nextCursor`.
 - `Idempotency-Key` header on every POST that creates something (24 h; same key + different body =
   `422 idempotency_key_reused`; still running = `409 idempotency_in_progress`, retryable).
-- `X-Dropway-Client: <harness>/<detail>` (attribution). `X-Request-Id` on every response.
+- `X-Kofra-Client: <harness>/<detail>` (attribution). `X-Request-Id` on every response.
 - Rate limits (R-36): `RateLimit-Policy` and `RateLimit` headers (IETF draft format), `Retry-After` on 429/503.
 - URLs in responses: `url` (live), `versionUrl` (exact version), per file `url`, `viewUrl`, `rawUrl`,
   `downloadUrl`. Clients must use them as returned.
@@ -1312,7 +1312,7 @@ Initial catalog (R-03 makes it complete and generates `/docs/errors.md`):
   anonymous agents use REST or the CLI.
 - Narrowing (R-25): `?toolsets=core,domains` (or `all`), `?read_only=1`, `?site=<slug>` (the `site`
   argument disappears from schemas and the credential is checked against that site). Header equivalents
-  `X-Dropway-Toolsets`, `X-Dropway-Read-Only`, `X-Dropway-Site`.
+  `X-Kofra-Toolsets`, `X-Kofra-Read-Only`, `X-Kofra-Site`.
 - Tools are generated from the operation registry (section 6.5). Embedding apps add toolsets through
   `operations` or `mcpTools`.
 
@@ -1434,8 +1434,8 @@ interface PublishResult {
   the error JSON, so clients pass them back to the model. Protocol errors stay JSON-RPC errors.
 - Lists paginate (default 50). `read_file` pages by byte range (default 64 KB) and can return
   `as: "markdown"` for HTML, PDF and Office files (Workers AI conversion, R-34).
-- Server `instructions` (under 4,096 characters, search-friendly): what Dropway is for; prefer
-  `npx dropway publish <dir> --json` when a shell exists; how to choose file sources; share `url` exactly;
+- Server `instructions` (under 4,096 characters, search-friendly): what Kofra is for; prefer
+  `npx kofra publish <dir> --json` when a shell exists; how to choose file sources; share `url` exactly;
   use `update_site_files` with `baseVersionId` for edits; run `check_site` after publishing; destructive
   calls need `confirm`.
 
@@ -1450,7 +1450,7 @@ interface PublishResult {
 
 ### 9.5 Local stdio server (R-26)
 
-`npx -y dropway mcp` exposes the same tools; file sources also accept `localPath` and `localDir`, which the
+`npx -y kofra mcp` exposes the same tools; file sources also accept `localPath` and `localDir`, which the
 CLI hashes and uploads from disk. Credentials as for the CLI.
 
 ---
@@ -1576,7 +1576,7 @@ does not approve a cookie-authenticated embedding deployment.
 | REST API | `Content-Type: application/json`, CORS `*` without credentials, `Cache-Control: no-store` |
 | Read-back `GET /files/{path}` | text types as `text/plain`, `Content-Security-Policy: default-src 'none'; sandbox`, `Cache-Control: private, no-store` |
 | Viewer pages (sites origin) | `VIEWER_CSP` or nonce CSP, plus the sandbox when the site is sandboxed |
-| User files (sites origin) | `nosniff`, `X-Dropway-Version`, `ETag`, CSP `sandbox ...` when sandboxed, COOP/COEP when cross-origin isolation is on, `Access-Control-Allow-Origin: *` on public sites only, `X-Robots-Tag: noindex` on anonymous, expiring and `noindex` sites, `frame-ancestors 'self'` on gated sites |
+| User files (sites origin) | `nosniff`, `X-Kofra-Version`, `ETag`, CSP `sandbox ...` when sandboxed, COOP/COEP when cross-origin isolation is on, `Access-Control-Allow-Origin: *` on public sites only, `X-Robots-Tag: noindex` on anonymous, expiring and `noindex` sites, `frame-ancestors 'self'` on gated sites |
 | System pages (404, password, report) | no scripts, `Cache-Control: no-store` |
 
 The sandbox token list is `SITE_SANDBOX` (`allow-scripts allow-forms allow-popups
@@ -1685,9 +1685,9 @@ The link alone is not an operational reporting channel.
 3. **First run in the browser (R-16).** Opening `<app>/` on an instance that is not set up shows a form:
    paste the bootstrap secret, enter an email, get the owner API key once, then the `/connect` page with
    one-line setup for each agent. The `curl` path keeps working.
-4. **Connect agents.** `/connect` shows: `claude mcp add --transport http dropway <app>/mcp --header
-   "Authorization: Bearer $DROPWAY_API_KEY"`, Codex, Cursor, `npx add-mcp <app>/mcp`,
-   `npx skills add <app> -g`, and `npx dropway login --url <app>`.
+4. **Connect agents.** `/connect` shows: `claude mcp add --transport http kofra <app>/mcp --header
+   "Authorization: Bearer $KOFRA_API_KEY"`, Codex, Cursor, `npx add-mcp <app>/mcp`,
+   `npx skills add <app> -g`, and `npx kofra login --url <app>`.
 
 ### 12.2 What the button cannot do, and the fallback
 
@@ -1724,7 +1724,7 @@ setup is described correctly to agents.
 
 On a fresh Cloudflare account (Free plan and Paid plan, separately): click the button, finish in under 5
 minutes with only the documented inputs, set up the owner in the browser, publish a 40-file Vite build with
-`npx dropway publish ./dist --json --wait`, open it, view a Markdown and a CSV file rendered and raw, roll
+`npx kofra publish ./dist --json --wait`, open it, view a Markdown and a CSV file rendered and raw, roll
 back, and connect Claude Code to `/mcp` with the key. Record the result in `docs/SELF_HOST.md`.
 
 ---
@@ -1735,7 +1735,7 @@ here.now's public API (OpenAPI v0.1.0 read on 2026-10-22) has 139 operations: Au
 Folders 4, Site Data 5, Analytics 2, Profiles 6, Drives 17, Domains 30, Domain purchasing 13,
 Workspaces 24, Variables 3, Billing 4, Support 1.
 
-| here.now feature (operations) | Dropway equivalent | Pri | Status |
+| here.now feature (operations) | Kofra equivalent | Pri | Status |
 |---|---|---|---|
 | 3-step publish: create, PUT to presigned R2, finalize (Sites) | Manifest publish + upload links + `finalize_version`; plus one-call publish and inline/URL sources | P0 | Done / R-04 |
 | Presigned R2 upload URLs | Upload links on the app origin (one egress host, no R2 keys) | P0 | R-04 |
@@ -1746,7 +1746,7 @@ Workspaces 24, Variables 3, Billing 4, Support 1.
 | Update in place, settings as patches | `publish_site` with `site`, `update_site_settings` | P0 | Done |
 | `baseVersionId` -> 409 | Same, with `next` | P0 | Done |
 | Finalize `warnings[]` | Publish warnings (more kinds) | P0 | R-12 |
-| Client attribution header and badge | `X-Dropway-Client`, MCP `clientInfo` | P0 | Done / R-06 |
+| Client attribution header and badge | `X-Kofra-Client`, MCP `clientInfo` | P0 | Done / R-06 |
 | `urls[]` (slug, domain, label...) | `site.urls[]` (slug, domain, mount) | P1 | R-33 |
 | TTL | `ttlSeconds` | P1 | R-27 |
 | SPA mode | `spa` | P0 | Done |

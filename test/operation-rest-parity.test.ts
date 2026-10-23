@@ -125,7 +125,7 @@ function publishSources(dw: Instance, body: unknown, idempotencyKey?: string) {
   return dw.json("/api/v1/publish-sources", {
     key: dw.ownerKey, ...jsonBody(body),
     headers: {
-      "Content-Type": "application/json", "X-Dropway-Client": "rest-parity-test/1.0",
+      "Content-Type": "application/json", "X-Kofra-Client": "rest-parity-test/1.0",
       ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
   });

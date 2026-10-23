@@ -59,7 +59,7 @@ async function cli(args: string[], setup = false) {
     stdout: text => void (stdout += text), stderr: text => void (stderr += text),
     stdinIsTTY: false, stderrIsTTY: false, readStdin: async () => "",
     prompt: async () => { throw new Error("acceptance must not prompt"); }, cwd: work,
-    env: { DROPWAY_API: api, DROPWAY_CONFIG_DIR: join(work, "credentials"), ...(setup ? { DROPWAY_BOOTSTRAP_KEY: bootstrap } : {}) },
+    env: { KOFRA_API: api, KOFRA_CONFIG_DIR: join(work, "credentials"), ...(setup ? { KOFRA_BOOTSTRAP_KEY: bootstrap } : {}) },
     fetch: async request => {
       expect(new URL(request.url).origin === api, "CLI must only contact the scratch app Worker").toBe(true);
       cliWire.push({ url: request.url, headers: JSON.stringify([...request.headers]), body: Buffer.from(await request.clone().arrayBuffer()) });

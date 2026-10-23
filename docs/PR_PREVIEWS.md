@@ -1,7 +1,7 @@
 # GitHub Action: pull-request previews
 
 The composite action at the root of this repository publishes a built folder to
-**your existing Dropway instance**, writes one PR comment with the preview URL,
+**your existing Kofra instance**, writes one PR comment with the preview URL,
 and deletes that preview on PR close. It does not deploy a Worker or change the
 instance configuration. No npm release of the CLI is needed: the action runs the
 zero-runtime-dependency CLI source from the same reviewed action revision.
@@ -11,7 +11,7 @@ zero-runtime-dependency CLI source from the same reviewed action revision.
 - A Linux runner with Bash and **Node 22.18+ with native TypeScript enabled**.
   `actions/setup-node` with Node 24 is recommended. The packaged CLI itself still
   supports Node 20; this source-based action has the newer runtime requirement.
-- An existing Dropway instance and an API key with **unrestricted** `sites:read`
+- An existing Kofra instance and an API key with **unrestricted** `sites:read`
   and `sites:write` access. Use a **dedicated preview member/account**, not an
   administrative or production key. Cleanup verifies both scopes first and
   refuses site-restricted keys, since a restricted key cannot prove the preview
@@ -33,9 +33,9 @@ zero-runtime-dependency CLI source from the same reviewed action revision.
 Put the following in the **consumer project's** `.github/workflows/preview.yml`.
 Replace `REVIEWED_COMMIT_SHA` with a reviewed immutable commit of this repository
 that contains `action.yml`; do not copy the placeholder literally. Set the
-repository variable `DROPWAY_API` to your instance origin and the repository
-secret `DROPWAY_PREVIEW_KEY` to the preview member's key. Adjust the build command
-and folder for your project. The build gets no Dropway key.
+repository variable `KOFRA_API` to your instance origin and the repository
+secret `KOFRA_PREVIEW_KEY` to the preview member's key. Adjust the build command
+and folder for your project. The build gets no Kofra key.
 
 ```yaml
 name: PR preview
@@ -70,8 +70,8 @@ jobs:
         uses: TogetherWeOwn/dropway@REVIEWED_COMMIT_SHA
         with:
           folder: dist
-          api: ${{ vars.DROPWAY_API }}
-          token: ${{ secrets.DROPWAY_PREVIEW_KEY }}
+          api: ${{ vars.KOFRA_API }}
+          token: ${{ secrets.KOFRA_PREVIEW_KEY }}
           github-token: ${{ github.token }}
 ```
 
@@ -86,8 +86,8 @@ close event if a cancelled/failed workflow left a preview behind.
 | Input | Meaning |
 | --- | --- |
 | `folder` | Built directory inside `github.workspace`; defaults to `dist`. Spaces are supported. Not read on close. |
-| `api` | Required instance origin, such as `https://dropway.example.com` (not `/api/v1`). |
-| `token` | Required Dropway API key. Passed in the child environment, never command-line arguments. No anonymous fallback. |
+| `api` | Required instance origin, such as `https://kofra.example.com` (not `/api/v1`). |
+| `token` | Required Kofra API key. Passed in the child environment, never command-line arguments. No anonymous fallback. |
 | `github-token` | Defaults to `github.token`; requires PR comment read/write access. |
 
 Successful publishing sets `steps.preview.outputs.url` and
@@ -134,6 +134,6 @@ serves the files.
   of a real GitHub workflow's permissions or a live
   instance deployment; validate those in a non-production preview account.
 - Roll back by pinning the previous reviewed action commit or removing the
-  consumer workflow. To remove a leftover preview, use `dropway delete <slug>
+  consumer workflow. To remove a leftover preview, use `kofra delete <slug>
   --yes` with that preview account and explicit `--api <instance>`. Do not delete
   a production site. Changing the action does not migrate the instance or schema.

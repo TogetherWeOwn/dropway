@@ -1,5 +1,5 @@
 {
-  "name": "dropway-monorepo",
+  "name": "kofra-monorepo",
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
@@ -24,7 +24,8 @@
     "db:migrate": "wrangler d1 migrations apply DB --remote",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "deploy": "(wrangler d1 migrations apply DB --remote || wrangler deploy) && wrangler d1 migrations apply DB --remote && wrangler deploy",
-    "skill:sync": "esbuild scripts/print-skill.ts --bundle --platform=node --format=esm --log-level=warning | node --input-type=module > skills/dropway/SKILL.md"
+    "skill:sync": "esbuild scripts/print-skill.ts --bundle --platform=node --format=esm --log-level=warning | node --input-type=module > skills/kofra/SKILL.md",
+    "rebrand": "node scripts/rebrand.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.4.7",

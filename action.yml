@@ -1,14 +1,14 @@
-name: Dropway PR previews
-description: Publish a folder to a Dropway preview, update its PR comment, and clean up on close.
+name: Kofra PR previews
+description: Publish a folder to a Kofra preview, update its PR comment, and clean up on close.
 inputs:
   folder:
     description: Folder to publish, relative to the caller workspace (not needed on close).
     default: dist
   api:
-    description: Origin of your Dropway instance.
+    description: Origin of your Kofra instance.
     required: true
   token:
-    description: Dropway API key for a dedicated preview account with sites read/write access.
+    description: Kofra API key for a dedicated preview account with sites read/write access.
     required: true
   github-token:
     description: GitHub token with permission to write pull-request comments.
@@ -27,8 +27,8 @@ runs:
       id: preview
       shell: bash
       env:
-        DROPWAY_ACTION_FOLDER: ${{ inputs.folder }}
-        DROPWAY_ACTION_API: ${{ inputs.api }}
-        DROPWAY_ACTION_TOKEN: ${{ inputs.token }}
-        DROPWAY_ACTION_GITHUB_TOKEN: ${{ inputs.github-token }}
+        KOFRA_ACTION_FOLDER: ${{ inputs.folder }}
+        KOFRA_ACTION_API: ${{ inputs.api }}
+        KOFRA_ACTION_TOKEN: ${{ inputs.token }}
+        KOFRA_ACTION_GITHUB_TOKEN: ${{ inputs.github-token }}
       run: node "$GITHUB_ACTION_PATH/scripts/pr-preview.mjs"

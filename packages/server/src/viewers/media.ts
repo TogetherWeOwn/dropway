@@ -88,7 +88,7 @@ export const imageViewer: Viewer = {
       body: `<main class="dw-media"><input type="checkbox" id="dw-zoom" class="dw-toggle">
 <div class="dw-mediabar"><span class="dw-meta" style="margin:0">${escapeHtml(meta)}</span><label for="dw-zoom" class="dw-btn">Actual size</label></div>
 <label for="dw-zoom" class="dw-stage dw-checker"><img src="${escapeHtml(vc.fileUrl)}" alt="${escapeHtml(name)}"${dim ? ` width="${dim.width}" height="${dim.height}"` : ""}></label></main>`,
-      headers: dim ? { "X-Dropway-Image-Size": `${dim.width}x${dim.height}` } : {},
+      headers: dim ? { "X-Kofra-Image-Size": `${dim.width}x${dim.height}` } : {},
     });
   },
 };

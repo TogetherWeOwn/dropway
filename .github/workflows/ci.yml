@@ -30,11 +30,12 @@ jobs:
         run: npm run openapi:lint
       - name: CLI package builds and packs
         run: |
-          npm run build -w dropway
-          npm pack -w dropway --dry-run
+          npm run build -w kofra
+          npm pack -w kofra --dry-run
 
   # This repository is the single-tenant open-source product. Fails on any sign of the
   # hosted service's code: payment SDKs, private packages or markers, billing/pricing code.
+  # Also fails while user-visible names from before the rename remain (fix: npm run rebrand).
   open-core-guard:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -47,6 +48,10 @@ jobs:
         run: node scripts/guard-open-core.mjs --self-test
       - name: Open-core guard
         run: node scripts/guard-open-core.mjs
+      - name: Rebrand script passes its self-test
+        run: node scripts/rebrand.mjs --self-test
+      - name: No user-visible names from before the rename (fix with npm run rebrand)
+        run: node scripts/rebrand.mjs --check
 
   # The published CLI promises Node 20+. Build the bundle and run it on Node 20.
   cli-node20:
@@ -59,7 +64,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run build -w dropway
+      - run: npm run build -w kofra
       - uses: actions/setup-node@v4
         with:
           node-version: 20

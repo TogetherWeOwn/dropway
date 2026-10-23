@@ -1,6 +1,6 @@
-# Dropway for agents: MCP server, REST twins, skill
+# Kofra for agents: MCP server, REST twins, skill
 
-Every Dropway instance serves a remote MCP server, an OpenAPI document and agent
+Every Kofra instance serves a remote MCP server, an OpenAPI document and agent
 docs. They are generated from the same sources, so they always describe what that
 instance can do.
 
@@ -20,16 +20,16 @@ Use an API key (`dw_...`) from the instance owner (`POST /api/v1/keys`, or the
 
 ```sh
 # Claude Code
-claude mcp add --transport http dropway https://<app>/mcp --header "Authorization: Bearer $DROPWAY_API_KEY"
+claude mcp add --transport http kofra https://<app>/mcp --header "Authorization: Bearer $KOFRA_API_KEY"
 
 # Codex (~/.codex/config.toml)
-[mcp_servers.dropway]
+[mcp_servers.kofra]
 url = "https://<app>/mcp"
-bearer_token_env_var = "DROPWAY_API_KEY"
+bearer_token_env_var = "KOFRA_API_KEY"
 
 # Any client, or a quick check
 npx @modelcontextprotocol/inspector --cli https://<app>/mcp --transport http \
-  --header "Authorization: Bearer $DROPWAY_API_KEY" --method tools/list
+  --header "Authorization: Bearer $KOFRA_API_KEY" --method tools/list
 ```
 
 The skill: `npx skills add TogetherWeOwn/dropway` (generic copy from this
@@ -45,14 +45,14 @@ repository) or `npx skills add https://<app>` (templated with that instance).
   anonymous site), resolved by the same identity adapter as the REST API.
   Missing or bad credentials get `401` with `WWW-Authenticate: Bearer`.
 - Narrowing: `?toolsets=core,sites,versions,keys,members` (default: all) and
-  `?read_only=1`; or the headers `X-Dropway-Toolsets` and `X-Dropway-Read-Only`.
+  `?read_only=1`; or the headers `X-Kofra-Toolsets` and `X-Kofra-Read-Only`.
   All 24 tools are about 8k tokens of definitions; `core` is about 5.5k.
 - Results: `structuredContent` matching the tool's `outputSchema`, plus one text
   block (a plain-English line, then the compact JSON), plus a `resource_link`
   for live URLs. Business errors are results with `isError: true` and the text
   `<code>: <message> Fix: <hint>` followed by the error JSON.
 - Attribution: the version's `client` is the MCP `clientInfo` (2026 clients), else
-  the `X-Dropway-Client` header, else the first word of the User-Agent.
+  the `X-Kofra-Client` header, else the first word of the User-Agent.
 
 ## Tools
 

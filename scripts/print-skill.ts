@@ -1,4 +1,4 @@
-// Prints the repository copy of the Agent Skill (skills/dropway/SKILL.md).
+// Prints the repository copy of the Agent Skill (skills/kofra/SKILL.md).
 // Run: npm run skill:sync. test/discovery.test.ts fails when the file is out of date.
 import { skillMarkdown } from "../packages/server/src/discovery";
 

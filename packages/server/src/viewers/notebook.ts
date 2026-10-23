@@ -99,7 +99,7 @@ export const notebookViewer: Viewer = {
       tabs: standardTabs(vc, { rendered: "Notebook", source: true }),
       css: NB_CSS + HIGHLIGHT_CSS,
       body: `<main class="dw-nb">${r.html}</main>`,
-      headers: { "X-Dropway-Render-Cache": r.cache },
+      headers: { "X-Kofra-Render-Cache": r.cache },
     });
   },
 };

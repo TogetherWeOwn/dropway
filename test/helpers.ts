@@ -13,7 +13,7 @@ export interface Instance {
   json<T = Record<string, any>>(path: string, init?: RequestInit & { key?: string | null; origin?: string }): Promise<{ status: number; body: T; res: Response }>;
 }
 
-/** Wipe storage, apply migrations, build a Dropway and create its owner. */
+/** Wipe storage, apply migrations, build a Kofra and create its owner. */
 export async function freshInstance(config: ConfigOverrides = {}, extra: Omit<CreateDropwayOptions, "config"> = {}): Promise<Instance> {
   await reset();
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);

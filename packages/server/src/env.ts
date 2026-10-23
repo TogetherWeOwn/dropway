@@ -3,7 +3,7 @@ import type { CoreBindings, DropwayContext, DropwayVars, Principal } from "@drop
 /** Bindings + vars the Worker receives. Extensions may add their own bindings. */
 export type ServerBindings = CoreBindings & DropwayVars & Record<string, unknown>;
 
-/** Hono environment shared by every Dropway route (core and extension routes). */
+/** Hono environment shared by every Kofra route (core and extension routes). */
 export type DropwayEnv = {
   Bindings: ServerBindings;
   Variables: {
