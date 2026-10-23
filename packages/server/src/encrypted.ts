@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { appOrigin, siteUrl } from "@dropway/core";
+import { siteUrl } from "@dropway/core";
 import type { DropwayEnv } from "./env";
 import { escapeHtml } from "./html";
 
@@ -43,10 +43,10 @@ async function encryptedLoader() {
     const frame = d.createElement("iframe");
     frame.title = "Decrypted site (isolated)";
     frame.setAttribute("sandbox", "allow-scripts allow-downloads");
-    frame.style.cssText = "position:fixed;inset:0;width:100%;height:100%;border:0;background:white";
+    frame.style.cssText = "flex:1;width:100%;min-height:0;border:0;background:white";
     frame.addEventListener("load", () => {
       frame.contentWindow.postMessage(bundle, "*");
-      status.textContent = "Site decrypted. Content runs in an isolated, network-free frame.";
+      status.textContent = "Site decrypted. Bundled scripts can read all decrypted files.";
     }, { once: true });
     frame.src = "/__dropway/encrypted-frame";
     d.body.append(frame);
@@ -56,7 +56,7 @@ async function encryptedLoader() {
   }
 }
 
-/** No key enters this realm; user content gets bytes, not app-origin privileges or network. */
+/** No key enters this realm; content gets bytes without app-origin privileges, not an egress guarantee. */
 function encryptedFrame() {
   const w = globalThis as any;
   const d = w.document;
@@ -142,13 +142,13 @@ export function installEncrypted(app: Hono<DropwayEnv>) {
   const frameScript = `(function(){"use strict";var __name=function(t){return t};(${encryptedFrame.toString()})();})();`;
   app.get("/__dropway/encrypted-frame", c => c.html(`<!doctype html><meta charset="utf-8"><title>Isolated encrypted content</title><body><script>${frameScript}</script></body>`, 200, {
     ...headers,
-    "Content-Security-Policy": `sandbox allow-scripts allow-downloads; default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline' blob:; img-src blob: data:; font-src blob: data:; media-src blob: data:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors ${appOrigin(c.get("dw"))}`,
+    "Content-Security-Policy": `sandbox allow-scripts allow-downloads; default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline' blob:; img-src blob: data:; font-src blob: data:; media-src blob: data:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'`,
   }));
   app.get("/__dropway/encrypted/:slug", c => {
     const slug = c.req.param("slug");
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) return c.notFound();
     const bundle = new URL("encrypted.bin?raw=1", siteUrl(c.get("dw"), slug));
-    return c.html(`<!doctype html><meta charset="utf-8"><title>Encrypted site · Dropway</title><body><main><h1>Encrypted site</h1><p id="status" data-bundle="${escapeHtml(bundle.href)}">Decrypting locally. The key is never sent to the server.</p><noscript>JavaScript is required to decrypt this site.</noscript></main><script src="/__dropway/encrypted-loader.js"></script></body>`, 200, {
+    return c.html(`<!doctype html><meta charset="utf-8"><title>Encrypted site · Dropway</title><body style="margin:0;height:100dvh;display:flex;flex-direction:column"><main style="padding:.5rem 1rem"><h1 style="font-size:1rem;margin:0">Encrypted site</h1><p>Only open sites whose bundled scripts and executable content you trust. Malicious scripts can navigate this frame to send decrypted data to the server.</p><p id="status" data-bundle="${escapeHtml(bundle.href)}">Decrypting locally. The key is never sent to the server.</p><noscript>JavaScript is required to decrypt this site.</noscript></main><script src="/__dropway/encrypted-loader.js"></script></body>`, 200, {
       ...headers, "X-Frame-Options": "DENY",
       "Content-Security-Policy": `default-src 'none'; script-src 'self'; connect-src 'self' ${bundle.origin}; frame-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
     });

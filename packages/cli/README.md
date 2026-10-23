@@ -106,7 +106,11 @@ local inventory as sensitive; a successful dry run does not guarantee encrypted 
 
 The initial viewer supports entry HTML (`index.html`/`index.htm`, otherwise the first file),
 relative classic scripts, styles, images, and read-only `fetch()` of original bundled bytes.
-Single text/images can be viewed and other files downloaded. Content has no external network;
+Single text/images can be viewed and other files downloaded. **Trust all bundled scripts and
+executable content before opening a site.** Scripts can read every decrypted file. The sandbox
+and resource CSP do not guarantee network isolation: a malicious script can navigate its frame
+to a same-app URL and send decrypted data to the server in that request. Encryption protects
+stored contents, not data from scripts that run after decryption.
 XHR, modules/imports, dynamically constructed resource URLs, nested frames, forms and multipage
 navigation are not supported. HTML links to bundled files download rather than navigate.
 CSS `url()` references are resolved locally; use simple relative asset paths. HTML data-URL
@@ -114,8 +118,10 @@ assets and CSS `@import` are not supported. This is an encrypted static viewer, 
 hosting for arbitrary applications.
 
 Stable local errors: `encrypted_zip_unsupported` / `encrypted_spa_unsupported` (exit 2),
-`encrypted_input_too_large`, `encrypted_too_many_files` and `encrypted_container_too_large`
-(exit 6). These fail before creating a site or uploading data.
+`encrypted_input_too_large`, `encrypted_too_many_files`, `encrypted_container_too_large` and
+`encrypted_invalid_path` (exit 6). These fail before creating a site or uploading data. Paths
+must be unique, relative, slash-separated, with no empty, dot or dotdot segments, backslashes
+or C0 control characters. Valid paths are preserved, not normalized.
 
 ## Output for agents
 

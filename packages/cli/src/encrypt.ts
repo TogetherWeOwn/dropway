@@ -7,13 +7,47 @@ export async function encryptFiles(files: SourceFile[]): Promise<{ files: Source
   if (!files.length) throw new CliError({ code: "no_files", message: "There are no files to encrypt.", hint: "Choose a non-empty file or folder.", exitCode: EXIT.usage });
   if (files.length > 10000) throw new CliError({ code: "encrypted_too_many_files", message: "Encrypted publishing supports at most 10,000 files.", hint: "Publish fewer files; remove files or split the folder into smaller sites.", exitCode: EXIT.invalid });
   const maxBytes = 16 * 1024 * 1024;
+  const inputTooLarge = () => new CliError({ code: "encrypted_input_too_large", message: "Encrypted publishing supports at most 16 MiB of source files.", hint: "Publish a smaller folder; encrypted sites are decrypted entirely in browser memory.", exitCode: EXIT.invalid });
+  const paths = new Set<string>();
+  let knownBytes = 0;
+  // Validate the whole inventory before invoking even the first lazy body reader.
+  for (const file of files) {
+    if (!file.path || file.path.startsWith("/") || /[\\\x00-\x1f]/.test(file.path) || file.path.split("/").some(s => !s || s === "." || s === "..") || paths.has(file.path)) throw new CliError({ code: "encrypted_invalid_path", message: "An encrypted file path is invalid or duplicated.", hint: "Rename or remove files with backslashes, control characters, empty or dot path segments, or duplicate paths.", exitCode: EXIT.invalid });
+    paths.add(file.path);
+    knownBytes += Math.max(0, file.size);
+    if (knownBytes > maxBytes) throw inputTooLarge();
+  }
   let total = 0;
   const packed: Array<{ path: string; data: string }> = [];
   for (const file of files) {
     const body = await file.body();
-    const bytes = body instanceof Uint8Array ? body : new Uint8Array(await body.arrayBuffer());
+    const remaining = maxBytes - total;
+    let bytes: Uint8Array;
+    if (body instanceof Uint8Array) {
+      if (body.byteLength > remaining) throw inputTooLarge();
+      bytes = body;
+    } else {
+      if (body.size > remaining) throw inputTooLarge();
+      const reader = body.stream().getReader();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > remaining) {
+            await reader.cancel().catch(() => {});
+            throw inputTooLarge();
+          }
+          chunks.push(value);
+        }
+      } finally { reader.releaseLock(); }
+      bytes = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    }
     total += bytes.byteLength;
-    if (total > maxBytes) throw new CliError({ code: "encrypted_input_too_large", message: "Encrypted publishing supports at most 16 MiB of source files.", hint: "Publish a smaller folder; encrypted sites are decrypted entirely in browser memory.", exitCode: EXIT.invalid });
     packed.push({ path: file.path, data: Buffer.from(bytes).toString("base64") });
   }
   const entry = files.find(f => /^index\.html?$/i.test(f.path))?.path ?? files[0]!.path;
