@@ -1,0 +1,10 @@
+extends:
+  - minimal
+plugins:
+  - ./scripts/redocly-operation-metadata.cjs
+rules:
+  operation-operationId: error
+  operation-summary: error
+  operation-description: error
+  operation-4xx-response: error
+  dropway/operation-metadata: error

@@ -26,6 +26,8 @@ jobs:
       - run: packages/cli/test/encrypted/node_modules/.bin/playwright install --with-deps chromium
       - run: npm run typecheck
       - run: npm test
+      - name: Validate generated OpenAPI 3.1 and required operation metadata
+        run: npm run openapi:lint
       - name: CLI package builds and packs
         run: |
           npm run build -w dropway

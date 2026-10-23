@@ -22,6 +22,7 @@ import { findViewer, toViewerFile, VIEWER_CSP, VIEWERS, type ViewMode, type View
 import { renderListing } from "./viewers/listing";
 import { MAX_CSS_REWRITE_BYTES, rewriteCss, rewriteHtml, type PathRewrite } from "./path-rewrite";
 import { PATH_SHIM_VERSION, pathShimScript } from "./path-shim";
+import { injectReportLink, REPORT_LINK_VERSION } from "./report-link";
 
 /**
  * How a site is being served.
@@ -349,11 +350,14 @@ async function serveFile(
   const head = req.method === "HEAD";
   const viewMode = raw || download ? null : requestedViewMode(req, sp);
   const viewer = viewMode ? findViewer(file, live, viewers, viewMode) : null;
+  const report = live.tenantId === null && !raw && !download && !precompressed(path) && baseType(contentType) === "text/html";
+  const reportVariant = report ? `-report${REPORT_LINK_VERSION}` : "";
+  const reportUrl = new URL(`${mode.base}__dropway/report`, url).href;
 
   // Rendered views: see ./viewers (one per file kind, plus ?view=source).
   if (viewer && viewMode) {
     const embed = flag(sp, "embed");
-    const etag = `W/"${viewer.id}@${viewer.version ?? 1}-${sha256}${embed ? "-e" : ""}"`;
+    const etag = `W/"${viewer.id}@${viewer.version ?? 1}-${sha256}${embed ? "-e" : ""}${reportVariant}"`;
     const h = new Headers();
     if (etagMatches(req, etag)) {
       h.set("ETag", etag);
@@ -396,27 +400,31 @@ async function serveFile(
     out.set("X-Dropway-Viewer", viewer.id);
     out.delete("Content-Length");
     securityHeaders(out, live, mode);
-    const page = new Response(head ? null : rendered.body, { status, headers: out });
-    return mode.rewrite && !head ? rewriteHtml(page, mode.rewrite) : page;
+    let page = new Response(head ? null : rendered.body, { status, headers: out });
+    if (mode.rewrite && !head) page = rewriteHtml(page, mode.rewrite);
+    return report && !head ? injectReportLink(page, reportUrl) : page;
   }
 
   // Path mode: HTML and CSS get root-relative URLs prefixed with the site base.
   const rewriteKind = mode.rewrite && !raw && !download && !precompressed(path) ? (isHtml(contentType) ? "html" : baseType(contentType) === "text/css" && size <= MAX_CSS_REWRITE_BYTES ? "css" : null) : null;
-  if (rewriteKind && mode.rewrite) {
+  if (rewriteKind || report) {
     // Sandboxed pages send no Referer, so their HTML also carries the run-time shim (./path-shim).
     const shim = rewriteKind === "html" && mode.sandbox;
-    const etag = shim ? `W/"pm-${sha256}-js${PATH_SHIM_VERSION}"` : `W/"pm-${sha256}"`;
-    const h = new Headers({ "Content-Type": contentType, ETag: etag, "Cache-Control": cacheControlFor(path, live), "X-Dropway-Rewritten": "path-prefix" });
+    const etag = `W/"${rewriteKind ? "pm-" : ""}${sha256}${shim ? `-js${PATH_SHIM_VERSION}` : ""}${reportVariant}"`;
+    const h = new Headers({ "Content-Type": contentType, ETag: etag, "Cache-Control": cacheControlFor(path, live) });
+    if (rewriteKind) h.set("X-Dropway-Rewritten", "path-prefix");
     securityHeaders(h, live, mode);
     if (etagMatches(req, etag)) return new Response(null, { status: 304, headers: h });
     if (head) return new Response(null, { status, headers: h });
     const blob = await readBlob(dw, sha256, size);
     if (!blob) return blobMissing(dw, req, mode, live);
-    if (rewriteKind === "css") {
+    if (rewriteKind === "css" && mode.rewrite) {
       const css = blob.body ? await new Response(blob.body).text() : "";
       return new Response(rewriteCss(css, mode.rewrite), { status, headers: h });
     }
-    return rewriteHtml(new Response(blob.body, { status, headers: h }), mode.rewrite, shim ? { inject: pathShimScript(mode.rewrite) } : {});
+    let page = new Response(blob.body, { status, headers: h });
+    if (rewriteKind === "html" && mode.rewrite) page = rewriteHtml(page, mode.rewrite, shim ? { inject: pathShimScript(mode.rewrite) } : {});
+    return report ? injectReportLink(page, reportUrl) : page;
   }
 
   const etag = `"${sha256}"`;
