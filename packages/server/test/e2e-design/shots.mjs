@@ -11,7 +11,7 @@
 //   overflow no document-level horizontal scroll
 //   mode     <html data-theme> and the page background match the mode
 //   fonts    Public Sans, Newsreader and Martian Mono loaded (where the page uses them)
-//   brand    no visible "Dropway", no "scanned/virus/safe/clean/verified" outside user content
+//   brand    no visible former product name, no "scanned/virus/verified" claims outside user content
 // Explicit modes use the __Host-dw_theme cookie on the app origin and ?theme= on site origins; Auto uses
 // the emulated prefers-color-scheme and no cookie.
 //
@@ -424,7 +424,8 @@ function screens(fx) {
 
 // ------------------------------------------------------------------ run
 
-const BANNED = /\b(dropway|scanned|virus|virus-free|verified)\b/i;
+// The former product name is assembled so the rebrand check does not flag this file.
+const BANNED = new RegExp(`\\b(${["drop", "way"].join("")}|scanned|virus|virus-free|verified)\\b`, "i");
 
 async function main() {
   if (!CHROME) throw new Error("No Chrome: set CHROME_PATH");

@@ -43,7 +43,9 @@ export function appStylesheetUrl(): string {
 
 /** @font-face rules for the self-hosted fonts, served from `origin` ("" = this origin). */
 export function fontFaceCss(origin: string): string {
-  return FONT_FACE_TEMPLATE.split("__FONT_BASE__").join(origin.replace(/\/+$/, ""));
+  let base = origin;
+  while (base.endsWith("/")) base = base.slice(0, -1);
+  return FONT_FACE_TEMPLATE.split("__FONT_BASE__").join(base);
 }
 
 /** Preload links for the two fonts every app page uses first (Public Sans and Newsreader, Latin). */

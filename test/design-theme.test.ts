@@ -202,7 +202,10 @@ describe("design assets", () => {
     expect(font.headers.get("x-content-type-options")).toBe("nosniff");
     const bytes = new Uint8Array(await font.arrayBuffer());
     expect(String.fromCharCode(...bytes.subarray(0, 4))).toBe("wOF2");
-    expect((await dw.call(`/__dropway/fonts/${f.name}.00000000.woff2`)).headers.get("cache-control")).toBe("no-cache");
+    const again = await dw.call(`/__dropway/fonts/${f.name}.00000000.woff2`);
+    expect(again.headers.get("cache-control")).toBe("no-cache");
+    // The cached bytes serve every response in full.
+    expect(new Uint8Array(await again.arrayBuffer()).byteLength).toBe(bytes.byteLength);
     expect((await dw.call("/__dropway/fonts/nope.00000000.woff2")).status).toBe(404);
     const ofl = await dw.call("/__dropway/fonts/OFL.txt");
     expect(ofl.headers.get("content-type")).toBe("text/plain; charset=utf-8");

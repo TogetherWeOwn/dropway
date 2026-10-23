@@ -78,7 +78,8 @@ export function fontResponse(file: string): Response | null {
   const m = /^([a-z0-9-]+)\.([0-9a-f]{8})\.woff2$/.exec(file);
   const bytes = m ? fontBytes(m[1]!) : null;
   if (!m || !bytes) return null;
-  return new Response(bytes, {
+  // A copy per response: a body may take ownership of (detach) the buffer it is given.
+  return new Response(bytes.slice(), {
     headers: { "Content-Type": "font/woff2", "Cache-Control": m[2] === FONT_FILES[m[1]!]!.hash ? IMMUTABLE : "no-cache", ...FONT_HEADERS },
   });
 }
