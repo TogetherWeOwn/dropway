@@ -237,14 +237,19 @@ describe("viewer pages", () => {
     const html = await res.text();
     expect(html).toContain('id="L1"');
     expect(html).toContain('href="#L2"');
+    // Line links work by click and by #L2, but stay out of the Tab order (a long file would be thousands of stops).
+    expect(html).toContain('<a href="#L2" data-n="2" aria-label="Line 2" tabindex="-1">');
     expect(html).toContain('<span class="hljs-keyword">export</span>');
     expect(html).toContain("typescript · 2 lines");
     expect(res.headers.get("x-kofra-render-cache")).toBe("miss");
     const again = await get("src/app.ts");
     expect(again.headers.get("x-kofra-render-cache")).toBe("memory");
     const etag = again.headers.get("etag")!;
-    expect(etag).toMatch(/^W\/"code@1-[a-f0-9]{64}"$/);
+    expect(etag).toMatch(/^W\/"code@2\.sp1\.[0-9a-f]{8}-[a-f0-9]{64}"$/);
     expect((await get("src/app.ts", { ...NAV, "If-None-Match": etag })).status).toBe(304);
+    // A validator from before the redesign (no page version) never revalidates the new page.
+    const sha = /-([a-f0-9]{64})"$/.exec(etag)![1];
+    expect((await get("src/app.ts", { ...NAV, "If-None-Match": `W/"code@1-${sha}"` })).status).toBe(200);
     // Sub-resource requests still get the bytes.
     const script = await get("src/app.ts", { "Sec-Fetch-Dest": "script", Accept: "*/*" });
     expect(script.headers.get("x-kofra-viewer")).toBeNull();

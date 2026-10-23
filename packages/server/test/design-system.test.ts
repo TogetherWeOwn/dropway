@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -5,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { buildDesign, classesIn, minifyCss, prefixCss, prefixSelector } from "../../../scripts/build-design.mjs";
 import { APP_CSS, SITE_CSS, THEME_TOKENS } from "../src/ui/design.generated";
 import { kofraMotifs } from "../src/ui/motifs";
+import { checkSelection, exitCodeFor } from "./e2e-design/shots.mjs";
 
 /**
  * The Security Print design system as code: the k- prefixer, the generated modules being in sync with
@@ -108,22 +110,36 @@ describe("literal-colour lint", () => {
     }
     expect(fails).toEqual([]);
   });
+  it("the source scanner finds CSS in assignments and in css: properties, in backticks or quotes", () => {
+    const found = (src: string) => literalColoursIn(src).length;
+    expect(found("const MD_CSS = `.a{color:#123456}`;")).toBe(1);
+    expect(found("return viewerPage(vc, { css: `.k-vbody{color:#123456}`, body });")).toBe(1);
+    expect(found('page({ css: ".x{background:#abcdef}" })')).toBe(1);
+    expect(found("const CSS = `.a{color:var(--ink)}`; const x = { css: `.b{fill:var(--accent)}` };")).toBe(0);
+    expect(found("const note = `#123456 is not CSS`;")).toBe(0);
+  });
   it("viewer and page CSS in the server source uses tokens only", () => {
     const fails: string[] = [];
     for (const dir of ["viewers", "ui", "."]) {
       for (const f of readdirSync(join(SRC, dir)).filter((n) => n.endsWith(".ts") && !n.endsWith(".generated.ts"))) {
-        const src = readFileSync(join(SRC, dir, f), "utf8");
-        for (const m of src.matchAll(/(?:css|CSS)[^=\n]*=\s*`([^`]*)`|css:\s*"([^"]*)"/g)) {
-          let css = (m[1] ?? m[2] ?? "").replace(/\$\{[^}]*\}/g, "");
-          for (const ok of ALLOWED_LITERALS) css = css.replace(ok, "");
-          const hit = LITERAL.exec(css);
-          if (hit) fails.push(`${dir}/${f}: ${css.slice(Math.max(0, hit.index - 40), hit.index + 20)}`);
-        }
+        for (const hit of literalColoursIn(readFileSync(join(SRC, dir, f), "utf8"))) fails.push(`${dir}/${f}: ${hit}`);
       }
     }
     expect(fails).toEqual([]);
   });
 });
+
+/** Literal colours in CSS written in TypeScript source: `X_CSS = \`…\``, `css: \`…\``, `css: "…"` (allowed literals excepted). */
+function literalColoursIn(src: string): string[] {
+  const out: string[] = [];
+  for (const m of src.matchAll(/(?:css|CSS)[^=:\n`"]*[=:]\s*`([^`]*)`|css:\s*"([^"]*)"/g)) {
+    let css = (m[1] ?? m[2] ?? "").replace(/\$\{[^}]*\}/g, "");
+    for (const ok of ALLOWED_LITERALS) css = css.replace(ok, "");
+    const hit = LITERAL.exec(css);
+    if (hit) out.push(css.slice(Math.max(0, hit.index - 40), hit.index + 20));
+  }
+  return out;
+}
 
 /** Legacy presentational classes (PORT-SPEC 8.2): none may be left in markup the server or the dashboard script writes. */
 const RETIRED = [
@@ -187,5 +203,31 @@ describe("motifs", () => {
   it("plates stay inside their size budget", () => {
     expect(m.plate("kofra-home").length).toBeLessThan(420_000);
     expect(m.plate("kofra-signin", { lite: true }).length).toBeLessThan(100_000);
+  });
+});
+
+describe("screenshot harness (npm run design:shots)", () => {
+  it("exits non-zero when any cell or switch check fails, and for an empty run", () => {
+    const ok = { gates: { csp: { pass: true }, axe: { pass: true } } };
+    const bad = { gates: { csp: { pass: true }, overflow: { pass: false } } };
+    expect(exitCodeFor([ok, ok])).toBe(0);
+    expect(exitCodeFor([ok, bad])).toBe(1);
+    expect(exitCodeFor([ok], { themeSwitch: { "in-place": { pass: true }, "no-script": { pass: false } } })).toBe(1);
+    expect(exitCodeFor([])).toBe(1);
+  });
+  it("refuses a selection that runs nothing, before starting a worker or a browser", () => {
+    expect(() => checkSelection(new Set(["J15"]), [390, 1440], ["light", "auto-dark"])).not.toThrow();
+    expect(() => checkSelection(new Set(["J99"]), [390], ["light"])).toThrow(/no such screen J99/);
+    expect(() => checkSelection(null, [999], ["light"])).toThrow(/Nothing valid/);
+    expect(() => checkSelection(null, [390], ["sepia"])).toThrow(/Nothing valid/);
+    expect(() => checkSelection(null, [], ["light"])).toThrow(/Nothing valid/);
+    // As a process: a non-zero exit, with nothing started.
+    let status = 0;
+    try {
+      execFileSync(process.execPath, [join(ROOT, "packages/server/test/e2e-design/shots.mjs"), "--only", "J99", "--out", join(ROOT, "node_modules/.cache/shots-selftest")], { stdio: "pipe", timeout: 20_000 });
+    } catch (e) {
+      status = (e as { status: number }).status;
+    }
+    expect(status).toBe(2);
   });
 });

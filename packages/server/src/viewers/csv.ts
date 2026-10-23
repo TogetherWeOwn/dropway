@@ -145,7 +145,7 @@ export const csvViewer: Viewer = {
       const delim = delimiter === "\t" ? "tab" : delimiter === "," ? "comma" : delimiter === ";" ? "semicolon" : "pipe";
       return `<!--meta-->${dataRows.toLocaleString("en-US")}${more ? "+" : ""} rows · ${columns} columns · ${delim}-separated${
         more ? ` · showing the first ${Math.min(dataRows, MAX_ROWS).toLocaleString("en-US")} rows of ${formatBytes(vc.file.size)}` : ""
-      }<!--/meta--><div class="dw-csvwrap">${html}</div>`;
+      }<!--/meta--><div class="dw-csvwrap" tabindex="0" role="region" aria-label="${escapeHtml(`Table: ${vc.file.path}`)}">${html}</div>`;
     });
     const m = /^<!--meta-->(.*?)<!--\/meta-->/.exec(r.html);
     if (m) meta = m[1]!;

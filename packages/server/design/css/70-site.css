@@ -4,6 +4,9 @@
 .sys>main{flex:1 0 auto;width:100%;max-width:46rem;margin:0 auto;padding:10vh var(--s5) var(--s9)}
 .sys>.guilloche-band{margin-top:var(--s7)}
 .sys .foot{padding-bottom:28px}
+/* Keyboard focus and #L links scroll clear of the sticky bar (it wraps to more rows on narrow screens). */
+html:has(.vbar){scroll-padding-top:8.5rem}
+@media (min-width:1000px){html:has(.vbar){scroll-padding-top:4.5rem}}
 .vbar{position:sticky;top:0;z-index:20;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;padding:8px 18px;border-bottom:1px solid var(--rule);background:color-mix(in srgb,var(--paper) 92%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);font-size:13.5px;line-height:1.3}
 .vbar .wm{font-size:15px}
 .vfile{display:flex;align-items:center;gap:10px;min-width:0;flex:1 1 18rem;flex-wrap:wrap}
@@ -33,6 +36,14 @@
   .listing{padding:var(--s6) var(--s4) var(--s8)}
   .listing .frow{grid-template-columns:40px minmax(0,1fr) auto}
   .listing .frow .fkind{display:none}
+}
+@media (max-width:999.98px){
+  /* Two fixed rows, whatever the fonts: the file (path cut with an ellipsis) above the view and buttons, so
+     nothing below jumps when the web fonts replace the fallbacks. */
+  .vfile{flex:1 1 100%;flex-wrap:nowrap}
+  .vfile>*{flex:none}
+  .vfile .crumbs{flex:1 1 auto;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .vmeta{white-space:nowrap}
 }
 @media (max-width:640px){.vmeta{display:none}}
 @media (min-width:1000px){.show-lg{display:block}.hide-lg{display:none}}

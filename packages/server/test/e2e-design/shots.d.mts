@@ -1,0 +1,15 @@
+// Types for the parts of the screenshot harness that unit tests import (the rest runs only as a script).
+export interface Gate {
+  pass: boolean;
+  detail?: unknown;
+}
+export interface Cell {
+  gates: Record<string, Gate>;
+  [key: string]: unknown;
+}
+export interface Checks {
+  themeSwitch?: Record<string, Gate>;
+}
+export function failures(matrix: Cell[], checks?: Checks): { failed: Cell[]; switchFailed: string[] };
+export function exitCodeFor(matrix: Cell[], checks?: Checks): 0 | 1;
+export function checkSelection(only?: Set<string> | null, widths?: number[], modes?: string[]): void;

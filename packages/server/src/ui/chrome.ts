@@ -32,7 +32,7 @@ export function modeSwitch(pref: ThemePref, next: string): string {
   const buttons = (["auto", "light", "dark"] as const)
     .map((v) => {
       const [label, title] = LABELS[v];
-      return `<button type="submit" name="theme" value="${v}" aria-pressed="${pref === v}" title="${title}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">${ICONS[v]}</svg><span>${label}</span></button>`;
+      return `<button type="submit" name="theme" value="${v}" aria-pressed="${pref === v}" title="${title}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">${ICONS[v]}</svg><span data-label="${label}">${label}</span></button>`;
     })
     .join("");
   return `<form class="k-mode-switch" method="post" action="${THEME_PATH}"><input type="hidden" name="next" value="${e(next)}"><div role="group" aria-label="Colour theme">${buttons}</div></form>`;

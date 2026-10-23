@@ -1,9 +1,17 @@
 import { appOrigin, encodePath, KIND_LABELS } from "@dropway/core";
 import { escapeHtml, formatBytes, htmlPage } from "../html";
 import { TRUST_LINE } from "../ui/chrome";
+import { SITE_CSS_HASH } from "../ui/design.generated";
 import { fileSeal } from "../ui/motifs";
 import { themeOf } from "../ui/theme";
 import type { ViewerContext } from "./index";
+
+/**
+ * Version of what every viewer page shares: the bar, the document and the inlined site CSS. It is part of
+ * every viewer ETag, so a redesign (or any change to the site CSS, through its hash) turns over the
+ * validators of every viewer at once, not only of viewers whose own version was bumped.
+ */
+export const VIEWER_PAGE_VERSION = `sp1.${SITE_CSS_HASH}`;
 
 /**
  * The shared frame of every viewer page: one slim bar (kind, path, size, type;

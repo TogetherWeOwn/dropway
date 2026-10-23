@@ -9,6 +9,9 @@
 .mode-switch svg{flex:none;width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
 .mode-switch button:hover{color:var(--accent);background:var(--accent-wash)}
 .mode-switch button[aria-pressed=true]{background:var(--accent);color:var(--accent-ink);font-weight:600}
+/* Each label reserves its bold width, so pressing a button never moves the switch or what sits beside it. */
+.mode-switch button span{display:inline-flex;flex-direction:column}
+.mode-switch button span::after{content:attr(data-label);height:0;overflow:hidden;visibility:hidden;font-weight:600;pointer-events:none;user-select:none}
 .mode-switch button:focus-visible{outline:2px solid var(--focus);outline-offset:2px;position:relative;z-index:1}
 @media (max-width:720px){.mode-switch svg{display:none}.mode-switch button{padding:5px 10px}}
 @media print{.mode-switch{display:none}}

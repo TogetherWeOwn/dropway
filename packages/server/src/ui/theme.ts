@@ -113,12 +113,47 @@ export async function themeRoute(c: Context<DropwayEnv>): Promise<Response> {
     headers.set("Location", "/");
     return new Response(null, { status: 303, headers });
   }
-  const form = await c.req.formData().catch(() => null);
+  // The switch posts two short fields (theme, next <= 512 characters), urlencoded. Read at most
+  // THEME_BODY_MAX bytes, so nobody can make this unauthenticated route buffer a large body.
+  const body = await readCapped(c.req.raw, THEME_BODY_MAX);
+  if (body === null) return new Response("Request body too large", { status: 413, headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" } });
+  const urlencoded = (c.req.header("content-type") ?? "").split(";")[0]!.trim().toLowerCase() === "application/x-www-form-urlencoded";
+  const form = urlencoded ? new URLSearchParams(body) : null;
   const next = safeNext(form?.get("next"));
   headers.set("Location", next);
   const theme = form?.get("theme");
   if (isThemePref(theme)) headers.append("Set-Cookie", themeSetCookie(theme));
   return new Response(null, { status: 303, headers });
+}
+
+/** Largest theme-switch body accepted (theme + a 512-character next, urlencoded, with room to spare). */
+export const THEME_BODY_MAX = 2048;
+
+/** The body as text, or null once it passes `max` bytes (declared or streamed). */
+async function readCapped(req: Request, max: number): Promise<string | null> {
+  const declared = Number(req.headers.get("content-length") ?? "");
+  if (declared > max) return null;
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const ch of chunks) {
+    all.set(ch, at);
+    at += ch.byteLength;
+  }
+  return new TextDecoder().decode(all);
 }
 
 /** Escaped `next` value for the switch form. */

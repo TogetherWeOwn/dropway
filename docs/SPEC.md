@@ -1258,6 +1258,7 @@ Sites origin:
 | `/<slug>/<path>` or `https://<slug>.<SITES_DOMAIN>/<path>` | The site; `?raw=1`, `?download=1`, `?view=1`, `?view=source` | P0 | Done (view modes R-07) |
 | `/<slug>--v<N>/<path>` or `<slug>--v<N>.<SITES_DOMAIN>` | Version preview | P0 | R-13 |
 | `<site>/__dropway/password` | Password form post | P0 | Done |
+| `<site>/__dropway/open?next=<path>&theme=light\|dark` | How the app's file viewer opens a folder, raw file or the site's own page in its frame: 303 to `next`, adding `?theme=` only when `next` shows a page Kofra draws (listing, viewer, system page), so the site's own HTML never sees it; on a locked site the gate (in that mode) comes first | P0 | Done |
 | `<site>/__dropway/access`, `<site>/__dropway/share/<token>` | Restricted-site sign-in, share-link entry | P1 | R-23 |
 | `<site>/.dropway/data/<collection>[/<id>]` | Site Data browser API | P1 | R-30 |
 | any path declared in `.dropway/proxy.json` | Proxy route | P1 | R-31 |

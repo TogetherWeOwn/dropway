@@ -18,8 +18,9 @@ import {
   type LiveSite,
 } from "@dropway/core";
 import { escapeHtml, siteSystemCsp, systemPage } from "./html";
-import { themeOf } from "./ui/theme";
+import { safeNext, themeOf } from "./ui/theme";
 import { findViewer, toViewerFile, VIEWER_CSP, VIEWERS, type ViewMode, type Viewer } from "./viewers";
+import { VIEWER_PAGE_VERSION } from "./viewers/chrome";
 import { renderListing } from "./viewers/listing";
 import { MAX_CSS_REWRITE_BYTES, rewriteCss, rewriteHtml, type PathRewrite } from "./path-rewrite";
 import { PATH_SHIM_VERSION, pathShimScript } from "./path-shim";
@@ -47,6 +48,8 @@ export const SITE_SANDBOX =
   "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-pointer-lock allow-presentation allow-orientation-lock";
 
 const PASSWORD_PATH = "__dropway/password";
+/** The app's file viewer opens folders and a site's own pages in its frame through this address (see openInFrame). */
+export const OPEN_PATH = "__dropway/open";
 
 export type Resolved =
   | { kind: "file"; path: string; status: number }
@@ -217,6 +220,35 @@ async function handlePassword(dw: DropwayContext, req: Request, live: LiveSite, 
   return passwordForm(dw, req, live, mode, u.pathname + u.search, false);
 }
 
+/**
+ * GET <base>__dropway/open?next=<path>&theme=light|dark: how the app's file viewer opens a folder, a raw file
+ * or a site's own page in its frame without handing ?theme= to the site's own HTML. It answers 303 to `next`,
+ * adding the mode only when `next` shows a page Kofra draws there (a listing, a file viewer, a system page).
+ * On a password-protected site the gate comes first (drawn in the mode, since this request carries it) and
+ * returns here once unlocked. `next` must be a path on this site; anything else opens the site root.
+ */
+function openInFrame(dw: DropwayContext, req: Request, url: URL, live: LiveSite, mode: ServeMode, viewers: readonly Viewer[]): Response {
+  const asked = url.searchParams.get("next") ?? "";
+  const next = safeNext(asked) === asked && asked.startsWith(mode.base) ? asked : mode.base;
+  const target = new URL(next, url);
+  const theme = themeOf(dw);
+  if (theme !== "auto") {
+    // Resolve `next` the way a frame navigation to it would be served.
+    const nav = new Request(target.href, { headers: { "Sec-Fetch-Dest": "iframe", Accept: "text/html" } });
+    const filePath = requestPathToFilePath(`/${target.pathname.slice(mode.base.length)}`);
+    const resolved = filePath === null ? null : resolvePath(live, filePath, nav, mode);
+    let kofra = resolved?.kind === "listing" || resolved?.kind === "not_found";
+    if (resolved?.kind === "file") {
+      const sp = target.searchParams;
+      const viewMode = flag(sp, "raw") || flag(sp, "download") ? null : requestedViewMode(nav, sp);
+      const [sha256, size, contentType] = live.files[resolved.path]!;
+      kofra = !!viewMode && !!findViewer(toViewerFile(resolved.path, sha256, size, contentType), live, viewers, viewMode);
+    }
+    if (kofra) target.searchParams.set("theme", theme);
+  }
+  return new Response(null, { status: 303, headers: { Location: target.pathname + target.search, "Cache-Control": "no-store" } });
+}
+
 function passwordForm(dw: DropwayContext, req: Request, live: LiveSite, mode: ServeMode, next: string, failed: boolean): Response {
   // The form posts with the same ?theme= as the page, so a wrong-password answer keeps the mode. No
   // autofocus: browsers block it in the app's file viewer (a cross-origin frame) and it skips the page.
@@ -324,6 +356,7 @@ export async function serveSite(
   if (method !== "GET" && method !== "HEAD") {
     return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD, OPTIONS" } });
   }
+  if (filePath === OPEN_PATH) return openInFrame(dw, req, url, live, mode, viewers);
   if (!live.versionId) return systemResponse(dw, req, mode, live, 404, "EMPTY", "Nothing published yet", "This site exists but has no live version yet.");
 
   const resolved = resolvePath(live, filePath, req, mode);
@@ -372,7 +405,7 @@ async function serveFile(
     const embed = flag(sp, "embed");
     // ?theme= (from the app's file viewer) prints the page in one mode: a different body, so a different ETag.
     const theme = themeOf(dw);
-    const etag = `W/"${viewer.id}@${viewer.version ?? 1}-${sha256}${embed ? "-e" : ""}${theme === "auto" ? "" : `-t${theme[0]}`}${reportVariant}"`;
+    const etag = `W/"${viewer.id}@${viewer.version ?? 1}.${VIEWER_PAGE_VERSION}-${sha256}${embed ? "-e" : ""}${theme === "auto" ? "" : `-t${theme[0]}`}${reportVariant}"`;
     const h = new Headers();
     if (etagMatches(req, etag)) {
       h.set("ETag", etag);

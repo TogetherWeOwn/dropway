@@ -22,7 +22,7 @@ const MEDIA_CSS = `
 .dw-pdf{width:100%;height:calc(100vh - 3.6rem);border:0;display:block;background:var(--paper-3)}
 .dw-video{max-width:100%;max-height:calc(100vh - 9rem);background:var(--paper-3)}
 .dw-audio{width:min(40rem,100%);margin-top:18vh}
-.dw-fallback{max-width:34rem;margin:15vh auto;text-align:center;color:var(--muted)}
+.dw-fallback{max-width:34rem;margin:0 auto;padding:15vh 0 0;text-align:center;color:var(--muted)}
 `;
 
 /** Pixel size from the first bytes of a PNG, GIF, JPEG, WebP or BMP file. */
@@ -189,8 +189,9 @@ export const fontViewer: Viewer = {
 .dw-font .s{font-family:"dw-specimen",var(--mono)}
 .dw-font .big{font-size:clamp(5rem,16vw,11rem);line-height:1;margin:.5rem 0 1rem}
 .dw-font .set{font-size:1.6rem;line-height:1.5;word-break:break-all;margin:0 0 .6rem}
-.dw-font .try{font-size:2rem;line-height:1.35;border:1px dashed var(--rule);padding:1rem;margin:1.5rem 0;outline:0}
+.dw-font .try{font-size:2rem;line-height:1.35;border:1px dashed var(--rule);padding:1rem;margin:1.5rem 0}
 .dw-font .try:focus{border-color:var(--accent)}
+.dw-font .try:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .dw-fs{display:flex;gap:1rem;align-items:baseline;border-top:1px solid var(--rule-soft);padding:.4rem 0}
 .dw-fs span{flex:none;width:3.5rem;color:var(--muted);font-size:.8rem;font-family:var(--mono)}
 .dw-fs p{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:"dw-specimen",var(--mono)}`,

@@ -5,7 +5,7 @@ import type { UiSlots } from "../extensions";
 import { escapeHtml, formatBytes } from "../html";
 import { TRUST_LINE } from "./chrome";
 import { renderAppPage, sitesCspSource, uiSlotsOf } from "./shell";
-import { themeOf } from "./theme";
+import { themeOf, type ThemePref } from "./theme";
 
 const e = escapeHtml;
 
@@ -256,6 +256,13 @@ export function withViewerTheme(url: string, pref: string): string {
   return /[?&]view=(1|source)\b/.test(url) ? `${url}&theme=${pref}` : url;
 }
 
+/** The frame address for a folder or raw file: direct in Auto; through <site>/__dropway/open in an explicit mode. */
+export function openInFrameUrl(root: string, target: string, pref: ThemePref): string {
+  if (pref !== "light" && pref !== "dark") return target;
+  const t = new URL(target);
+  return `${root}__dropway/open?next=${encodeURIComponent(t.pathname + t.search)}&theme=${pref}`;
+}
+
 export function viewerPage(c: Context<DropwayEnv>): Response | Promise<Response> {
   const dw = c.get("dw");
   const slug = (c.req.param("slug") ?? "").toLowerCase();
@@ -269,7 +276,10 @@ export function viewerPage(c: Context<DropwayEnv>): Response | Promise<Response>
   const fileUrl = root + encodePath(path.replace(/\/$/, "")) + (path.endsWith("/") ? "/" : "");
   const isDir = path === "" || path.endsWith("/");
   const mode = c.req.query("mode");
-  const src = withViewerTheme(isDir ? fileUrl : mode === "source" ? `${fileUrl}?view=source&embed=1` : mode === "raw" ? `${fileUrl}?raw=1` : `${fileUrl}?view=1&embed=1`, pref);
+  // Folders and raw files may be the site's own bytes, so in an explicit mode they open through the site's
+  // __dropway/open address, which adds ?theme= only when the frame will show a page Kofra draws.
+  const target = isDir ? fileUrl : mode === "source" ? `${fileUrl}?view=source&embed=1` : mode === "raw" ? `${fileUrl}?raw=1` : `${fileUrl}?view=1&embed=1`;
+  const src = isDir || mode === "raw" ? openInFrameUrl(root, target, pref) : withViewerTheme(target, pref);
   const shared = sitesCspSource(dw) === "'self'";
   // A sandboxed frame. On a separate sites origin the page keeps that (different) origin so its own
   // storage works; on the shared origin it gets an opaque origin, like every site response there.

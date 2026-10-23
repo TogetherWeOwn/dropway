@@ -1,6 +1,7 @@
 /* App header: wordmark, tag, navigation, account area, colour mode switch (ui/chrome.ts).
-   Wide: wordmark, tag, nav (pushed right), account, switch. Below 720px: wordmark, account and switch on
-   the first row, the nav wraps to its own row under them. */
+   Wide (1100px and up): wordmark, tag, nav (pushed right), account, switch. Narrower: wordmark, account and
+   switch on the first row and the nav on its own row under them, so the header keeps the same rows whether
+   or not the account area has filled in (no layout shift) and the switch never drops to a row of its own. */
 .top{border-bottom:1px solid var(--rule);background:var(--paper)}
 .top>.wrap{display:flex;align-items:center;gap:10px var(--s5);min-height:60px;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}
 .top .wm{font-size:22px;line-height:1.2}
@@ -15,11 +16,13 @@
 .acct form{margin:0}
 .slotbanner{border-bottom:1px solid var(--rule-soft);background:var(--paper-2)}
 .slotbanner>.wrap{padding-top:10px;padding-bottom:10px;font-size:14.5px}
+@media (max-width:1099.98px){
+  .nav{order:3;flex-basis:100%;margin-left:0;gap:4px 16px}
+  .acct,.nav~.acct{margin-left:auto}
+}
 @media (max-width:720px){
   .top>.wrap{gap:10px 12px}
   .top .tag{display:none}
-  .nav{order:3;flex-basis:100%;margin-left:0;gap:4px 16px}
-  .acct,.nav~.acct{margin-left:auto}
   .acct .who{display:none}
 }
 @media print{.nav,.acct{display:none}}

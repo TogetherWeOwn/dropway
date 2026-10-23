@@ -23,6 +23,7 @@ const JSON_CSS = `
 .dw-jtabs{display:flex;gap:.4rem;margin:.4rem 0 .6rem}
 .dw-jtabs label{padding:.28rem .7rem;border:1px solid var(--rule-soft);cursor:pointer;font-size:.82rem;color:var(--muted);background:var(--paper-2)}
 #dw-jt-tree:checked~.dw-jtabs label[for=dw-jt-tree],#dw-jt-pretty:checked~.dw-jtabs label[for=dw-jt-pretty]{color:var(--ink);border-color:var(--accent);font-weight:600}
+#dw-jt-tree:focus-visible~.dw-jtabs label[for=dw-jt-tree],#dw-jt-pretty:focus-visible~.dw-jtabs label[for=dw-jt-pretty]{outline:2px solid var(--focus);outline-offset:2px}
 .dw-jpane{display:none}
 #dw-jt-tree:checked~.dw-jtree,#dw-jt-pretty:checked~.dw-jpretty{display:block}
 .dw-jpretty .dw-src{margin:0}

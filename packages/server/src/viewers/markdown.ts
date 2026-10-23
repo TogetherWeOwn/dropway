@@ -4,7 +4,7 @@ import { cachedRender } from "./cache";
 import { standardTabs, viewerPage } from "./chrome";
 import { HIGHLIGHT_CSS, highlight, hljsLanguage } from "./highlight";
 import type { Viewer } from "./index";
-import { sanitizeHtml } from "./sanitize";
+import { RESERVED_NAME, sanitizeHtml } from "./sanitize";
 
 const MD_VERSION = 3;
 
@@ -47,17 +47,21 @@ export function splitFrontMatter(src: string): { title: string | null; body: str
   return { title: t ? t[1]! : null, body: src.slice(m[0].length), frontMatter: m[1]! };
 }
 
-/** GitHub-style heading id: lowercase, punctuation dropped, spaces to dashes. */
+/**
+ * GitHub-style heading id: lowercase, punctuation dropped, spaces to dashes. An id in a namespace reserved
+ * for Kofra's own markup (`k-`, `dw-`; the sanitizer strips those from user content) gets an `h-` prefix,
+ * so the heading keeps an id and its `#` link still reaches it.
+ */
 export function headingId(text: string): string {
-  return (
+  const id =
     text
       .toLowerCase()
       .replace(/<[^>]+>/g, "")
       .replace(/&[a-z0-9#]+;/g, "")
       .replace(/[^\p{L}\p{N}\s_-]/gu, "")
       .trim()
-      .replace(/\s+/g, "-") || "section"
-  );
+      .replace(/\s+/g, "-") || "section";
+  return RESERVED_NAME.test(id) ? `h-${id}` : id;
 }
 
 function markedFor(): Marked {

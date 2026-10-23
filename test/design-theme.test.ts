@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { APP_PAGE_CSP, THEME_COOKIE } from "@dropway/server";
+import { THEME_BODY_MAX } from "../packages/server/src/ui/theme";
 import { APP_CSS_HASH, THEME_COLORS } from "../packages/server/src/ui/design.generated";
 import { FONT_FILES } from "../packages/server/src/ui/fonts.generated";
+import { renderMarkdown } from "../packages/server/src/viewers/markdown";
 import { sanitizeHtml } from "../packages/server/src/viewers/sanitize";
 import { ORIGIN, form, freshInstance } from "./helpers";
 
@@ -52,6 +54,34 @@ describe("theme cookie route (POST /__dropway/theme)", () => {
     expect(bad.status).toBe(303);
     expect(bad.headers.get("location")).toBe("/login");
     expect(bad.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("reads at most THEME_BODY_MAX bytes: a large declared or streamed body is refused unread; only urlencoded forms count", async () => {
+    const dw = await freshInstance();
+    const big = new URLSearchParams({ theme: "dark", next: "/", pad: "x".repeat(THEME_BODY_MAX) });
+    const declared = await themePost(dw, Object.fromEntries(big));
+    expect(declared.status).toBe(413);
+    expect(declared.headers.get("set-cookie")).toBeNull();
+    // Streamed with no Content-Length: cut off once it passes the limit.
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(ctl) {
+        if (sent >= 64) return ctl.close();
+        sent++;
+        ctl.enqueue(new TextEncoder().encode(sent === 1 ? "theme=dark&next=%2F&pad=" : "y".repeat(1024)));
+      },
+    });
+    const streamed = await dw.call("/__dropway/theme", { method: "POST", body: stream, headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: ORIGIN }, duplex: "half" } as RequestInit);
+    expect(streamed.status).toBe(413);
+    expect(streamed.headers.get("set-cookie")).toBeNull();
+    expect(sent).toBeLessThan(64);
+    // Multipart is not what the switch sends: nothing is set.
+    const fd = new FormData();
+    fd.append("theme", "dark");
+    const multipart = await dw.call("/__dropway/theme", { method: "POST", body: fd, headers: { Origin: ORIGIN } });
+    expect(multipart.status).toBe(303);
+    expect(multipart.headers.get("location")).toBe("/");
+    expect(multipart.headers.get("set-cookie")).toBeNull();
   });
 });
 
@@ -105,6 +135,41 @@ describe("server-rendered colour mode (no flash, no script)", () => {
     expect(mdDark.headers.get("etag")).toContain("-td");
     // The user's own HTML is served untouched.
     expect(await (await dw.call(`${url.pathname}index.html?theme=dark`)).text()).toContain("<p>hi</p>");
+  });
+
+  it("the app viewer opens folders and the site's own pages through __dropway/open: ?theme= reaches Kofra pages only", async () => {
+    const dw = await freshInstance();
+    const pub = await dw.json("/api/v1/publish", { method: "POST", key: dw.ownerKey, body: form({ "index.html": "<p>hi</p>", "docs/a.txt": "a", "docs/b.md": "# B" }) });
+    const slug = pub.body.slug as string;
+    const base = new URL(pub.body.url as string).pathname;
+    const open = (next: string, theme = "dark") => dw.call(`${base}__dropway/open?next=${encodeURIComponent(next)}&theme=${theme}`, { headers: { "Sec-Fetch-Dest": "iframe" } });
+    const location = async (next: string, theme?: string) => {
+      const res = await open(next, theme);
+      expect(res.status).toBe(303);
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      return res.headers.get("location");
+    };
+    expect(await location(`${base}docs/`)).toBe(`${base}docs/?theme=dark`); // a listing
+    expect(await location(base)).toBe(base); // the site's own index.html
+    expect(await location(`${base}docs/a.txt?raw=1`)).toBe(`${base}docs/a.txt?raw=1`); // raw bytes
+    expect(await location(`${base}docs/b.md?view=1&embed=1`)).toBe(`${base}docs/b.md?view=1&embed=1&theme=dark`); // a viewer
+    expect(await location(`${base}nope.html`)).toBe(`${base}nope.html?theme=dark`); // Kofra's page-not-found
+    expect(await location(`${base}docs/`, "auto")).toBe(`${base}docs/`);
+    // Only paths on this site.
+    for (const bad of ["//evil.test/", "https://evil.test/", "/elsewhere/", `${base}\\evil`]) expect(await location(bad)).toBe(base);
+
+    // The viewer page frames a folder through it in an explicit mode, and directly in Auto.
+    const frameSrc = async (path: string, cookie?: string) => /<iframe id="dw-frame"[^>]* src="([^"]+)"/.exec(await (await dw.call(path, { headers: cookie ? { Cookie: cookie } : {} })).text())![1]!.replaceAll("&amp;", "&");
+    expect(await frameSrc(`/v/${slug}/docs/`, `${THEME_COOKIE}=light`)).toBe(`${ORIGIN}${base}__dropway/open?next=${encodeURIComponent(`${base}docs/`)}&theme=light`);
+    expect(await frameSrc(`/v/${slug}/docs/`)).toBe(`${ORIGIN}${base}docs/`);
+
+    // A locked site: the gate is drawn in the mode and returns to __dropway/open once unlocked.
+    await dw.json(`/api/v1/sites/${slug}`, { method: "PATCH", key: dw.ownerKey, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: "correct horse" }) });
+    const gate = await open(base, "light");
+    expect(gate.status).toBe(401);
+    const html = await gate.text();
+    expect(htmlTag(html)).toBe('<html lang="en" data-theme="light">');
+    expect(html).toContain(`name="next" value="${base}__dropway/open?next=`);
   });
 });
 
@@ -161,6 +226,27 @@ describe("user content cannot wear Kofra's chrome", () => {
     expect(await sanitizeHtml('<p class="k-banner k-ok note">x</p>')).toBe('<p class="note">x</p>');
     expect(await sanitizeHtml('<div id="dw-main" class="k-btn">y</div>')).toBe("<div>y</div>");
     expect(await sanitizeHtml('<h2 id="setup" class="intro">z</h2>')).toBe('<h2 id="setup" class="intro">z</h2>');
+  });
+  it("character references cannot spell a reserved name (decimal, hex, no semicolon, encoded separators)", async () => {
+    expect(await sanitizeHtml('<div class="k&#45;banner k&#45;ok" id="d&#119;-main">Forged</div>')).toBe("<div>Forged</div>");
+    expect(await sanitizeHtml('<div class="&#x6b;-btn note" id="&#100;&#119;&#45;boot">x</div>')).toBe('<div class="note">x</div>');
+    expect(await sanitizeHtml('<p class="k&#45banner">x</p>')).toBe("<p>x</p>");
+    expect(await sanitizeHtml('<p class="note&#9;k-ok&NewLine;dw-x lead">x</p>')).toBe('<p class="note lead">x</p>');
+    expect(await sanitizeHtml('<p id=" &#9;k-top">x</p>')).toBe("<p>x</p>");
+    // Lookalikes that browsers do not turn into a hyphen-minus stay.
+    expect(await sanitizeHtml('<p class="k&dash;x">x</p>')).toBe('<p class="k&dash;x">x</p>');
+  });
+  it("code blocks (which scroll sideways on phones) are reachable by keyboard; other tabindex values are dropped", async () => {
+    expect(await sanitizeHtml('<pre tabindex="-1"><code>x</code></pre><p tabindex="3">y</p>')).toBe('<pre tabindex="0"><code>x</code></pre><p>y</p>');
+  });
+  it("Markdown headings named like a reserved prefix keep a working id and # link after sanitizing", async () => {
+    const { html } = renderMarkdown("## K setup\n\n## DW guide\n\n## Setup\n\n## K setup\n", "README.md");
+    const clean = await sanitizeHtml(html);
+    for (const id of ["h-k-setup", "h-dw-guide", "setup", "h-k-setup-1"]) {
+      expect(clean).toContain(`id="${id}"`);
+      expect(clean).toContain(`href="#${id}"`);
+    }
+    expect(clean).not.toMatch(/id="(k|dw)-/);
   });
 });
 

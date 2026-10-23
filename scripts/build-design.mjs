@@ -172,6 +172,23 @@ export function classesIn(css) {
 
 // ------------------------------------------------------------------ build
 
+/**
+ * Load ui/motifs.ts (the same drawing code the Worker runs). Node 22.18+ strips the types itself; on older
+ * Node (the repo supports >= 20) the module is transpiled with esbuild (already a dev dependency) and
+ * imported from a data: URL. motifs.ts has no imports, so this is the whole module.
+ */
+async function loadMotifs() {
+  const url = new URL("../packages/server/src/ui/motifs.ts", import.meta.url);
+  try {
+    return await import(url.href);
+  } catch (e) {
+    if (e?.code !== "ERR_UNKNOWN_FILE_EXTENSION") throw e;
+    const { transformSync } = await import("esbuild");
+    const { code } = transformSync(readFileSync(url, "utf8"), { loader: "ts", format: "esm", target: "node20" });
+    return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+  }
+}
+
 export function buildDesign() {
   const themes = JSON.parse(readFileSync(join(DESIGN, "themes.json"), "utf8"));
   const bundles = JSON.parse(readFileSync(join(DESIGN, "bundles.json"), "utf8"));
@@ -194,7 +211,7 @@ export function buildDesign() {
   const art = {};
   const artStyle = (s) =>
     `path,circle,rect{fill:none}.k-e1{stroke:${s.colors["eng-1"]}}.k-e2{stroke:${s.colors["eng-2"]}}.k-e3{stroke:${s.colors["eng-3"]}}.k-em{stroke:${s.colors["eng-mark"]}}.k-ef{stroke:${s.colors["eng-frame"]}}.k-fm{fill:${s.colors["eng-mark"]}}.k-ft{fill:${s.colors["eng-1"]}}.k-fp{fill:${s.colors["paper-2"]}}`;
-  return import("../packages/server/src/ui/motifs.ts").then(({ plate }) => {
+  return loadMotifs().then(({ plate }) => {
     const plates = { "plate-home": { seed: "kofra-home", lite: false }, "plate-lite": { seed: "kofra-signin", lite: true } };
     for (const [name, p] of Object.entries(plates)) {
       for (const [mode, s] of [["light", light], ["dark", dark]]) {
@@ -249,7 +266,7 @@ export function buildDesign() {
     const designTs =
       header("CSS bundles, theme colours, plate art") +
       `\n/** Every app-origin page: served as /__dropway/ui/kofra-<APP_CSS_HASH>.css (fonts relative to the app origin). */\nexport const APP_CSS = ${JSON.stringify(appCss)};\nexport const APP_CSS_HASH = ${JSON.stringify(sha8(appCss))};\n` +
-      `\n/** Site-origin pages: inlined. Fonts come from the app origin through siteFontFaceCss(appOrigin). */\nexport const SITE_CSS = ${JSON.stringify(siteCss)};\n` +
+      `\n/** Site-origin pages: inlined. Fonts come from the app origin through siteFontFaceCss(appOrigin). */\nexport const SITE_CSS = ${JSON.stringify(siteCss)};\nexport const SITE_CSS_HASH = ${JSON.stringify(sha8(siteCss))};\n` +
       `\n/** @font-face rules for the self-hosted fonts; ${FONT_BASE} is replaced by the app origin ("" on the app origin). */\nexport const FONT_FACE_TEMPLATE = ${JSON.stringify(fontFace(FONT_BASE))};\n` +
       `\n/** Font files preloaded on app pages (path, no origin). */\nexport const PRELOAD_FONTS: readonly string[] = ${JSON.stringify(Object.values(fontFiles).filter((f) => f.preload).map((f) => `/__dropway/fonts/${f.name}.${f.hash}.woff2`))};\n` +
       `\n/** Page background per mode, for <meta name="theme-color">. */\nexport const THEME_COLORS = ${JSON.stringify({ light: light.colors.paper, dark: dark.colors.paper })} as const;\n` +

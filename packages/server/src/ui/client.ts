@@ -241,9 +241,12 @@ export function dropwayClient(motifsFactory) {
   function localTime(iso) {
     if (!iso) return "";
     try {
-      return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short", timeZoneName: "short" });
+      // Explicit fields: dateStyle/timeStyle cannot be combined with timeZoneName (that throws a TypeError).
+      return new Date(iso).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
     } catch (e) {
-      return new Date(iso).toLocaleString();
+      // Still name the zone if the engine rejects the options or the date.
+      const d = new Date(iso);
+      return isNaN(d.getTime()) ? String(iso) : d.toISOString().slice(0, 16).replace("T", " ") + " UTC";
     }
   }
   function reducedMotion() {
@@ -1657,13 +1660,24 @@ export function dropwayClient(motifsFactory) {
       if (f) return f.url;
       return P.siteUrl + encodePath(p);
     }
+    /**
+     * Folders, raw files and HTML pages may be the site's own bytes: in an explicit mode they open through the
+     * site's __dropway/open address, which adds ?theme= only when the frame will show a page Kofra draws
+     * (a listing, a viewer, the password gate), so the site's own HTML never sees it.
+     */
+    function openInFrame(target) {
+      var pref = themePref();
+      if (pref === "auto") return target;
+      var u = new URL(target);
+      return P.siteUrl + "__dropway/open?next=" + encodeURIComponent(u.pathname + u.search) + "&theme=" + pref;
+    }
     function viewSrc(p, mode) {
       var f = fileByPath(p);
       var base = siteUrlFor(p);
-      if (!p || p.charAt(p.length - 1) === "/") return base;
+      if (!p || p.charAt(p.length - 1) === "/") return openInFrame(base);
       if (mode === "source") return withViewerTheme(base + "?view=source&embed=1");
-      if (mode === "raw") return base + "?raw=1";
-      if (f && f.kind === "html") return base;
+      if (mode === "raw") return openInFrame(base + "?raw=1");
+      if (f && f.kind === "html") return openInFrame(base);
       return withViewerTheme(base + "?view=1&embed=1");
     }
 

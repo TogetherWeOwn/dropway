@@ -12,10 +12,25 @@
 //   mode     <html data-theme> and the page background match the mode
 //   fonts    Public Sans, Newsreader and Martian Mono loaded (where the page uses them)
 //   brand    no visible former product name, no "scanned/virus/verified" claims outside user content
+//   status   the HTTP status the screen expects
+//   tokens   (G8) color-scheme and theme-color metas match the mode; no old-palette colour in the HTML or CSS
+//   fontload (G9) font responses carry the section-4 headers; layout shift while loading <= 0.02
+//   motion   (G11) reduced motion: no transitions on buttons and the switch, no skeleton animation, no smooth scroll
+//   flash    (G7) explicit modes: the HTML already carries data-theme, and every frame painted until load has
+//            the mode's paper behind it (sampled each animation frame from the first one)
+//   focus    (G4) Tab from the top through every focusable element: each shows a ring >= 2px with >= 3:1
+//            against what is behind it, is in the viewport and not covered; app pages start at "Skip to
+//            content"; an open dialog keeps focus inside
+//   identity (G6) auto with the OS light is pixel-identical to light, and auto with the OS dark to dark
+//            (the mode switch, whose pressed state differs, and per-screen secrets are masked; channel
+//            deltas of 2/255 or less, rasteriser rounding on anti-aliased edges, are reported as noise)
+// Extra passes: every screen in Light at 320 px (reflow), forced colours (G12: axe and focus) on J15, J16,
+// J53 and J57, and the switch itself (G13: no-script POST, in-place switch with the script, keyboard,
+// persistence across a reload).
 // Explicit modes use the __Host-dw_theme cookie on the app origin and ?theme= on site origins; Auto uses
 // the emulated prefers-color-scheme and no cookie.
 //
-// Usage: node packages/server/test/e2e-design/shots.mjs --out <dir> [--only J03,J08] [--widths 390,1440] [--modes light,dark]
+// Usage: node packages/server/test/e2e-design/shots.mjs --out <dir> [--only J03,J08] [--widths 390,1440] [--modes light,dark] [--no-extra]
 // Browser: CHROME_PATH, default the cached Playwright headless shell.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -38,6 +53,7 @@ const ONLY = arg("only", "") ? new Set(arg("only").split(",")) : null;
 const WIDTHS = arg("widths", "390,768,1440").split(",").map(Number);
 const MODES = arg("modes", "light,dark,auto-light,auto-dark").split(",");
 const CONCURRENCY = Number(arg("concurrency", "4"));
+const EXTRA = !args.includes("--no-extra");
 const CHROME =
   process.env.CHROME_PATH ||
   [1248, 1234, 1200].map((v) => `/home/ubuntu/.cache/ms-playwright/chromium_headless_shell-${v}/chrome-headless-shell-linux64/chrome-headless-shell`).find(existsSync);
@@ -51,8 +67,14 @@ const VIEWPORTS = {
   390: { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
   768: { viewport: { width: 768, height: 1024 }, deviceScaleFactor: 2 },
   1440: { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 },
+  320: { viewport: { width: 320, height: 640 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
 };
 const PAPER = { light: "rgb(244, 239, 226)", dark: "rgb(15, 22, 38)" };
+const THEME_COLOR = { light: "#F4EFE2", dark: "#0F1626" };
+/** The retired palette (PORT-SPEC 9.3 G8): none of these may appear in a page or its CSS. */
+const OLD_HEX = ["#fbfaf8", "#1d1b19", "#d9480f", "#141312", "#ece8e2", "#ff8a4c", "#1a7f37", "#cf222e"];
+/** Forced-colours pass (PORT-SPEC 9.1): the core screens of J06, J15, J16, J53, J57. */
+const FORCED = new Set(["J15", "J16", "J53", "J57"]);
 
 // ------------------------------------------------------------------ fixtures (generated, licence-clean)
 
@@ -299,6 +321,15 @@ async function seed(mf, db) {
 
 // ------------------------------------------------------------------ screens
 
+/** Clean-up after a mutating cell, so the next cell sees the data as seeded. `api` calls /api/v1 as the owner. */
+const revokeKeys = (name) => async (api) => {
+  const { keys } = await api("/keys");
+  for (const k of keys ?? []) if (k.name === name) await api(`/keys/${encodeURIComponent(k.id)}`, { method: "DELETE" });
+};
+const deleteSite = async (api, state) => {
+  if (state.slug) await api(`/sites/${encodeURIComponent(state.slug)}`, { method: "DELETE" });
+};
+
 /** Core screens (PORT-SPEC 9.2, the rows the core worker renders). */
 function screens(fx) {
   const app = (id, title, path, more = {}) => ({ id, title, origin: "app", url: `${APP}${path}`, auth: true, ...more });
@@ -318,6 +349,9 @@ function screens(fx) {
         await page.click("#dw-recover button[type=submit]");
         await page.waitForSelector("#dw-recover .k-keyout");
       },
+      // The new key differs in every cell; each cell then revokes it, so the key lists stay as seeded.
+      mask: [".k-keyout code", ".k-codeblock pre"],
+      after: revokeKeys("recovery"),
     }),
     app("J13", "A08 Sites, loading", "/dashboard", { before: holdSites, wait: ".k-skel" }),
     app("J15", "A08 Sites, list", "/dashboard", { wait: "#dw-sites tbody tr" }),
@@ -348,16 +382,41 @@ function screens(fx) {
         await page.waitForSelector(".k-chosen .k-frow");
       },
     }),
+    app("J22", "A10 Publish, uploading", "/dashboard/publish", {
+      wait: ".k-dropzone",
+      mutates: true,
+      act: async (page, state) => {
+        // Five new files of the same size; the first three uploads finish, the last two never get an
+        // answer, so the bar holds at 64 % ("Uploaded 3 of 5").
+        let puts = 0;
+        await page.route(`${APP}/**`, (r) => (r.request().method() === "PUT" && ++puts > 3 ? undefined : r.fallback()));
+        const nonce = Math.random().toString(36).slice(2, 10).padEnd(8, "0");
+        const input = page.locator("#dw-publish input[type=file]:not([webkitdirectory])");
+        await input.setInputFiles(["index.html", "about.html", "notes.txt", "data.csv", "styles.css"].map((name) => ({ name, mimeType: "application/octet-stream", buffer: Buffer.from(`${name} ${nonce} `.padEnd(4096, ".")) })));
+        state.slug = `fx-up-${nonce}`;
+        await page.fill("#dw-pub-slug", state.slug);
+        await page.click("text=Publish >> nth=-1");
+        await page.waitForFunction(() => Number(document.querySelector(".k-prog")?.getAttribute("aria-valuenow")) >= 60, null, { timeout: 15000 });
+      },
+      mask: ["#dw-pub-slug"],
+      after: deleteSite,
+    }),
     app("J23", "A10 Publish, success", "/dashboard/publish", {
       wait: ".k-dropzone",
       mutates: true,
-      act: async (page) => {
+      act: async (page, state) => {
         const input = page.locator("#dw-publish input[type=file]:not([webkitdirectory])");
-        await input.setInputFiles([{ name: "index.html", mimeType: "text/html", buffer: Buffer.from("<h1>new</h1>") }]);
-        await page.fill("#dw-pub-slug", `fx-new-${Math.random().toString(36).slice(2, 7)}`);
+        // New bytes in every cell (same length), so no cell reuses a blob an earlier cell stored.
+        const nonce = Math.random().toString(36).slice(2, 10).padEnd(8, "0");
+        await input.setInputFiles([{ name: "index.html", mimeType: "text/html", buffer: Buffer.from(`<h1>new ${nonce}</h1>`) }]);
+        state.slug = `fx-new-${nonce.slice(0, 5)}`;
+        await page.fill("#dw-pub-slug", state.slug);
         await page.click("text=Publish >> nth=-1");
         await page.waitForSelector("#dw-publish .k-keyout", { timeout: 15000 });
       },
+      // The new site's address is random per cell; each cell deletes its site afterwards.
+      mask: ["#dw-pub-slug", "#dw-pub-site", "#dw-publish .k-keyout code"],
+      after: deleteSite,
     }),
     app("J24", "A11 API keys", "/dashboard/keys", { wait: "#dw-keys tbody tr" }),
     app("J25", "A11 Key created", "/dashboard/keys", {
@@ -368,6 +427,9 @@ function screens(fx) {
         await page.click("text=Create key");
         await page.waitForSelector("#dw-keys .k-keyout");
       },
+      // The secret and its prefix differ per cell; each cell revokes its key afterwards.
+      mask: [".k-keyout code", "#dw-keys .k-codeblock pre", "#dw-keys tbody tr:has-text('harness key') .k-mono"],
+      after: revokeKeys("harness key"),
     }),
     app("J26", "A11 Revoke dialog", "/dashboard/keys", {
       wait: "#dw-keys tbody tr",
@@ -379,9 +441,9 @@ function screens(fx) {
     app("J27", "A12 Settings, owner", "/dashboard/settings", { wait: "#dw-members tbody tr" }),
     app("J28", "A13 App viewer, Markdown file", "/v/fx-site/README.md", { wait: ".k-tree a[aria-current]", frame: true }),
     app("J29", "A13 App viewer, folder", "/v/fx-site/docs/", { wait: ".k-tree", frame: true }),
-    app("J30", "A13 App viewer, password site", "/v/fx-pw/", { wait: ".k-tree", frame: true, expectFailed: ["GET / 401"] }),
+    app("J30", "A13 App viewer, password site", "/v/fx-pw/", { wait: ".k-tree", frame: true, expectFailed: ["GET / 401", "GET /__dropway/open 401"] }),
     app("J42", "A24 Claim a site", `/claim?slug=${fx.anonLive}`, { auth: false }),
-    app("J43", "A25 Encrypted site wrapper", "/__dropway/encrypted/fx-site", { auth: false, expectConsole: true, expectFailed: ["GET /encrypted.bin"] }),
+    app("J43", "A25 Encrypted site wrapper", "/__dropway/encrypted/fx-site", { auth: false, expectConsole: true, expectFailed: ["GET /encrypted.bin"], noSkip: true }), // minimal chrome (A25): wordmark, warning, frame
     app("J44", "A26 Not found", "/nope", { auth: false, status: 404 }),
     // A second, empty instance: not set up yet, then set up with no sites, then a broken database.
     app("J04", "A02 Self-host home, not set up", "/", { auth: false, worker: "fresh" }),
@@ -390,6 +452,7 @@ function screens(fx) {
     // Built once at module load with no request data, so it follows the device only (no ?theme).
     s("J74", "S08 Platform error 500", site("anything"), { worker: "fresh", breakDb: true, status: 500, staticTheme: true }),
     s("J46", "S01 Unknown site", site("nosuch"), { status: 404 }),
+    s("J47", "S01 Reserved host", site("files", "x"), { status: 404 }),
     s("J48", "S01 Page not found", site("fx-site", "missing.html"), { status: 404 }),
     s("J49", "S01 Nothing published yet", site("fx-empty"), { status: 404 }),
     s("J50", "S01 Bad address 400", site("fx-site", "%ff"), { status: 400 }),
@@ -412,8 +475,9 @@ function screens(fx) {
     s("J60", "S05 CSV", site("fx-site", "data/table.csv")),
     s("J61", "S05 SVG", site("fx-site", "media/logo.svg")),
     s("J62", "S05 Image", site("fx-site", "media/photo.png")),
-    s("J63", "S05 PDF", site("fx-site", "docs/report.pdf")),
-    s("J64", "S05 Video", site("fx-site", "media/clip.webm"), { expectConsole: true }),
+    s("J63", "S05 PDF", site("fx-site", "docs/report.pdf"), { viewportOnly: true }), // a full-height layout
+    // The browser's own video control animates while it gives up on the (invalid) clip: masked for G6.
+    s("J64", "S05 Video", site("fx-site", "media/clip.webm"), { expectConsole: true, mask: ["video"] }),
     s("J65", "S05 Audio", site("fx-site", "media/tone.wav")),
     s("J66", "S05 Font", site("fx-site", "fonts/Mono.woff2")),
     s("J67", "S05 Code", site("fx-site", "src/app.py")),
@@ -430,10 +494,23 @@ function screens(fx) {
 // The former product name is assembled so the rebrand check does not flag this file.
 const BANNED = new RegExp(`\\b(${["drop", "way"].join("")}|scanned|virus|virus-free|verified)\\b`, "i");
 
+/** Refuse a selection that would run nothing (or not what was asked) before starting anything. */
+export function checkSelection(only = ONLY, widths = WIDTHS, modes = MODES) {
+  const ids = screens({ owner: "", anonExpired: "x", anonLive: "y" }).map((s) => s.id);
+  const unknown = [...(only ?? [])].filter((id) => !ids.includes(id));
+  if (unknown.length) throw new Error(`--only: no such screen ${unknown.join(", ")}`);
+  const badWidth = widths.filter((w) => !VIEWPORTS[w] || w === 320);
+  const badMode = modes.filter((m) => !["light", "dark", "auto-light", "auto-dark"].includes(m));
+  if (!widths.length || !modes.length || badWidth.length || badMode.length) throw new Error(`Nothing valid to run: widths ${widths.join(",") || "none"} (390, 768, 1440), modes ${modes.join(",") || "none"} (light, dark, auto-light, auto-dark)`);
+}
+
 async function main() {
+  checkSelection();
   if (!CHROME) throw new Error("No Chrome: set CHROME_PATH");
   mkdirSync(OUT, { recursive: true });
   const tmp = mkdtempSync(join(tmpdir(), "kofra-shots-"));
+  const maskDir = join(tmp, "masked");
+  mkdirSync(maskDir, { recursive: true });
   const { mf, db } = await startWorker(tmp);
   const fx = await seed(mf, db);
   const list = screens(fx).filter((s) => !ONLY || ONLY.has(s.id));
@@ -441,29 +518,38 @@ async function main() {
   const fresh = list.filter((s) => s.worker === "fresh").sort((a, b) => (a.needsOwner ? 1 : 0) + (a.breakDb ? 2 : 0) - ((b.needsOwner ? 1 : 0) + (b.breakDb ? 2 : 0)));
   const main = list.filter((s) => s.worker !== "fresh");
   const axeSource = readFileSync(join(ROOT, "node_modules/axe-core/axe.min.js"), "utf8");
-  const browser = await chromium.launch({ executablePath: CHROME, args: ["--no-sandbox", "--font-render-hinting=none", "--disable-gpu"] });
+  const browser = await chromium.launch({ executablePath: CHROME, args: ["--no-sandbox", "--font-render-hinting=none", "--disable-gpu", "--disable-lcd-text"] });
   const matrix = [];
+  const checks = {};
   try {
     let second = null;
     const record = (sc, mode, width, cell) => {
       matrix.push(cell);
       const bad = Object.entries(cell.gates).filter(([, v]) => !v.pass).map(([k]) => k);
-      console.log(`${sc.id} ${mode} ${width}: ${bad.length ? `FAIL ${bad.join(",")}` : "ok"}`);
+      console.log(`${sc.id} ${cell.pass === "matrix" ? "" : `${cell.pass} `}${mode} ${width}: ${bad.length ? `FAIL ${bad.join(",")}` : "ok"}`);
     };
-    const failCell = (sc, mode, width) => (e) => ({ screen: sc.id, title: sc.title, mode, width, file: null, gates: { harness: { pass: false, detail: String(e).slice(0, 300) } } });
-    // Seeded-instance cells run CONCURRENCY at a time (each in its own browser context).
-    // Screens that change the data (a new owner key, a new site, a new key) run after the rest, so lists stay as seeded.
-    const jobs = [];
-    for (const sc of [...main.filter((x) => !x.mutates), ...main.filter((x) => x.mutates)]) for (const mode of MODES) for (const width of WIDTHS) jobs.push([sc, mode, width]);
+    const failCell = (sc, mode, width, pass) => (e) => ({ screen: sc.id, title: sc.title, pass, mode, width, file: null, gates: { harness: { pass: false, detail: String(e).slice(0, 300) } } });
+    // Every screen: the 12 matrix cells, then (extra passes) Light at 320 px and, for FORCED, forced colours.
+    const jobsFor = (sc) => [
+      ...MODES.flatMap((mode) => WIDTHS.map((width) => [sc, mode, width, "matrix"])),
+      ...(EXTRA ? [[sc, "light", 320, "reflow"]] : []),
+      ...(EXTRA && FORCED.has(sc.id) ? [390, 1440].map((width) => [sc, "light", width, "forced"]) : []),
+    ];
+    const runOn = (worker, ctx) => async ([sc, mode, width, pass]) =>
+      record(sc, mode, width, await runCell(browser, worker, ctx, sc, mode, width, axeSource, { pass, maskDir }).catch(failCell(sc, mode, width, pass)));
+    // Read-only seeded-instance cells run CONCURRENCY at a time (each in its own browser context) and all finish
+    // first. Screens that change the data (a new owner key, a new site, a new key) then run one cell at a time
+    // and clean up after themselves, so every cell sees the data as seeded and no two mutating cells race.
+    const runOne = runOn(mf, fx);
+    const readOnly = main.filter((x) => !x.mutates).flatMap(jobsFor);
     let next = 0;
     await Promise.all(
       Array.from({ length: CONCURRENCY }, async () => {
-        while (next < jobs.length) {
-          const [sc, mode, width] = jobs[next++];
-          record(sc, mode, width, await runCell(browser, mf, fx, sc, mode, width, axeSource).catch(failCell(sc, mode, width)));
-        }
+        while (next < readOnly.length) await runOne(readOnly[next++]);
       }),
     );
+    for (const job of main.filter((x) => x.mutates).flatMap(jobsFor)) await runOne(job);
+    if (EXTRA && !ONLY) checks.themeSwitch = await themeSwitchChecks(browser, mf, fx);
     for (const sc of fresh) {
       if (!second) second = await startWorker(mkdtempSync(join(tmpdir(), "kofra-shots-fresh-")));
       if (sc.needsOwner && !second.owner) {
@@ -475,29 +561,355 @@ async function main() {
         await second.db.prepare("DROP TABLE sites").run().catch(() => {});
         second.broken = true;
       }
-      const ctx = { ...fx, owner: second.owner ?? fx.owner };
-      for (const mode of MODES) for (const width of WIDTHS) record(sc, mode, width, await runCell(browser, second.mf, ctx, sc, mode, width, axeSource).catch(failCell(sc, mode, width)));
+      const run = runOn(second.mf, { ...fx, owner: second.owner ?? fx.owner });
+      for (const job of jobsFor(sc)) await run(job);
     }
-    matrix.sort((a, b) => list.findIndex((s) => s.id === a.screen) - list.findIndex((s) => s.id === b.screen) || MODES.indexOf(a.mode) - MODES.indexOf(b.mode) || a.width - b.width);
+    // G6: auto with the OS light must equal light, and auto with the OS dark must equal dark, pixel for pixel.
+    for (const c of matrix.filter((x) => x.pass === "matrix" && x.mode.startsWith("auto-") && x.masked && !list.find((s) => s.id === x.screen)?.staticTheme)) {
+      const ref = matrix.find((x) => x.pass === "matrix" && x.screen === c.screen && x.width === c.width && x.mode === c.mode.replace("auto-", "") && x.masked);
+      if (!ref) continue;
+      const a = readFileSync(c.masked);
+      const b = readFileSync(ref.masked);
+      const same = a.equals(b) ? { diff: 0 } : await pixelDiff(browser, a, b);
+      c.gates.identity = { pass: same.diff === 0, detail: { against: ref.file, ...same } };
+      if (same.diff !== 0) {
+        // Keep the two masked images for whoever looks into it.
+        mkdirSync(join(OUT, "identity"), { recursive: true });
+        writeFileSync(join(OUT, "identity", c.file), a);
+        writeFileSync(join(OUT, "identity", ref.file), b);
+        console.log(`${c.screen} ${c.mode} ${c.width}: FAIL identity ${JSON.stringify(same)}`);
+      }
+    }
+    for (const c of matrix) delete c.masked;
+    matrix.sort((a, b) => list.findIndex((s) => s.id === a.screen) - list.findIndex((s) => s.id === b.screen) || PASSES.indexOf(a.pass) - PASSES.indexOf(b.pass) || MODES.indexOf(a.mode) - MODES.indexOf(b.mode) || a.width - b.width);
     if (second) await second.mf.dispose();
   } finally {
     await browser.close();
     await mf.dispose();
     rmSync(tmp, { recursive: true, force: true });
   }
-  writeFileSync(join(OUT, "matrix.json"), JSON.stringify({ generatedAt: new Date().toISOString(), target: "core", cells: matrix }, null, 1));
-  writeFileSync(join(OUT, "index.html"), gallery(list, matrix));
-  const failed = matrix.filter((c) => Object.values(c.gates).some((g) => !g.pass));
-  console.log(`${matrix.length} cells, ${failed.length} with a failing check. ${OUT}`);
+  writeFileSync(join(OUT, "matrix.json"), JSON.stringify({ generatedAt: new Date().toISOString(), target: "core", checks, cells: matrix }, null, 1));
+  writeFileSync(join(OUT, "index.html"), gallery(list, matrix, checks));
+  const { failed, switchFailed } = failures(matrix, checks);
+  console.log(`${matrix.length} cells, ${failed.length} with a failing check.${switchFailed.length ? ` Theme switch FAIL: ${switchFailed.join(", ")}.` : checks.themeSwitch ? " Theme switch ok." : ""} ${OUT}`);
+  // The matrix and gallery are written either way; the exit status says whether the run passed.
+  process.exitCode = exitCodeFor(matrix, checks);
 }
 
-async function runCell(browser, mf, fx, sc, mode, width, axeSource) {
+/** Cells with any failing check, and theme-switch checks that failed. */
+export function failures(matrix, checks = {}) {
+  return {
+    failed: matrix.filter((c) => Object.values(c.gates).some((g) => !g.pass)),
+    switchFailed: Object.entries(checks.themeSwitch ?? {}).filter(([, v]) => !v.pass).map(([k]) => k),
+  };
+}
+
+/** 0 only for a non-empty run in which every cell and every switch check passed. */
+export function exitCodeFor(matrix, checks = {}) {
+  const { failed, switchFailed } = failures(matrix, checks);
+  return matrix.length && !failed.length && !switchFailed.length ? 0 : 1;
+}
+
+const PASSES = ["matrix", "reflow", "forced"];
+
+/**
+ * G13 in the browser: the switch works with no script (form POST, 303 back, mode rendered by the server),
+ * in place where the dashboard script runs (no navigation, cookie written, persists across a reload), from the
+ * keyboard (Tab to it, Enter and Space), and Auto clears the choice.
+ */
+async function themeSwitchChecks(browser, mf, fx) {
+  const out = {};
+  const ctxOpts = { ...VIEWPORTS[1440], colorScheme: "light", timezoneId: "Europe/London", locale: "en-GB", ignoreHTTPSErrors: true, reducedMotion: "reduce" };
+  const redirects = [];
+  const open = async (auth) => {
+    const context = await browser.newContext(ctxOpts);
+    await context.route("**/*", async (route) => {
+      const req = route.request();
+      if (!/^https:\/\/([a-z0-9-]+\.)?kofra(-sites)?\.test\//.test(req.url())) return route.abort();
+      const body = req.postDataBuffer();
+      const sent = await req.allHeaders();
+      let res = await mf.dispatchFetch(req.url(), { method: req.method(), headers: sent, body: body && req.method() !== "GET" && req.method() !== "HEAD" ? body : undefined, redirect: "manual" });
+      // Chromium does not route the request that follows a fulfilled redirect, so the form POST's 303 is
+      // followed here: the browser gets the Set-Cookie of the 303 and the page it points to (loaded with
+      // the new cookie), and the hop is recorded for the check.
+      const setCookie = [];
+      if (req.method() === "POST" && res.status === 303) {
+        const location = res.headers.get("location");
+        const cookies = res.headers.getSetCookie?.() ?? [res.headers.get("set-cookie")].filter(Boolean);
+        setCookie.push(...cookies);
+        redirects.push({ from: new URL(req.url()).pathname, status: res.status, location, setCookie: cookies });
+        const jar = new Map((sent.cookie ?? "").split(/;\s*/).filter(Boolean).map((c) => [c.split("=")[0], c]));
+        for (const c of cookies) {
+          const pair = c.split(";")[0];
+          const name = pair.split("=")[0];
+          if (/max-age=0/i.test(c)) jar.delete(name);
+          else jar.set(name, pair);
+        }
+        const { "content-type": _ct, "content-length": _cl, cookie: _c, ...rest } = sent;
+        res = await mf.dispatchFetch(new URL(location, req.url()).href, { method: "GET", headers: { ...rest, cookie: [...jar.values()].join("; ") }, redirect: "manual" });
+      }
+      const headers = {};
+      res.headers.forEach((v, k) => {
+        headers[k] = v;
+      });
+      if (setCookie.length) headers["set-cookie"] = setCookie.join("\n");
+      await route.fulfill({ status: res.status, headers, body: Buffer.from(await res.arrayBuffer()) });
+    });
+    if (auth) await context.addInitScript((key) => location.hostname === "kofra.test" && sessionStorage.setItem("dropway.key", key), fx.owner);
+    return { context, page: await context.newPage() };
+  };
+  const cookie = async (context) => (await context.cookies(`${APP}/`)).find((c) => c.name === "__Host-dw_theme") ?? null;
+  const theme = (page) => page.evaluate(() => document.documentElement.getAttribute("data-theme"));
+  const record = (name, pass, detail) => {
+    out[name] = { pass, detail };
+    console.log(`theme switch ${name}: ${pass ? "ok" : `FAIL ${JSON.stringify(detail)}`}`);
+  };
+  // 1. No script (the 404 page runs none): POST, 303 back to the same page, rendered dark by the server.
+  {
+    const { context, page } = await open(false);
+    try {
+      await page.goto(`${APP}/nope?x=1`);
+      const scripts = await page.evaluate(() => document.scripts.length);
+      await Promise.all([page.waitForNavigation(), page.click('.k-mode-switch button[value="dark"]')]);
+      const c = await cookie(context);
+      const hop = redirects.at(-1);
+      const pressed = await page.getAttribute('.k-mode-switch button[value="dark"]', "aria-pressed");
+      record(
+        "no-script",
+        scripts === 0 && hop?.location === "/nope?x=1" && (await theme(page)) === "dark" && c?.value === "dark" && c.secure && c.path === "/" && c.sameSite === "Lax" && !c.httpOnly && c.expires > Date.now() / 1000 + 364 * 86400 && pressed === "true",
+        { scripts, hop, cookie: c, pressed },
+      );
+      await Promise.all([page.waitForNavigation(), page.click('.k-mode-switch button[value="auto"]')]);
+      record("no-script-auto", (await theme(page)) === null && (await cookie(context)) === null, { theme: await theme(page), cookie: await cookie(context), hop: redirects.at(-1) });
+    } catch (e) {
+      record("no-script", false, String(e).slice(0, 300));
+    } finally {
+      await context.close();
+    }
+  }
+  // 2. With the dashboard script: in place, no navigation; the cookie persists across a reload; keyboard works.
+  {
+    const { context, page } = await open(true);
+    try {
+      await page.goto(`${APP}/dashboard?theme=light`);
+      await page.waitForSelector("#dw-sites tbody tr");
+      await page.evaluate(() => (window.__marker = 1));
+      await page.click('.k-mode-switch button[value="dark"]');
+      await page.waitForFunction(() => document.documentElement.getAttribute("data-theme") === "dark");
+      const kept = await page.evaluate(() => window.__marker === 1);
+      const meta = await page.evaluate(() => [document.querySelector('meta[name="color-scheme"]').content, ...[...document.querySelectorAll('meta[name="theme-color"]')].map((m) => m.content)]);
+      const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+      const c = await cookie(context);
+      record("in-place", kept && c?.value === "dark" && bg === PAPER.dark && page.url() === `${APP}/dashboard` && meta.join(" ") === `only dark ${THEME_COLOR.dark} ${THEME_COLOR.dark}`, { kept, cookie: c?.value, bg, url: page.url(), meta });
+      await page.reload();
+      await page.waitForSelector("#dw-sites tbody tr");
+      await page.evaluate(() => (window.__marker = 2));
+      record("persists", (await theme(page)) === "dark" && (await page.getAttribute('.k-mode-switch button[value="dark"]', "aria-pressed")) === "true", { theme: await theme(page) });
+      // Keyboard: focus Light with Tab order, press Enter; then Auto with Space.
+      await page.focus('.k-mode-switch button[value="auto"]');
+      await page.keyboard.press("Tab");
+      const focused = await page.evaluate(() => document.activeElement?.getAttribute("value"));
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(() => document.documentElement.getAttribute("data-theme") === "light");
+      await page.focus('.k-mode-switch button[value="auto"]');
+      await page.keyboard.press("Space");
+      await page.waitForFunction(() => !document.documentElement.hasAttribute("data-theme"));
+      const after = await cookie(context);
+      record("keyboard", focused === "light" && after === null && (await page.evaluate(() => window.__marker === 2)), { focused, cookie: after });
+    } catch (e) {
+      record("in-place", false, String(e).slice(0, 300));
+    } finally {
+      await context.close();
+    }
+  }
+  return out;
+}
+
+/**
+ * G4 probe for the focused element (runs in the page): its ring (outline >= 2px or a box-shadow ring; CSS-only
+ * toggles show it on their label), the ring's WCAG contrast against what is behind it, whether it is in the
+ * viewport and not covered by another element, and whether it escaped an open dialog.
+ */
+const FOCUS_PROBE = () => {
+  const parse = (c) => {
+    let m = /^rgba?\(([^)]+)\)/.exec(c);
+    if (m) {
+      const p = m[1].split(/[\s,/]+/).filter(Boolean).map(Number);
+      return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+    }
+    m = /^color\(srgb ([^)]+)\)/.exec(c);
+    if (m) {
+      const p = m[1].split(/[\s/]+/).filter(Boolean).map(Number);
+      return { r: p[0] * 255, g: p[1] * 255, b: p[2] * 255, a: p.length > 3 ? p[3] : 1 };
+    }
+    return null;
+  };
+  const lum = (c) => {
+    const f = (v) => {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+  };
+  const ratio = (a, b) => {
+    const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+    return (x + 0.05) / (y + 0.05);
+  };
+  const bgBehind = (el) => {
+    for (let n = el; n; n = n.parentElement) {
+      const c = parse(getComputedStyle(n).backgroundColor);
+      if (c && c.a > 0.5) return c;
+    }
+    return parse(getComputedStyle(document.documentElement).backgroundColor) ?? { r: 255, g: 255, b: 255, a: 1 };
+  };
+  const el = document.activeElement;
+  if (!el || el === document.body || el === document.documentElement) return { end: true };
+  if (el.tagName === "IFRAME") return { frame: true };
+  el.__fwid ??= `${(window.__fwn = (window.__fwn ?? 0) + 1)}`;
+  // CSS-only toggles hide the input and show its ring on the label.
+  let ringEl = el;
+  const r0 = el.getBoundingClientRect();
+  if ((r0.width <= 2 || r0.height <= 2) && el.id) {
+    const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    if (l) ringEl = l;
+  }
+  const r = ringEl.getBoundingClientRect();
+  const cs = getComputedStyle(ringEl);
+  const ow = parseFloat(cs.outlineWidth) || 0;
+  const outline = cs.outlineStyle !== "none" && ow >= 2;
+  const shadow = !!cs.boxShadow && cs.boxShadow !== "none";
+  const ringColor = parse(outline ? cs.outlineColor : (/(rgba?\([^)]+\)|color\([^)]+\))/.exec(cs.boxShadow) ?? [])[0] ?? "");
+  const inset = outline && (parseFloat(cs.outlineOffset) || 0) < 0;
+  const behind = inset ? bgBehind(ringEl) : bgBehind(ringEl.parentElement ?? ringEl);
+  const contrast = ringColor ? Math.round(ratio(ringColor, behind) * 100) / 100 : null;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const inView = r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < vh && r.right > 0 && r.left < vw;
+  // WCAG 2.4.11: the focused element must not be entirely hidden by other content (a sticky bar, a toast).
+  // Sample its centre and four inset corners inside the viewport; it is covered only if every one is.
+  let covered = null;
+  if (inView) {
+    const clampX = (x) => Math.min(Math.max(x, 1), vw - 1);
+    const clampY = (y) => Math.min(Math.max(y, 1), vh - 1);
+    const pts = [
+      [r.left + r.width / 2, r.top + r.height / 2],
+      [r.left + 2, r.top + 2],
+      [r.right - 2, r.top + 2],
+      [r.left + 2, r.bottom - 2],
+      [r.right - 2, r.bottom - 2],
+    ];
+    const blockers = pts.map(([x, y]) => {
+      const hit = document.elementFromPoint(clampX(x), clampY(y));
+      return hit && hit !== ringEl && !ringEl.contains(hit) && !hit.contains(ringEl) && hit !== el && !el.contains(hit) ? hit : null;
+    });
+    if (blockers.every(Boolean)) {
+      const hit = blockers[0];
+      covered = hit.tagName.toLowerCase() + (hit.className && typeof hit.className === "string" ? `.${hit.className.trim().split(/\s+/).join(".")}` : "");
+    }
+  }
+  const open = document.querySelector("dialog[open]");
+  const name = el.tagName.toLowerCase() + (el.id ? `#${el.id}` : "") + (el.className && typeof el.className === "string" && el.className.trim() ? `.${el.className.trim().split(/\s+/).join(".")}` : "");
+  return {
+    key: el.__fwid,
+    name: `${name} "${(el.innerText || el.value || el.getAttribute("aria-label") || "").trim().slice(0, 30)}"`,
+    skip: el.classList.contains("k-skip"),
+    ring: outline || shadow,
+    width: outline ? ow : null,
+    contrast,
+    inView,
+    covered,
+    escaped: !!open && !open.contains(el),
+    inDialog: !!open && open.contains(el),
+  };
+};
+
+/** G4: Tab from the top of the page (or of an open dialog) through every focusable element, then Shift+Tab back. */
+async function focusWalk(page) {
+  await page.evaluate(() => {
+    const host = document.querySelector("dialog[open]") ?? document.body;
+    const start = document.createElement("span");
+    start.tabIndex = -1;
+    host.prepend(start);
+    start.focus();
+    start.remove();
+    if (host === document.body) window.scrollTo(0, 0);
+  });
+  const focusable = await page.evaluate(() => document.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select, textarea, [tabindex]:not([tabindex="-1"]), [contenteditable=""], [contenteditable=true], iframe, summary').length);
+  const stops = [];
+  let frames = 0;
+  for (let i = 0; i < 160; i++) {
+    await page.keyboard.press("Tab");
+    const st = await page.evaluate(FOCUS_PROBE);
+    if (st.end) break;
+    if (st.frame) {
+      if (++frames > 80) break;
+      continue;
+    }
+    if (stops.length && st.key === stops[0].key) break;
+    if (stops.some((x) => x.key === st.key)) continue;
+    stops.push(st);
+  }
+  // Shift+Tab back from the last stop must reach the previous ones (no traps).
+  let back = 0;
+  if (stops.length > 1) {
+    for (let i = 0; i < Math.min(stops.length - 1, 40); i++) {
+      await page.keyboard.press("Shift+Tab");
+      const st = await page.evaluate(FOCUS_PROBE);
+      if (st.frame) continue;
+      if (!st.end) back++;
+    }
+  }
+  return { stops, back, focusable };
+}
+
+/** Number of differing pixels between two PNGs (decoded by the browser), or a size mismatch (diff -1). */
+async function pixelDiff(browser, a, b) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  try {
+    return await page.evaluate(async ([x, y]) => {
+      const load = async (b64) => {
+        const img = new Image();
+        img.src = `data:image/png;base64,${b64}`;
+        await img.decode();
+        return img;
+      };
+      const [ia, ib] = await Promise.all([load(x), load(y)]);
+      if (ia.width !== ib.width || ia.height !== ib.height) return { diff: -1, size: `${ia.width}x${ia.height} vs ${ib.width}x${ib.height}` };
+      const c = new OffscreenCanvas(ia.width, ia.height);
+      const g = c.getContext("2d", { willReadFrequently: true });
+      g.drawImage(ia, 0, 0);
+      const da = g.getImageData(0, 0, ia.width, ia.height).data;
+      g.clearRect(0, 0, ia.width, ia.height);
+      g.drawImage(ib, 0, 0);
+      const db = g.getImageData(0, 0, ia.width, ia.height).data;
+      // A pixel differs when any channel is more than 2 of 255 apart; smaller deltas are rasteriser rounding
+      // on anti-aliased edges (seen as 1-unit changes on a few corner pixels), counted separately as noise.
+      let diff = 0;
+      let noise = 0;
+      for (let i = 0; i < da.length; i += 4) {
+        const d = Math.max(Math.abs(da[i] - db[i]), Math.abs(da[i + 1] - db[i + 1]), Math.abs(da[i + 2] - db[i + 2]), Math.abs(da[i + 3] - db[i + 3]));
+        if (d > 2) diff++;
+        else if (d > 0) noise++;
+      }
+      return { diff, noise };
+    }, [a.toString("base64"), b.toString("base64")]);
+  } finally {
+    await context.close();
+  }
+}
+
+async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
   const explicit = mode === "light" || mode === "dark" ? mode : null;
   const os = explicit ? (explicit === "dark" ? "light" : "dark") : mode.replace("auto-", "");
   const expected = explicit ?? os;
-  const context = await browser.newContext({ ...VIEWPORTS[width], colorScheme: os, timezoneId: "Europe/London", locale: "en-GB", ignoreHTTPSErrors: true, reducedMotion: "reduce" });
+  const pass = opts.pass ?? "matrix";
+  const context = await browser.newContext({ ...VIEWPORTS[width], colorScheme: os, timezoneId: "Europe/London", locale: "en-GB", ignoreHTTPSErrors: true, reducedMotion: "reduce", forcedColors: pass === "forced" ? "active" : "none" });
   const failed = [];
   const consoleMsgs = [];
+  const fontHeaders = [];
+  const redirects = [];
+  const css = [];
   await context.route("**/*", async (route) => {
     const req = route.request();
     const url = req.url();
@@ -509,13 +921,57 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource) {
     res.headers.forEach((v, k) => {
       out[k] = v;
     });
-    await route.fulfill({ status: res.status, headers: out, body: Buffer.from(await res.arrayBuffer()) });
+    const buf = Buffer.from(await res.arrayBuffer());
+    const path = new URL(url).pathname;
+    // Chromium does not route the request that follows a fulfilled redirect, so a redirected navigation
+    // (the app viewer's frame through __dropway/open) continues through a harness-made meta refresh, which
+    // is a new, routed request to the same Location.
+    const location = res.headers.get("location");
+    if (location && res.status >= 300 && res.status < 400 && req.isNavigationRequest()) {
+      const to = new URL(location, url).href.replace(/[&"<>]/g, (c) => ({ "&": "&amp;", '"': "&quot;", "<": "&lt;", ">": "&gt;" })[c]);
+      redirects.push(`${req.method()} ${path} ${res.status} -> ${location}`);
+      return route.fulfill({ status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }, body: `<!doctype html><meta http-equiv="refresh" content="0;url=${to}">` });
+    }
+    if (path.startsWith("/__dropway/fonts/") && path.endsWith(".woff2")) fontHeaders.push({ path, status: res.status, ...out });
+    if ((out["content-type"] ?? "").startsWith("text/css") || (out["content-type"] ?? "").startsWith("text/html")) css.push(buf.toString("utf8"));
+    await route.fulfill({ status: res.status, headers: out, body: buf });
   });
   if (explicit && sc.origin === "app") await context.addCookies([{ name: "__Host-dw_theme", value: explicit, url: `${APP}/`, secure: true, sameSite: "Lax" }]);
   await context.addInitScript(({ key, auth }) => {
     window.__cspViolations = [];
     document.addEventListener("securitypolicyviolation", (e) => window.__cspViolations.push(`${e.violatedDirective} ${e.blockedURI}`));
     if (auth && location.hostname === "kofra.test") sessionStorage.setItem("dropway.key", key);
+    // G9: layout shift while the page and its fonts load.
+    window.__cls = 0;
+    window.__shifts = [];
+    try {
+      new PerformanceObserver((l) => {
+        for (const e of l.getEntries()) {
+          if (e.hadRecentInput) continue;
+          // G9 counts shifts until the load event (fonts and CSS arriving); later shifts are the dashboard
+          // drawing the data it fetched, reported separately.
+          if (document.readyState === "complete") window.__clsAfter = (window.__clsAfter ?? 0) + e.value;
+          else window.__cls += e.value;
+          const n = (e.sources ?? [])[0]?.node;
+          const name = n ? (n.nodeType === 1 ? n.tagName.toLowerCase() + (n.id ? `#${n.id}` : "") + (typeof n.className === "string" && n.className ? `.${n.className.trim().split(/\s+/).join(".")}` : "") : "#text") : "?";
+          const src = (e.sources ?? [])[0];
+          const rect = (r) => (r ? `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}` : "");
+          window.__shifts.push(`${Math.round(e.value * 1000) / 1000} ${name} @${Math.round(e.startTime)}ms ${rect(src?.previousRect)} -> ${rect(src?.currentRect)}`);
+        }
+      }).observe({ type: "layout-shift", buffered: true });
+    } catch {}
+    // G7: the background behind every frame painted until load (top-level documents only).
+    if (window.top === window) {
+      window.__frames = [];
+      const sample = () => {
+        const html = getComputedStyle(document.documentElement).backgroundColor;
+        const body = document.body ? getComputedStyle(document.body).backgroundColor : null;
+        const pick = (c) => (c && c !== "rgba(0, 0, 0, 0)" && c !== "transparent" ? c : null);
+        window.__frames.push(pick(html) ?? pick(body) ?? "canvas");
+        if (document.readyState !== "complete" && window.__frames.length < 600) requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    }
   }, { key: fx.owner, auth: !!sc.auth });
   const page = await context.newPage();
   await page.clock.setFixedTime(FROZEN);
@@ -526,24 +982,44 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource) {
   page.on("response", (r) => {
     if (r.status() >= 400) failed.push(`${r.request().method()} ${new URL(r.url()).pathname} ${r.status()}`);
   });
+  // Requests that never got a response (blocked, unroutable). Cancellations (a frame moving on, media range
+  // requests) are normal browser behaviour and not counted.
+  page.on("requestfailed", (r) => {
+    const why = r.failure()?.errorText ?? "";
+    if (collecting && !/ERR_ABORTED/.test(why)) failed.push(`${r.method()} ${new URL(r.url()).pathname} ${why || "failed"}`);
+  });
   if (sc.before) await sc.before(page);
   let url = sc.url;
   if (explicit && sc.origin === "site") url += (url.includes("?") ? "&" : "?") + `theme=${explicit}`;
   const t0 = Date.now();
   let status = 0;
+  let firstHtml = "";
+  const state = {};
   try {
     const resp = await page.goto(url, { waitUntil: "load", timeout: 30000 });
     status = resp?.status() ?? 0;
+    firstHtml = (await resp?.text().catch(() => "")) ?? "";
     if (sc.wait) await page.waitForSelector(sc.wait, { timeout: 15000 }).catch(() => {});
-    if (sc.act) await sc.act(page);
+    if (sc.act) await sc.act(page, state);
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(sc.frame ? 900 : 200);
   } catch (e) {
     consoleMsgs.push(`harness: ${e.message.split("\n")[0]}`);
   }
-  const file = `${sc.id}-${mode}-${width}.png`;
+  // Full-page captures (and their masks) are taken from the top of the page.
+  await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+  const tag = pass === "forced" ? `forced-${width}` : `${mode}-${width}`;
+  const file = `${sc.id}-${tag}.png`;
   // Very tall pages (the truncated log) are captured one viewport high.
-  const png = await page.screenshot({ path: join(OUT, file), fullPage: !sc.viewportOnly }).catch(() => page.screenshot({ path: join(OUT, file) }));
+  const shot = (o = {}) => page.screenshot({ fullPage: !sc.viewportOnly, ...o }).catch(() => page.screenshot(o));
+  const png = await shot({ path: join(OUT, file) });
+  // G6 compares this copy: the switch (its pressed state differs by design) and per-cell secrets masked.
+  const masks = [".k-mode-switch", ...(sc.mask ?? [])].map((m) => page.locator(m));
+  let masked = null;
+  if (pass === "matrix" && opts.maskDir) {
+    masked = join(opts.maskDir, file);
+    await shot({ path: masked, mask: masks, maskColor: "#FF00FF", animations: "disabled", caret: "hide" });
+  }
   const probe = await page.evaluate((vw) => {
     // Elements that stick out past the viewport (a phone would zoom the whole page out to show them).
     const wide = [];
@@ -556,6 +1032,7 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource) {
     }
     const cs = getComputedStyle(document.body);
     const h1 = document.querySelector("h1");
+    const dur = (sel) => [...document.querySelectorAll(sel)].map((e) => getComputedStyle(e).transitionDuration).filter((d) => d.split(",").some((x) => parseFloat(x) > 0));
     return {
       theme: document.documentElement.getAttribute("data-theme"),
       bg: cs.backgroundColor,
@@ -566,50 +1043,123 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource) {
       text: document.body.innerText,
       csp: window.__cspViolations || [],
       wide: wide.slice(0, 6),
+      colorScheme: document.querySelector('meta[name="color-scheme"]')?.content ?? null,
+      themeColors: [...document.querySelectorAll('meta[name="theme-color"]')].map((m) => `${m.media}=${m.content}`),
+      cls: Math.round((window.__cls ?? 0) * 1000) / 1000,
+      shifts: (window.__shifts ?? []).slice(0, 5),
+      clsAfterLoad: Math.round((window.__clsAfter ?? 0) * 1000) / 1000,
+      frames: window.__frames ?? [],
+      motion: {
+        buttons: dur(".k-btn, .k-mode-switch button"),
+        skel: [...document.querySelectorAll(".k-skel")].map((e) => getComputedStyle(e).animationName).filter((n) => n !== "none"),
+        scroll: getComputedStyle(document.documentElement).scrollBehavior,
+      },
     };
   }, width);
   let axe = { violations: [] };
   collecting = false; // axe messages its frames; Chrome warns about cross-origin ones. Not the page's own output.
   try {
     await page.evaluate(axeSource);
-    axe = await page.evaluate(() => window.axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"] }, resultTypes: ["violations"] }));
+    // Forced colours: the user's system palette sets every colour, and axe reads the author colours, so its
+    // colour-contrast rule says nothing there (G12 checks the rest of axe and the focus rings).
+    const rules = pass === "forced" ? { "color-contrast": { enabled: false } } : {};
+    axe = await page.evaluate((rules) => window.axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"] }, rules, resultTypes: ["violations"] }), rules);
   } catch (e) {
     axe = { violations: [{ id: "axe-error", help: String(e).slice(0, 200), nodes: [] }] };
   }
+  // G4 runs last: it moves focus and scrolls.
+  const walk = sc.userPage || pass === "reflow" ? null : await focusWalk(page).catch((e) => ({ error: String(e).slice(0, 200), stops: [] }));
   await context.close();
-  const expectFailed = (sc.expectFailed ?? []).concat(sc.status ? [`${new URL(sc.url).pathname}`] : []);
-  const unexpected = failed.filter((f) => !expectFailed.some((x) => f.includes(x.replace(/^(GET|POST|PATCH) /, ""))) && !/\/favicon\.ico/.test(f));
+  if (sc.after) {
+    const api = async (path, init = {}) => {
+      const res = await mf.dispatchFetch(`${APP}/api/v1${path}`, { ...init, headers: { Authorization: `Bearer ${fx.owner}`, ...(init.headers ?? {}) } });
+      const text = await res.text();
+      try {
+        return JSON.parse(text);
+      } catch {
+        return text;
+      }
+    };
+    await sc.after(api, state).catch((e) => consoleMsgs.push(`harness clean-up: ${String(e).slice(0, 200)}`));
+  }
+  // Each failed request is "<METHOD> <path> <status>". An expected failure names the method and the exact path,
+  // and optionally the status; a screen that expects a status allows only its own navigation with that status.
+  const req = (x) => {
+    const [method, path, status] = x.split(" ");
+    return { method, path, status };
+  };
+  const expectFailed = (sc.expectFailed ?? []).concat(sc.status ? [`GET ${new URL(sc.url).pathname} ${sc.status}`] : []).map(req);
+  const unexpected = failed.filter((f) => {
+    const a = req(f);
+    return a.path !== "/favicon.ico" && !expectFailed.some((e) => e.method === a.method && e.path === a.path && (!e.status || e.status === a.status));
+  });
   const userContent = sc.id === "J70" || sc.id === "J72";
+  // Explicit modes pin the metas to the chosen colour; Auto lists both (PORT-SPEC 3.1). The static platform
+  // error page (S08) is built without request data and is always Auto.
+  const metaMode = sc.staticTheme ? "auto" : (explicit ?? "auto");
+  const metasOk =
+    metaMode === "auto"
+      ? probe.colorScheme === "light dark" && probe.themeColors.join(" ") === `(prefers-color-scheme: light)=${THEME_COLOR.light} (prefers-color-scheme: dark)=${THEME_COLOR.dark}`
+      : probe.colorScheme === `only ${metaMode}` && probe.themeColors.length === 2 && probe.themeColors.every((t) => t.endsWith(`=${THEME_COLOR[metaMode]}`));
+  const oldHex = OLD_HEX.filter((h) => css.some((t) => t.toLowerCase().includes(h)));
+  const badFont = fontHeaders.filter((h) => h.status !== 200 || h["content-type"] !== "font/woff2" || !/immutable/.test(h["cache-control"] ?? "") || h["access-control-allow-origin"] !== "*" || h["cross-origin-resource-policy"] !== "cross-origin" || h["x-content-type-options"] !== "nosniff");
+  const wantBg = PAPER[sc.staticTheme ? os : expected];
+  const frames = probe.frames.filter((f) => f !== wantBg);
+  const stops = walk?.stops ?? [];
+  // Under forced colours the rings are system colours (CanvasText on Canvas); computed backgrounds still
+  // report author colours there, so only the ring itself is checked.
+  const forced = pass === "forced";
+  const badStops = stops.filter((x) => !x.ring || (x.width !== null && x.width < 2) || (!forced && (x.contrast === null || x.contrast < 3)) || !x.inView || x.covered || x.escaped);
   const gates = {
     csp: { pass: probe.csp.length === 0, detail: probe.csp },
     console: { pass: sc.expectConsole ? true : consoleMsgs.filter((m) => !/Failed to load resource/.test(m) || unexpected.length).length === 0 && unexpected.length === 0, detail: [...consoleMsgs, ...unexpected] },
     axe: { pass: sc.userPage || axe.violations.length === 0, detail: axe.violations.map((v) => `${v.id}: ${v.help} (${v.nodes.length}) ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")}`) },
     overflow: { pass: sc.userPage || probe.scrollWidth <= width && probe.innerWidth <= width, detail: { scrollWidth: probe.scrollWidth, innerWidth: probe.innerWidth, wide: probe.wide } },
-    mode: { pass: sc.userPage || (sc.staticTheme ? probe.theme === null && probe.bg === PAPER[os] : (explicit ? probe.theme === explicit : probe.theme === null) && probe.bg === PAPER[expected]), detail: `data-theme=${probe.theme} bg=${probe.bg} expected ${expected}` },
+    mode: { pass: sc.userPage || forced || (sc.staticTheme ? probe.theme === null && probe.bg === PAPER[os] : (explicit ? probe.theme === explicit : probe.theme === null) && probe.bg === PAPER[expected]), detail: `data-theme=${probe.theme} bg=${probe.bg} expected ${expected}` },
     fonts: { pass: probe.fonts.sans && (!probe.h1Font || !probe.h1Font.includes("Newsreader") || probe.fonts.serif), detail: probe.fonts },
     brand: { pass: userContent || !BANNED.test(probe.text), detail: (probe.text.match(BANNED) ?? [])[0] ?? null },
     status: { pass: !sc.status || status === sc.status, detail: status },
+    tokens: { pass: sc.userPage || (metasOk && oldHex.length === 0), detail: { colorScheme: probe.colorScheme, themeColors: probe.themeColors, oldHex } },
+    fontload: { pass: badFont.length === 0 && probe.cls <= 0.02, detail: { cls: probe.cls, clsAfterLoad: probe.clsAfterLoad, shifts: probe.shifts, fonts: fontHeaders.length, bad: badFont.slice(0, 3) } },
+    motion: { pass: sc.userPage || (probe.motion.buttons.length === 0 && probe.motion.skel.length === 0 && probe.motion.scroll === "auto"), detail: probe.motion },
   };
-  return { screen: sc.id, title: sc.title, mode, width, file, sha256: createHash("sha256").update(png).digest("hex"), ms: Date.now() - t0, gates };
+  if (explicit && !sc.userPage && !sc.staticTheme && !forced) {
+    gates.flash = { pass: firstHtml.includes(`data-theme="${explicit}"`) && frames.length === 0, detail: { inHtml: firstHtml.includes(`data-theme="${explicit}"`), frames: probe.frames.length, other: [...new Set(frames)] } };
+  }
+  if (walk) {
+    // App pages start at "Skip to content"; with a dialog open, the walk starts (and must stay) inside it.
+    const needSkip = sc.origin === "app" && !sc.noSkip && !stops[0]?.inDialog;
+    gates.focus = {
+      pass: !walk.error && (stops.length > 0 || walk.focusable === 0) && badStops.length === 0 && (!needSkip || stops[0]?.skip === true) && (stops.length < 2 || walk.back > 0),
+      detail: { error: walk.error, focusable: walk.focusable, stops: stops.length, first: stops[0]?.name ?? null, back: walk.back, bad: badStops.slice(0, 4) },
+    };
+  }
+  return { screen: sc.id, title: sc.title, pass, mode, width, file, sha256: createHash("sha256").update(png).digest("hex"), masked, ms: Date.now() - t0, gates };
 }
 
-function gallery(list, matrix) {
+function gallery(list, matrix, checks = {}) {
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const label = (c) => (c.pass === "forced" ? `forced colours · ${c.width}px` : `${c.mode} · ${c.width}px${c.pass === "reflow" ? " (reflow)" : ""}`);
   const rows = list
     .map((sc) => {
       const cells = matrix.filter((c) => c.screen === sc.id);
       return `<section><h2>${esc(sc.id)} · ${esc(sc.title)}</h2><div class="g">${cells
         .map((c) => {
           const bad = Object.entries(c.gates).filter(([, v]) => !v.pass).map(([k]) => k);
-          return `<figure><a href="${esc(c.file)}"><img loading="lazy" src="${esc(c.file)}" alt="${esc(`${sc.id} ${c.mode} ${c.width}`)}"></a><figcaption>${esc(c.mode)} · ${c.width}px ${bad.length ? `<b>${esc(bad.join(", "))}</b>` : "ok"}</figcaption></figure>`;
+          return `<figure><a href="${esc(c.file)}"><img loading="lazy" src="${esc(c.file)}" alt="${esc(`${sc.id} ${label(c)}`)}"></a><figcaption>${esc(label(c))} ${bad.length ? `<b>${esc(bad.join(", "))}</b>` : "ok"}</figcaption></figure>`;
         })
         .join("")}</div></section>`;
     })
     .join("");
-  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kofra Security Print port: core screenshots</title><style>body{font:14px/1.5 system-ui,sans-serif;margin:24px;background:#f4efe2;color:#141414}h1{font-weight:600}section{margin:0 0 40px}.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}figure{margin:0}img{width:100%;height:260px;object-fit:cover;object-position:top;border:1px solid #b08d3c;background:#fff}b{color:#a8321f}</style><h1>Kofra Security Print port: core screens (${matrix.length} cells)</h1>${rows}`;
+  const sw = Object.entries(checks.themeSwitch ?? {})
+    .map(([k, v]) => `<li>${esc(k)}: ${v.pass ? "ok" : `<b>fail</b> ${esc(JSON.stringify(v.detail))}`}</li>`)
+    .join("");
+  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kofra Security Print port: core screenshots</title><style>body{font:14px/1.5 system-ui,sans-serif;margin:24px;background:#f4efe2;color:#141414}h1{font-weight:600}section{margin:0 0 40px}.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}figure{margin:0}img{width:100%;height:260px;object-fit:cover;object-position:top;border:1px solid #b08d3c;background:#fff}b{color:#a8321f}</style><h1>Kofra Security Print port: core screens (${matrix.length} cells)</h1>${sw ? `<h2>Theme switch (G13)</h2><ul>${sw}</ul>` : ""}${rows}`;
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(2);
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(2);
+  });
+}
