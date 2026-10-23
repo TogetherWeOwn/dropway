@@ -190,8 +190,8 @@ function observeCrypto() {
 }
 
 type Mutation = { ciphertext: Buffer; byte: "ciphertext" | "tag" };
-async function visit(url: string, mutation?: Mutation) {
-  const context = await browser.newContext();
+async function visit(url: string, mutation?: Mutation, viewport?: { width: number; height: number }) {
+  const context = await browser.newContext(viewport ? { viewport } : {});
   await context.addInitScript(observeCrypto);
   const wire: Wire[] = [];
   let altered = 0;
@@ -548,6 +548,57 @@ describe("encrypted publish acceptance against a real local Worker and Chromium"
       expect(text).toMatch(/navigat/i);
       expect(text).toMatch(/leak|disclos|send.{0,60}(?:data|content)|(?:data|content).{0,60}(?:leave|escape)/i);
       expect(text).not.toMatch(/network[- ]free|no[- ]network|no network (?:access|requests)|cannot (?:make|send) network/i);
+    } finally { await view.context.close(); }
+  });
+
+  it.each([
+    ["desktop", { width: 1280, height: 800 }],
+    ["narrow", { width: 360, height: 640 }],
+  ] as const)("loader warning after decryption stays in the viewport and unobscured: %s", async (_name, viewport) => {
+    const result = await encrypted();
+    const view = await visit(result.json.url, undefined, viewport);
+    try {
+      await restored(view);
+      await authenticatedRecords(view, fragmentKey(result.json.url).bytes);
+      // A full-viewport content iframe can hide the warning while innerText and
+      // ordinary visibility checks still pass. Sample the actual warning's text
+      // lines, not its container's box (which may include empty space).
+      const warning = await view.page.evaluate(() => {
+        const { document, innerWidth, innerHeight } = globalThis as any;
+        const walker = document.createTreeWalker(document.body, 4 /* SHOW_TEXT */);
+        const text: string[] = [];
+        const lines = [];
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (node.parentElement?.closest("script,style,noscript")) continue;
+          if (!/trust|navigat|leak|disclos/i.test(node.textContent)) continue;
+          text.push(node.textContent);
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          for (const rect of range.getClientRects()) {
+            if (rect.width <= 0 || rect.height <= 0) continue;
+            const y = rect.top + rect.height / 2;
+            lines.push({
+              inViewport: rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight,
+              samples: [0.1, 0.5, 0.9].map(fraction => {
+                const x = rect.left + rect.width * fraction;
+                const hit = document.elementFromPoint(x, y);
+                return { x, y, hit: hit?.tagName ?? null, unobscured: hit === node.parentElement };
+              }),
+            });
+          }
+        }
+        return { text: text.join(" "), lines };
+      });
+      expect(warning.text).toMatch(/trust/i);
+      expect(warning.text).toMatch(/navigat/i);
+      expect(warning.text).toMatch(/leak|disclos|send.{0,60}(?:data|content)/i);
+      expect(warning.lines.length, "the actual warning text must have rendered lines after successful authenticated restoration").toBeGreaterThan(0);
+      for (const line of warning.lines) {
+        expect(line.inViewport, "each warning text line must fit in the viewport without scrolling").toBe(true);
+        for (const sample of line.samples) {
+          expect(sample.unobscured, `warning text must be hit-testable after restoration; elementFromPoint(${sample.x}, ${sample.y}) hit ${sample.hit}`).toBe(true);
+        }
+      }
     } finally { await view.context.close(); }
   });
 
