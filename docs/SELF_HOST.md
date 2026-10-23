@@ -93,6 +93,8 @@ Variables go in `vars` in `wrangler.jsonc`; secrets with `npx wrangler secret pu
 | `SIGNING_SECRET` (secret) | bootstrap key | HMAC secret for password cookies and IP hashing |
 | `INSTANCE_NAME` | `Dropway` | Shown in pages and API responses |
 | `APP_ORIGIN` | request origin | Public origin of the app and API |
+| `LEGACY_APP_ORIGINS` | empty | Former app origins (comma-separated), after a move to a new `APP_ORIGIN`. See [Moving the app](#moving-the-app-to-a-new-origin) |
+| `LEGACY_DEPRECATED_AT` | none | Date of that move (ISO 8601 or Unix seconds), sent as `Deprecation: @<seconds>`; unset = no `Deprecation` header (the successor `Link` is still sent) |
 | `SITES_MODE` | `path` | `path` or `subdomain` (see below) |
 | `SITES_DOMAIN` | empty | Subdomain mode: sites at `https://<name>.<SITES_DOMAIN>/` |
 | `SITES_ORIGIN` | empty | Path mode: origin of a second, sites-only deployment of the same Worker |
@@ -175,6 +177,22 @@ certificate.
 
 To put the app itself on your domain too, add a Custom Domain route such as
 `{ "pattern": "dropway.example.com", "custom_domain": true }` and set `APP_ORIGIN` to match.
+
+### Moving the app to a new origin
+
+Keep `"workers_dev": true`, set `APP_ORIGIN` to the new origin and list the old one in
+`LEGACY_APP_ORIGINS` (for example `"https://dropway.<you>.workers.dev"`). On the old origin:
+
+- `/api/*`, `/mcp`, `/health`, `/.well-known/*`, `/llms.txt`, `/llms-full.txt`, `/openapi.json` and
+  `/skill.md` keep answering, with `Deprecation` and `Link: <new URL>; rel="successor-version"`
+  headers. They are not redirected: HTTP clients drop the `Authorization` header on a cross-origin
+  redirect, so a redirected agent would get 401. The CLI prints a one-line note with the new address.
+- Other `GET`/`HEAD` requests (pages, the dashboard, sign-in links) answer `308` to the same path and
+  query on the new origin. The redirect is not cached, so moving back works at once. It carries
+  `Access-Control-Allow-Origin: *` (never credentials), so cross-origin reads of published files at
+  their old URLs (`/s/<site>/...`) follow it; the new origin decides whether the read is allowed.
+  Other methods (webhooks, form posts) are served in place.
+- Browser sessions are per host: people sign in again on the new origin.
 
 ## Upgrades, backups, removal
 
