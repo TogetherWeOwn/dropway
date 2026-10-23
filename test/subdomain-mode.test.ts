@@ -90,6 +90,20 @@ describe("legacy path-mode sites origin (P1): 308 to the site's own origin, path
     expect(resolveConfig({ SITES_ORIGIN: OLD, LEGACY_SITES_ORIGINS: OLD }).legacySitesOrigins).toEqual([]);
     expect(resolveConfig({}).legacySitesOrigins).toEqual([]);
   });
+
+  it("keeps a legacy origin that SITES_ORIGIN still names in subdomain mode (ignored there), and redirects it", async () => {
+    // An operator moving from option B leaves SITES_ORIGIN set to the old sites Worker and lists it as legacy.
+    const vars = { APP_ORIGIN: APP, SITES_MODE: "subdomain", SITES_DOMAIN: "sites.test", SITES_ORIGIN: OLD, LEGACY_SITES_ORIGINS: OLD };
+    const c = resolveConfig(vars);
+    expect(c.sitesOrigin).toBeNull();
+    expect(c.legacySitesOrigins).toEqual([OLD]);
+    // The same vars as a deployed Worker: old links redirect instead of showing the app.
+    const { appOrigin, sitesMode, sitesDomain, sitesOrigin, legacySitesOrigins } = c;
+    const moved = await freshInstance({ appOrigin, sitesMode, sitesDomain, sitesOrigin, legacySitesOrigins });
+    const res = await moved.call(`${OLD}/my-site/a/b/c.txt?q=1`, { headers: NAV });
+    expect(res.status).toBe(308);
+    expect(res.headers.get("location")).toBe(`${site("my-site")}/a/b/c.txt?q=1`);
+  });
 });
 
 describe("reserved labels on the sites domain (P2)", () => {

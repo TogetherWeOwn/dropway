@@ -139,8 +139,10 @@ export function resolveConfig(vars: DropwayVars, overrides: ConfigOverrides = {}
     sitesMode = "path";
   }
   const appOrigin = overrides.appOrigin !== undefined ? overrides.appOrigin : normaliseOrigin(vars.APP_ORIGIN);
-  let sitesOrigin = overrides.sitesOrigin !== undefined ? overrides.sitesOrigin : normaliseOrigin(vars.SITES_ORIGIN);
-  if (sitesOrigin && appOrigin && sitesOrigin === appOrigin) sitesOrigin = null;
+  const sitesOriginVar = overrides.sitesOrigin !== undefined ? overrides.sitesOrigin : normaliseOrigin(vars.SITES_ORIGIN);
+  // The effective sites origin. SITES_ORIGIN applies in path mode only: subdomain mode ignores it,
+  // so a value left over from path mode must not drop that origin from LEGACY_SITES_ORIGINS below.
+  const sitesOrigin = sitesMode === "path" && sitesOriginVar !== appOrigin ? sitesOriginVar : null;
   const legacySitesOrigins =
     overrides.legacySitesOrigins ??
     [...new Set((vars.LEGACY_SITES_ORIGINS ?? "").split(/[\s,]+/).map(normaliseOrigin))].filter(
@@ -177,7 +179,7 @@ export function resolveConfig(vars: DropwayVars, overrides: ConfigOverrides = {}
     appOrigin,
     sitesMode,
     sitesDomain: sitesMode === "subdomain" ? sitesDomain : null,
-    sitesOrigin: sitesMode === "path" ? sitesOrigin : null,
+    sitesOrigin,
     legacySitesOrigins,
     sitesPathPrefix: (overrides.sitesPathPrefix ?? "/s").replace(/\/+$/, ""),
     // Sites that share the app origin are always sandboxed: they must never touch the app's storage.

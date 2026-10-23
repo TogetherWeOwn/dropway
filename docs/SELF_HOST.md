@@ -95,7 +95,7 @@ Variables go in `vars` in `wrangler.jsonc`; secrets with `npx wrangler secret pu
 | `APP_ORIGIN` | request origin | Public origin of the app and API |
 | `SITES_MODE` | `path` | `path` or `subdomain` (see below) |
 | `SITES_DOMAIN` | empty | Subdomain mode: sites at `https://<name>.<SITES_DOMAIN>/` |
-| `SITES_ORIGIN` | empty | Path mode: origin of a second, sites-only deployment of the same Worker |
+| `SITES_ORIGIN` | empty | Path mode: origin of a second, sites-only deployment of the same Worker. Ignored in subdomain mode |
 | `LEGACY_SITES_ORIGINS` | empty | Former path-mode sites origins (comma-separated): `<origin>/<name>/<path>` answers `308` to the site's current URL, path and query kept (not cached) |
 | `SITES_SANDBOX` | `auto` | `auto`: on a separate sites origin, sandbox anonymous sites only. `true`: sandbox every site. `false`: none. Always on when sites share the app origin |
 | `ANONYMOUS_PUBLISH` | `false` | Allow publishing without a key (sites expire; a claim token is returned) |
@@ -157,7 +157,7 @@ can never set or read the app's cookies.
      "APP_ORIGIN": "https://dropway.<you>.workers.dev",
      "SITES_MODE": "subdomain",
      "SITES_DOMAIN": "example-sites.com"
-     // ...keep the other vars
+     // ...keep the other vars; clear SITES_ORIGIN (subdomain mode ignores it)
    }
    ```
 
@@ -167,7 +167,8 @@ can never set or read the app's cookies.
 5. **Check**: `curl -sI https://anything.example-sites.com/` answers from Dropway (404, no such site),
    and a new publish returns `https://<name>.example-sites.com/`. Old `/s/<name>/` links on the app
    redirect to the new URLs. If sites were on a second Worker before (option B), set
-   `LEGACY_SITES_ORIGINS` to its old origin so `<old origin>/<name>/...` links redirect too.
+   `LEGACY_SITES_ORIGINS` to its old origin so `<old origin>/<name>/...` links redirect too, and
+   clear `SITES_ORIGIN`: subdomain mode ignores it (left set, it does not stop those redirects).
 
 In subdomain mode `www.<SITES_DOMAIN>` redirects to the app, and reserved names (`files`, `fallback`,
 `customers`, `api`, ...) are never served as sites. Site names are at most 56 characters, so a version
