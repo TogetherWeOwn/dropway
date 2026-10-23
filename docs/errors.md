@@ -82,6 +82,7 @@ Extension adapters can add codes and override guidance without changing built-in
 | `request_too_large` | 413 | false | Split the request or use manifest/upload/finalize instead of embedding file bytes. |
 | `route_not_found` | 404 | false | See /openapi.json for supported methods and endpoints. |
 | `scope_not_grantable` | 403 | false | Request only scopes held by both the caller and the target member's role. |
+| `site_changed` | 409 | false | Reload the site, reconcile the change, and retry manually. |
 | `site_not_found` | 404 | false | List sites with GET /api/v1/sites using the intended owner's credential. |
 | `site_too_large` | 413 | false | Split the content across several sites. |
 | `size_mismatch` | 400 | false | Recheck the file bytes, manifest size and Content-Length; send the raw file body. |

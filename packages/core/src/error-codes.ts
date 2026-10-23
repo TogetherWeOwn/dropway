@@ -68,6 +68,7 @@ export const ERROR_CODES: Readonly<Record<string, ErrorCode>> = {
   last_owner: { status: 409, retryable: false, hint: "Make another active member an owner before removing or demoting this owner." },
   member_exists: { status: 409, retryable: false, hint: "List members and use or update the existing member instead." },
   missing_blobs: { status: 409, retryable: false, hint: "PUT missing files' raw bytes to their upload URLs with the same credential, then finalize again." },
+  site_changed: { status: 409, retryable: false, hint: "Reload the site, reconcile the change, and retry manually." },
   slug_taken: { status: 409, retryable: false, hint: "Pick another slug, or omit it when creating a site to get a generated name." },
   version_conflict: { status: 409, retryable: false, hint: "Call get_site, reconcile the change, and retry using its live version ID as baseVersionId." },
   version_is_live: { status: 409, retryable: false, hint: "Restore or publish another version before deleting this one." },
