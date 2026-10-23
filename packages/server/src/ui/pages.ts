@@ -59,10 +59,10 @@ export async function homePage(c: Context<DropwayEnv>): Promise<Response> {
       "curl",
       `<p>One call publishes a page; the form field name is the file path.</p>${snippet(
         "dw-s-curl",
-        `curl ${o}/api/v1/publish \\\n  -H "Authorization: Bearer $DROPWAY_API_KEY" \\\n  -F "index.html=@index.html" -F "style.css=@style.css"`,
+        `curl ${o}/api/v1/publish \\\n  -H "Authorization: Bearer $KOFRA_API_KEY" \\\n  -F "index.html=@index.html" -F "style.css=@style.css"`,
       )}<p>A folder or build: zip it and send the zip.</p>${snippet(
         "dw-s-zip",
-        `cd dist && zip -qr ../site.zip . && cd ..\ncurl ${o}/api/v1/publish -H "Authorization: Bearer $DROPWAY_API_KEY" \\\n  -H "Content-Type: application/zip" --data-binary @site.zip`,
+        `cd dist && zip -qr ../site.zip . && cd ..\ncurl ${o}/api/v1/publish -H "Authorization: Bearer $KOFRA_API_KEY" \\\n  -H "Content-Type: application/zip" --data-binary @site.zip`,
       )}<p>Add <code>?slug=&lt;site&gt;</code> to publish a new version of the same site.</p>`,
     ],
     [
@@ -70,7 +70,7 @@ export async function homePage(c: Context<DropwayEnv>): Promise<Response> {
       "CLI",
       `<p>Hashes locally and uploads only files the server does not have.</p>${snippet(
         "dw-s-cli",
-        `export DROPWAY_API=${o}\nexport DROPWAY_API_KEY=dw_...\nnpx dropway publish ./dist`,
+        `export KOFRA_API=${o}\nexport KOFRA_API_KEY=dw_...\nnpx kofra publish ./dist`,
       )}`,
     ],
     [
@@ -78,10 +78,10 @@ export async function homePage(c: Context<DropwayEnv>): Promise<Response> {
       "MCP",
       `<p>Claude Code:</p>${snippet(
         "dw-s-mcp",
-        `claude mcp add --transport http dropway ${o}/mcp \\\n  --header "Authorization: Bearer $DROPWAY_API_KEY"`,
+        `claude mcp add --transport http kofra ${o}/mcp \\\n  --header "Authorization: Bearer $KOFRA_API_KEY"`,
       )}<p>Other clients (Streamable HTTP):</p>${snippet(
         "dw-s-mcpjson",
-        JSON.stringify({ mcpServers: { dropway: { type: "http", url: `${o}/mcp`, headers: { Authorization: "Bearer ${DROPWAY_API_KEY}" } } } }, null, 2),
+        JSON.stringify({ mcpServers: { kofra: { type: "http", url: `${o}/mcp`, headers: { Authorization: "Bearer ${KOFRA_API_KEY}" } } } }, null, 2),
       )}`,
     ],
     [
@@ -119,7 +119,7 @@ ${snippet("dw-s-setup", `curl -X POST ${o}/api/v1/setup \\\n  -H "Authorization:
 <li><strong>Publishing</strong>${anon ? `With an API key, or anonymously (anonymous sites expire after ${Math.round(dw.config.anonymous.ttlMs / 3600_000)} hours).` : "With an API key from this instance's owner. Anonymous publishing is off."} Files up to ${formatBytes(lim.maxFileBytes)}, ${lim.maxFiles.toLocaleString("en-US")} files per version.</li>
 <li><strong>Yours</strong>Runs on its owner's Cloudflare account. Open source, MIT licensed.</li>
 </ul>
-<footer class="dw-foot"><span>${e(name)} runs <a href="https://github.com/TogetherWeOwn/dropway">Dropway</a>, open source under the MIT license.</span><span><a href="/llms.txt">llms.txt</a> · <a href="/openapi.json">OpenAPI</a> · <a href="https://github.com/TogetherWeOwn/dropway/blob/main/docs/SELF_HOST.md">Host your own</a></span></footer>`;
+<footer class="dw-foot"><span>${e(name)} runs <a href="https://github.com/TogetherWeOwn/dropway">Kofra</a>, open source under the MIT license.</span><span><a href="/llms.txt">llms.txt</a> · <a href="/openapi.json">OpenAPI</a> · <a href="https://github.com/TogetherWeOwn/dropway/blob/main/docs/SELF_HOST.md">Host your own</a></span></footer>`;
   return renderAppPage(c, { title: name, page: "home", body, css: HOME_CSS, nav: false });
 }
 

@@ -22,8 +22,8 @@ describe("app pages", () => {
     expect(scriptSrc(html)).toBe(`/__dropway/ui/app-${CLIENT_HASH}.js`);
     expect(html).not.toMatch(/<script>(?!<)/); // no inline executable scripts
     expect(html).toContain("https://dropway.test/api/v1/publish");
-    expect(html).toContain("npx dropway publish ./dist");
-    expect(html).toContain("claude mcp add --transport http dropway https://dropway.test/mcp");
+    expect(html).toContain("npx kofra publish ./dist");
+    expect(html).toContain("claude mcp add --transport http kofra https://dropway.test/mcp");
     expect(html).toContain('data-page="home"');
     // The open-source edition never talks about money.
     expect(html).not.toMatch(/pric|billing|\bplans?\b|subscription|upgrade|checkout/i);
@@ -112,7 +112,7 @@ describe("app-origin file viewer (/v/:slug/*path)", () => {
     expect(boot(html).page).toEqual({ name: "viewer", slug, path: "docs/a b.md", siteUrl: `https://dropway.test/s/${slug}/` });
     // The framed view really is the embed variant (no bar), served sandboxed.
     const framed = await dw.call(`/s/${slug}/docs/a%20b.md?view=1&embed=1`, { headers: { "Sec-Fetch-Dest": "iframe" } });
-    expect(framed.headers.get("x-dropway-viewer")).toBe("markdown");
+    expect(framed.headers.get("x-kofra-viewer")).toBe("markdown");
     expect(framed.headers.get("content-security-policy")).toContain("sandbox");
     expect(await framed.text()).not.toContain('class="dw-vbar"');
   });

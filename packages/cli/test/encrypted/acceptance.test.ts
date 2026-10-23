@@ -113,7 +113,7 @@ async function cli(args: string[], opts: { bootstrap?: boolean } = {}): Promise<
     stdinIsTTY: false, stderrIsTTY: false, readStdin: async () => "",
     prompt: async () => { throw new Error("acceptance must not prompt"); },
     cwd: work,
-    env: { DROPWAY_API: api, DROPWAY_CONFIG_DIR: configDir, ...(opts.bootstrap ? { DROPWAY_BOOTSTRAP_KEY: bootstrap } : {}) },
+    env: { KOFRA_API: api, KOFRA_CONFIG_DIR: configDir, ...(opts.bootstrap ? { KOFRA_BOOTSTRAP_KEY: bootstrap } : {}) },
     fetch: async request => {
       expect(new URL(request.url).origin, "CLI must only contact the local Worker").toBe(api);
       const body = Buffer.from(await request.clone().arrayBuffer());

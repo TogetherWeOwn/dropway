@@ -1,10 +1,11 @@
 {
-  "name": "dropway",
+  "name": "kofra",
   "version": "0.1.0",
-  "description": "Publish files, folders and sites to a live URL on any Dropway instance. Built for AI agents: one command, JSON output, content-addressed uploads.",
+  "description": "Publish files, folders and sites to a live URL on any Kofra instance. Built for AI agents: one command, JSON output, content-addressed uploads.",
   "license": "MIT",
   "type": "module",
   "keywords": [
+    "kofra",
     "dropway",
     "hosting",
     "static-site",
@@ -23,6 +24,7 @@
     "directory": "packages/cli"
   },
   "bin": {
+    "kofra": "bin/dropway.mjs",
     "dropway": "bin/dropway.mjs"
   },
   "files": [

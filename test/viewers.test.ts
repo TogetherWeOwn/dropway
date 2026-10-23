@@ -230,7 +230,7 @@ describe("viewer pages", () => {
 
   it("code: highlighted lines with anchors, a hashed copy script, and a render cache", async () => {
     const res = await get("src/app.ts");
-    expect(res.headers.get("x-dropway-viewer")).toBe("code");
+    expect(res.headers.get("x-kofra-viewer")).toBe("code");
     const csp = res.headers.get("content-security-policy")!;
     expect(csp).toMatch(/script-src 'sha256-[A-Za-z0-9+/=]+'/);
     expect(csp).toContain("sandbox allow-scripts");
@@ -239,27 +239,27 @@ describe("viewer pages", () => {
     expect(html).toContain('href="#L2"');
     expect(html).toContain('<span class="hljs-keyword">export</span>');
     expect(html).toContain("typescript · 2 lines");
-    expect(res.headers.get("x-dropway-render-cache")).toBe("miss");
+    expect(res.headers.get("x-kofra-render-cache")).toBe("miss");
     const again = await get("src/app.ts");
-    expect(again.headers.get("x-dropway-render-cache")).toBe("memory");
+    expect(again.headers.get("x-kofra-render-cache")).toBe("memory");
     const etag = again.headers.get("etag")!;
     expect(etag).toMatch(/^W\/"code@1-[a-f0-9]{64}"$/);
     expect((await get("src/app.ts", { ...NAV, "If-None-Match": etag })).status).toBe(304);
     // Sub-resource requests still get the bytes.
     const script = await get("src/app.ts", { "Sec-Fetch-Dest": "script", Accept: "*/*" });
-    expect(script.headers.get("x-dropway-viewer")).toBeNull();
+    expect(script.headers.get("x-kofra-viewer")).toBeNull();
     expect(await script.text()).toContain("export const answer");
   });
 
   it("html: the page itself; ?view=1 frames it; ?view=source highlights it", async () => {
     const page = await get("index.html");
-    expect(page.headers.get("x-dropway-viewer")).toBeNull();
+    expect(page.headers.get("x-kofra-viewer")).toBeNull();
     expect(await page.text()).toContain("<p>home</p>");
     const frame = await get("index.html?view=1");
-    expect(frame.headers.get("x-dropway-viewer")).toBe("html-frame");
+    expect(frame.headers.get("x-kofra-viewer")).toBe("html-frame");
     expect(await frame.text()).toContain(`<iframe class="dw-frame" src="/s/${slug}/index.html"`);
     const src = await get("index.html?view=source");
-    expect(src.headers.get("x-dropway-viewer")).toBe("source");
+    expect(src.headers.get("x-kofra-viewer")).toBe("source");
     const html = await src.text();
     expect(html).toContain('<span class="hljs-tag">&lt;<span class="hljs-name">p</span>&gt;</span>');
     expect(html).toContain(">Page</a>");
@@ -267,7 +267,7 @@ describe("viewer pages", () => {
 
   it("json: collapsible tree and pretty view; invalid JSON shows the error", async () => {
     const res = await get("data/config.json");
-    expect(res.headers.get("x-dropway-viewer")).toBe("json");
+    expect(res.headers.get("x-kofra-viewer")).toBe("json");
     const html = await res.text();
     expect(html).toContain('<span class="dw-jk">nested</span>');
     expect(html).toContain("3 items");
@@ -287,8 +287,8 @@ describe("viewer pages", () => {
 
   it("images: zoomable with dimensions; sub-resources and iframes get the bytes", async () => {
     const res = await get("img/logo.png");
-    expect(res.headers.get("x-dropway-viewer")).toBe("image");
-    expect(res.headers.get("x-dropway-image-size")).toBe("64x32");
+    expect(res.headers.get("x-kofra-viewer")).toBe("image");
+    expect(res.headers.get("x-kofra-image-size")).toBe("64x32");
     expect(await res.text()).toContain(`<img src="/s/${slug}/img/logo.png" alt="logo.png" width="64" height="32">`);
     const img = await get("img/logo.png", { "Sec-Fetch-Dest": "image", Accept: "image/*" });
     expect(img.headers.get("content-type")).toBe("image/png");
@@ -299,12 +299,12 @@ describe("viewer pages", () => {
     const html = await (await get("img/icon.svg")).text();
     expect(html).toContain(`<img src="/s/${slug}/img/icon.svg"`);
     expect(html).not.toContain("alert(1)");
-    expect((await get("img/icon.svg?view=source")).headers.get("x-dropway-viewer")).toBe("source");
+    expect((await get("img/icon.svg?view=source")).headers.get("x-kofra-viewer")).toBe("source");
   });
 
   it("pdf, video, audio and fonts get players and specimens", async () => {
     const pdf = await get("docs/report.pdf");
-    expect(pdf.headers.get("x-dropway-viewer")).toBe("pdf");
+    expect(pdf.headers.get("x-kofra-viewer")).toBe("pdf");
     expect(pdf.headers.get("content-security-policy")).toContain("object-src https://dropway.test");
     expect(await pdf.text()).toContain(`<object class="dw-pdf" data="/s/${slug}/docs/report.pdf?raw=1" type="application/pdf"`);
     expect((await get("docs/report.pdf", IFRAME)).headers.get("content-type")).toBe("application/pdf");
@@ -318,18 +318,18 @@ describe("viewer pages", () => {
 
   it("binary: downloads on navigation, info page with ?view=1; text without a known type is shown as text", async () => {
     const nav = await get("bin/data.bin");
-    expect(nav.headers.get("x-dropway-viewer")).toBeNull();
+    expect(nav.headers.get("x-kofra-viewer")).toBeNull();
     expect(nav.headers.get("content-type")).toBe("application/octet-stream");
     const info = await get("bin/data.bin?view=1");
-    expect(info.headers.get("x-dropway-viewer")).toBe("binary");
+    expect(info.headers.get("x-kofra-viewer")).toBe("binary");
     const html = await info.text();
     expect(html).toContain("00000000  00 01 02 03 ff fe 41 42");
     expect(html).toContain("SHA-256");
     const lic = await get("LICENSE");
-    expect(lic.headers.get("x-dropway-viewer")).toBe("code");
+    expect(lic.headers.get("x-kofra-viewer")).toBe("code");
     expect(await lic.text()).toContain("Permission is hereby granted");
     const lock = await get("yarn.lock?view=1");
-    expect(lock.headers.get("x-dropway-viewer")).toBe("binary");
+    expect(lock.headers.get("x-kofra-viewer")).toBe("binary");
     expect(await lock.text()).toContain("it looks like text");
   });
 
@@ -360,7 +360,7 @@ describe("viewer pages", () => {
 
   it("folder listings show kinds, sizes and an image gallery", async () => {
     const res = await get("img/");
-    expect(res.headers.get("x-dropway-viewer")).toBe("listing");
+    expect(res.headers.get("x-kofra-viewer")).toBe("listing");
     const html = await res.text();
     expect(html).toContain('class="dw-gal"');
     expect(html).toContain(">SVG image<");

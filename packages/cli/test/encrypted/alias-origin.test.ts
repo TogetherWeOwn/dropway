@@ -39,7 +39,7 @@ async function cli(args: string[], setup = false) {
     stdout: text => void (stdout += text), stderr: text => void (stderr += text),
     stdinIsTTY: false, stderrIsTTY: false, readStdin: async () => "",
     prompt: async () => { throw Error("must not prompt"); }, cwd: work,
-    env: { DROPWAY_API: alias, DROPWAY_CONFIG_DIR: join(work, "credentials"), ...(setup ? { DROPWAY_BOOTSTRAP_KEY: bootstrap } : {}) },
+    env: { KOFRA_API: alias, KOFRA_CONFIG_DIR: join(work, "credentials"), ...(setup ? { KOFRA_BOOTSTRAP_KEY: bootstrap } : {}) },
     fetch: async request => {
       expect([alias, canonical].includes(new URL(request.url).origin), "CLI may only use the two actual loopback origins (upload URLs may be canonical)").toBe(true);
       return fetch(request);

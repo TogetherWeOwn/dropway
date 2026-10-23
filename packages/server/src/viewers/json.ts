@@ -105,7 +105,7 @@ export const jsonViewer: Viewer = {
         tabs,
         css: CODE_CSS + HIGHLIGHT_CSS + JSON_CSS,
         body: `<p class="dw-jerr" role="alert">This file is not valid JSON: ${escapeHtml(error)}</p><main class="dw-codewrap"><div class="dw-src">${html}</div></main>`,
-        headers: { "X-Dropway-Render-Cache": cache },
+        headers: { "X-Kofra-Render-Cache": cache },
       });
     }
     const tree = await cachedRender(vc.dw, `json@${JSON_VERSION}/tree/${vc.file.sha256}`, async () => renderJsonTree(parsed));
@@ -117,6 +117,6 @@ export const jsonViewer: Viewer = {
 <div class="dw-jpane dw-jtree">${tree.html}</div>
 ${pretty ? `<div class="dw-jpane dw-jpretty"><div class="dw-src">${pretty}</div></div>` : ""}
 </main>`;
-    return viewerPage(vc, { tabs, css: CODE_CSS + HIGHLIGHT_CSS + JSON_CSS, body, headers: { "X-Dropway-Render-Cache": tree.cache } });
+    return viewerPage(vc, { tabs, css: CODE_CSS + HIGHLIGHT_CSS + JSON_CSS, body, headers: { "X-Kofra-Render-Cache": tree.cache } });
   },
 };

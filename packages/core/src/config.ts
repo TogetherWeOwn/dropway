@@ -200,7 +200,7 @@ export function resolveConfig(vars: DropwayVars, overrides: ConfigOverrides = {}
   };
   const adminBootstrapKey = overrides.adminBootstrapKey !== undefined ? overrides.adminBootstrapKey : vars.ADMIN_BOOTSTRAP_KEY?.trim() || null;
   return {
-    instanceName: overrides.instanceName ?? (vars.INSTANCE_NAME?.trim() || "Dropway"),
+    instanceName: overrides.instanceName ?? (vars.INSTANCE_NAME?.trim() || "Kofra"),
     appOrigin,
     legacyAppOrigins,
     legacyDeprecatedAt: overrides.legacyDeprecatedAt ?? unixSeconds(vars.LEGACY_DEPRECATED_AT),

@@ -204,7 +204,7 @@ describe("read-back and site management", () => {
     expect(files.body.files[0].kind).toBe("json");
     const raw = await dw.call("/api/v1/sites/readback/files/index.html", { key: dw.ownerKey });
     expect(raw.headers.get("content-type")).toBe("text/plain; charset=utf-8");
-    expect(raw.headers.get("x-dropway-content-type")).toBe("text/html; charset=utf-8");
+    expect(raw.headers.get("x-kofra-content-type")).toBe("text/html; charset=utf-8");
     expect(raw.headers.get("etag")).toBe(`"${files.body.files[1].sha256}"`);
     expect(await raw.text()).toBe("<b>x</b>");
   });

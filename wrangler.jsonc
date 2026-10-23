@@ -1,4 +1,4 @@
-// Dropway: single-tenant, self-hosted deployment.
+// Kofra: single-tenant, self-hosted deployment.
 //
 // This file lives at the repository root on purpose: the Deploy to Cloudflare
 // button treats the chosen folder as the whole repository, so the Worker entry
