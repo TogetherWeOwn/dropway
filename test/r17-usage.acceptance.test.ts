@@ -245,7 +245,7 @@ describe("R-17 persisted usage lifecycle", () => {
     limit = null;
     expect((await claim()).status).toBe(200);
     expect(await usage(id)).toMatchObject({ sites: 2, storage_bytes: 9 });
-    expect((await claim()).status).toBe(409);
+    expect((await claim()).status).toBe(200); // The same owner can retry a completed claim safely.
     expect(await usage(id)).toMatchObject({ sites: 2, storage_bytes: 9 });
   });
 
