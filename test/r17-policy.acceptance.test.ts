@@ -356,6 +356,80 @@ describe("R-17 beforeOperation", () => {
     }
   });
 
+  it("MCP publish replay must honor a new beforeOperation refusal before exposing the cached result", async () => {
+    let paused = false;
+    const policy: PolicyContract = { limits, beforeOperation(_p, op) {
+      if (paused && op.id === "publish_site") throw new ApiError(403, "publishing_paused", "Publishing is paused.", "Retry after maintenance.");
+    } };
+    const dw = await freshInstance({}, { adapters: { policy } });
+    const mcp = await connectMcp(dw, dw.ownerKey);
+    try {
+      const args = { site: "replay-policy", files: [{ path: "index.txt", content: "once" }], idempotencyKey: "acceptance-replay-policy" };
+      const first = await mcp.call("publish_site", args);
+      expect(first.isError).toBe(false);
+      expect(first.data.version.id).toEqual(expect.any(String));
+      const allowed = await mcp.call("publish_site", args);
+      expect(allowed.isError).toBe(false);
+      expect(allowed.data).toMatchObject({ replayed: true, version: { id: first.data.version.id } });
+      paused = true;
+      const refused = await mcp.call("publish_site", args);
+      expect(refused.isError).toBe(true);
+      expect(refused.data.error).toMatchObject({ code: "publishing_paused", message: "Publishing is paused.", hint: "Retry after maintenance." });
+      expect(refused.data).not.toHaveProperty("version");
+      expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM versions").first<{ n: number }>())!.n).toBe(1);
+      paused = false;
+      const resumed = await mcp.call("publish_site", args);
+      expect(resumed.isError).toBe(false);
+      expect(resumed.data).toMatchObject({ replayed: true, version: { id: first.data.version.id } });
+      expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM versions").first<{ n: number }>())!.n).toBe(1);
+    } finally { await mcp.client.close(); }
+  });
+
+  it.each(["policy", "binding"])("MCP extension replay rechecks capability after %s availability changes", async (change) => {
+    let allowed = true;
+    let calls = 0;
+    const capability = change === "binding" ? "screenshots" as const : "site_password" as const;
+    const policy: PolicyContract = { limits, capability(_p, name) {
+      return !allowed && change === "policy" && name === capability
+        ? { allowed: false, error: new ApiError(403, "capability_paused", "Feature is paused.", "Ask the instance administrator.") }
+        : { allowed: true };
+    } };
+    const op = { ...echoOperation({
+      output: z.object({ message: z.string(), count: z.number(), replayed: z.boolean().optional() }),
+      async handler(input) { calls++; return input; },
+    }), capability, tool: { idempotent: true } };
+    const dw = await freshInstance({}, { operations: [op], adapters: { policy } });
+    // Binding-presence sentinel only: echo never calls the browser or any external service.
+    let bindings = { ...env, BROWSER: { fetch: async () => new Response("unused") } } as unknown as ServerBindings & Record<string, unknown>;
+    const bound: Instance = { ...dw, dropway: { ...dw.dropway,
+      fetch: (request, _env, ctx) => dw.dropway.fetch(request, bindings, ctx),
+    } };
+    const mcp = await connectMcp(bound, dw.ownerKey);
+    try {
+      const args = { message: "cached capability", count: 1, idempotencyKey: "acceptance-replay-capability" };
+      expect((await mcp.call("acceptance_echo", args)).isError).toBe(false);
+      const cached = await mcp.call("acceptance_echo", args);
+      expect(cached.isError, cached.text).toBe(false);
+      expect(cached.data).toMatchObject({ message: "cached capability", count: 1, replayed: true });
+      expect(calls).toBe(1);
+      allowed = false;
+      if (change === "binding") {
+        bindings = { ...env } as unknown as ServerBindings & Record<string, unknown>;
+        delete bindings.BROWSER;
+      }
+      const refused = await mcp.call("acceptance_echo", args);
+      expect(refused.isError).toBe(true);
+      if (change === "binding") {
+        expect(refused.data.error.code).toBe("feature_unavailable");
+        expect(JSON.stringify(refused.data.error.details.requires)).toContain("BROWSER");
+      } else {
+        expect(refused.data.error).toMatchObject({ code: "capability_paused", hint: "Ask the instance administrator." });
+      }
+      expect(refused.data).not.toHaveProperty("message");
+      expect(calls).toBe(1);
+    } finally { await mcp.client.close(); }
+  });
+
   it("runs for core registry operations, not only extension operations", async () => {
     const seen: string[] = [];
     const policy: PolicyContract = { limits, beforeOperation(_p, op) { seen.push(op.id); } };
