@@ -15,13 +15,14 @@ function issuerState(issuer: string): IssuerState {
   let state = issuers.get(issuer);
   if (!state) {
     if (issuers.size >= MAX_ISSUERS) {
-      const idle = [...issuers].find(([, entry]) => !entry.pending);
+      const idle = [...issuers].find(([, entry]) => !entry.pending && Date.now() >= entry.refreshAt);
       if (!idle) throw new Error("Access key cache is busy");
       issuers.delete(idle[0]);
     }
     state = { refreshAt: 0 };
   }
-  // Least recently used idle states are the first eviction candidates.
+  // Keep cooling states pinned so eviction cannot erase their fetch limit.
+  // Least recently used idle states are the first eligible eviction candidates.
   issuers.delete(issuer);
   issuers.set(issuer, state);
   return state;
@@ -91,7 +92,14 @@ export async function accessVerificationKey(issuer: string, kid: string): Promis
     entry = keyset && Date.now() < keyset.expiresAt ? keyset.keys.get(kid) : undefined;
   }
   if (!keyset || !entry) throw new Error("Unknown or expired Access key");
-  const key = await importKey(entry);
+  let key: CryptoKey;
+  try { key = await importKey(entry); }
+  catch (error) {
+    // An unusable lazy key must become a miss, not a cached rejected import.
+    // Keep the other keys and the issuer cooldown; recovery uses normal refresh.
+    keyset.keys.delete(kid);
+    throw error;
+  }
   if (Date.now() >= keyset.expiresAt) throw new Error("Expired Access key");
   return { key, expiresAt: keyset.expiresAt };
 }
