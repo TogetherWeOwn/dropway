@@ -2,6 +2,9 @@
    loading rows, key-value lists, URLs with copy, secrets shown once, toasts. */
 .page{min-height:100vh;display:flex;flex-direction:column}
 .page>main{flex:1 0 auto}
+/* Dashboard pages draw their content after fetching it: the footer starts below the fold, so it is never
+   pushed down in view while they do. */
+.page:is([data-page=sites],[data-page=site],[data-page=publish],[data-page=keys],[data-page=settings])>main{min-height:100vh}
 .main{width:100%;max-width:1200px;margin:0 auto;padding:var(--s7) var(--s7) var(--s10)}
 .main-wide{flex:1;display:flex;min-height:0}
 .narrow{max-width:34rem;margin:0 auto}
