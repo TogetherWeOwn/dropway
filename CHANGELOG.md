@@ -16,9 +16,21 @@
 
 ### Extension API
 
-- Export `EXTENSION_API_VERSION = 1` from `@dropway/server`, identifying the
-  current public embedding contract. Extension API changes must update this
-  version and this section.
+- Advance `EXTENSION_API_VERSION` from 1 to 2. Add public core
+  `AtomicWriteExtension`, `SiteNameMutation` and optional
+  `PolicyAdapter.siteNameMutation`: every concrete site create/rename candidate
+  composes core and extension SQL in one same-D1 batch. SQL refusal rolls back
+  all statements; only precise 409 `slug_taken` conflicts retry generated names.
+  Legacy `beforeCreateSite` remains a non-atomic, once-per-create preflight.
+- Fence rename identity/previous name inside its batch; stale preparation fails
+  with 409 `site_changed`, without extension residue or cache changes.
+- Export `createTenantWithOwner`, `CreateTenantWithOwnerInput` and
+  `CreateTenantWithOwnerOptions` for low-level atomic tenant/owner/extension SQL.
+  Existing helpers retain field rules; setup uses the new helper. Key minting,
+  setup admission races and cross-database/storage/network effects are excluded.
+- Pin the additive types, deterministic competing-writer/rollback/cache behavior
+  and version in independent disposable workerd/D1 acceptance tests. No core
+  schema changes or additional public routes.
 - Cover existing identity, policy limits and refusals, all five metering events,
   all three hooks, API middleware, route overrides and app routes, contexts,
   MCP tools and endpoint replacement, UI slots, viewers and scheduled work in
