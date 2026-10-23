@@ -37,6 +37,7 @@ const OUT = resolve(arg("out", join(ROOT, "e2e-design-out")));
 const ONLY = arg("only", "") ? new Set(arg("only").split(",")) : null;
 const WIDTHS = arg("widths", "390,768,1440").split(",").map(Number);
 const MODES = arg("modes", "light,dark,auto-light,auto-dark").split(",");
+const CONCURRENCY = Number(arg("concurrency", "4"));
 const CHROME =
   process.env.CHROME_PATH ||
   [1248, 1234, 1200].map((v) => `/home/ubuntu/.cache/ms-playwright/chromium_headless_shell-${v}/chrome-headless-shell-linux64/chrome-headless-shell`).find(existsSync);
@@ -379,6 +380,12 @@ function screens(fx) {
     app("J42", "A24 Claim a site", `/claim?slug=${fx.anonLive}`, { auth: false }),
     app("J43", "A25 Encrypted site wrapper", "/__dropway/encrypted/fx-site", { auth: false, expectConsole: true, expectFailed: ["GET /encrypted.bin"] }),
     app("J44", "A26 Not found", "/nope", { auth: false, status: 404 }),
+    // A second, empty instance: not set up yet, then set up with no sites, then a broken database.
+    app("J04", "A02 Self-host home, not set up", "/", { auth: false, worker: "fresh" }),
+    app("J11", "A07 API-key sign-in, not set up", "/login", { auth: false, worker: "fresh" }),
+    app("J14", "A08 Sites, empty", "/dashboard", { worker: "fresh", needsOwner: true, wait: ".k-empty" }),
+    // Built once at module load with no request data, so it follows the device only (no ?theme).
+    s("J74", "S08 Platform error 500", site("anything"), { worker: "fresh", breakDb: true, status: 500, staticTheme: true }),
     s("J46", "S01 Unknown site", site("nosuch"), { status: 404 }),
     s("J48", "S01 Page not found", site("fx-site", "missing.html"), { status: 404 }),
     s("J49", "S01 Nothing published yet", site("fx-empty"), { status: 404 }),
@@ -426,20 +433,48 @@ async function main() {
   const { mf, db } = await startWorker(tmp);
   const fx = await seed(mf, db);
   const list = screens(fx).filter((s) => !ONLY || ONLY.has(s.id));
+  // Fresh-instance screens run last, in order: not set up, then set up (no sites), then a broken database.
+  const fresh = list.filter((s) => s.worker === "fresh").sort((a, b) => (a.needsOwner ? 1 : 0) + (a.breakDb ? 2 : 0) - ((b.needsOwner ? 1 : 0) + (b.breakDb ? 2 : 0)));
+  const main = list.filter((s) => s.worker !== "fresh");
   const axeSource = readFileSync(join(ROOT, "node_modules/axe-core/axe.min.js"), "utf8");
   const browser = await chromium.launch({ executablePath: CHROME, args: ["--no-sandbox", "--font-render-hinting=none", "--disable-gpu"] });
   const matrix = [];
   try {
-    for (const sc of list) {
-      for (const mode of MODES) {
-        for (const width of WIDTHS) {
-          const cell = await runCell(browser, mf, fx, sc, mode, width, axeSource).catch((e) => ({ screen: sc.id, title: sc.title, mode, width, file: null, gates: { harness: { pass: false, detail: String(e).slice(0, 300) } } }));
-          matrix.push(cell);
-          const bad = Object.entries(cell.gates).filter(([, v]) => !v.pass).map(([k]) => k);
-          console.log(`${sc.id} ${mode} ${width}: ${bad.length ? `FAIL ${bad.join(",")}` : "ok"}`);
+    let second = null;
+    const record = (sc, mode, width, cell) => {
+      matrix.push(cell);
+      const bad = Object.entries(cell.gates).filter(([, v]) => !v.pass).map(([k]) => k);
+      console.log(`${sc.id} ${mode} ${width}: ${bad.length ? `FAIL ${bad.join(",")}` : "ok"}`);
+    };
+    const failCell = (sc, mode, width) => (e) => ({ screen: sc.id, title: sc.title, mode, width, file: null, gates: { harness: { pass: false, detail: String(e).slice(0, 300) } } });
+    // Seeded-instance cells run CONCURRENCY at a time (each in its own browser context).
+    const jobs = [];
+    for (const sc of main) for (const mode of MODES) for (const width of WIDTHS) jobs.push([sc, mode, width]);
+    let next = 0;
+    await Promise.all(
+      Array.from({ length: CONCURRENCY }, async () => {
+        while (next < jobs.length) {
+          const [sc, mode, width] = jobs[next++];
+          record(sc, mode, width, await runCell(browser, mf, fx, sc, mode, width, axeSource).catch(failCell(sc, mode, width)));
         }
+      }),
+    );
+    for (const sc of fresh) {
+      if (!second) second = await startWorker(mkdtempSync(join(tmpdir(), "kofra-shots-fresh-")));
+      if (sc.needsOwner && !second.owner) {
+        const r = await second.mf.dispatchFetch(`${APP}/api/v1/setup`, { method: "POST", headers: { Authorization: `Bearer ${BOOT}`, "Content-Type": "application/json" }, body: JSON.stringify({ email: "new@kofra.test" }) });
+        second.owner = (await r.json()).apiKey.key;
       }
+      if (sc.breakDb && !second.broken) {
+        await second.db.prepare("DROP TABLE version_files").run().catch(() => {});
+        await second.db.prepare("DROP TABLE sites").run().catch(() => {});
+        second.broken = true;
+      }
+      const ctx = { ...fx, owner: second.owner ?? fx.owner };
+      for (const mode of MODES) for (const width of WIDTHS) record(sc, mode, width, await runCell(browser, second.mf, ctx, sc, mode, width, axeSource).catch(failCell(sc, mode, width)));
     }
+    matrix.sort((a, b) => list.findIndex((s) => s.id === a.screen) - list.findIndex((s) => s.id === b.screen) || MODES.indexOf(a.mode) - MODES.indexOf(b.mode) || a.width - b.width);
+    if (second) await second.mf.dispose();
   } finally {
     await browser.close();
     await mf.dispose();
@@ -544,8 +579,8 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource) {
     csp: { pass: probe.csp.length === 0, detail: probe.csp },
     console: { pass: sc.expectConsole ? true : consoleMsgs.filter((m) => !/Failed to load resource/.test(m) || unexpected.length).length === 0 && unexpected.length === 0, detail: [...consoleMsgs, ...unexpected] },
     axe: { pass: sc.userPage || axe.violations.length === 0, detail: axe.violations.map((v) => `${v.id}: ${v.help} (${v.nodes.length}) ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")}`) },
-    overflow: { pass: probe.scrollWidth <= width && probe.innerWidth <= width, detail: { scrollWidth: probe.scrollWidth, innerWidth: probe.innerWidth, wide: probe.wide } },
-    mode: { pass: sc.userPage || (explicit ? probe.theme === explicit : probe.theme === null) && probe.bg === PAPER[expected], detail: `data-theme=${probe.theme} bg=${probe.bg} expected ${expected}` },
+    overflow: { pass: sc.userPage || probe.scrollWidth <= width && probe.innerWidth <= width, detail: { scrollWidth: probe.scrollWidth, innerWidth: probe.innerWidth, wide: probe.wide } },
+    mode: { pass: sc.userPage || (sc.staticTheme ? probe.theme === null && probe.bg === PAPER[os] : (explicit ? probe.theme === explicit : probe.theme === null) && probe.bg === PAPER[expected]), detail: `data-theme=${probe.theme} bg=${probe.bg} expected ${expected}` },
     fonts: { pass: probe.fonts.sans && (!probe.h1Font || !probe.h1Font.includes("Newsreader") || probe.fonts.serif), detail: probe.fonts },
     brand: { pass: userContent || !BANNED.test(probe.text), detail: (probe.text.match(BANNED) ?? [])[0] ?? null },
     status: { pass: !sc.status || status === sc.status, detail: status },

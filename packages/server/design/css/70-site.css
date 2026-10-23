@@ -8,7 +8,6 @@
 .vbar .wm{font-size:15px}
 .vfile{display:flex;align-items:center;gap:10px;min-width:0;flex:1 1 18rem;flex-wrap:wrap}
 .vfile .crumbs{flex:1 1 10rem}
-.vmeta{flex:none;color:var(--ink-2);white-space:nowrap;font-size:12.5px}
 .vbar .btnrow{gap:6px;flex:none}
 .vbar .trust{font-size:12px;margin:0 0 0 auto}
 .vtrust{max-width:60rem;margin:var(--s7) auto var(--s5);padding:12px var(--s5) 0;border-top:1px solid var(--rule-soft)}

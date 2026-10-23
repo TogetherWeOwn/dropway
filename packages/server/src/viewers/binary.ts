@@ -92,7 +92,7 @@ export const binaryViewer: Viewer = {
       .map(([k, v]) => `<tr><th scope="row">${escapeHtml(k)}</th><td class="${k === "SHA-256" ? "k-mono k-break" : "k-break"}">${escapeHtml(v)}</td></tr>`)
       .join("")}</table></div>
 <h2 class="k-binh2">First ${Math.min(256, head.byteLength)} bytes</h2>
-<pre class="k-hex">${escapeHtml(hexDump(head.subarray(0, 256)))}</pre></main>`;
+<pre class="k-hex" tabindex="0" aria-label="First bytes, hexadecimal">${escapeHtml(hexDump(head.subarray(0, 256)))}</pre></main>`;
     return viewerPage(vc, {
       tabs: standardTabs(vc, { rendered: "Info", raw: false }),
       body,

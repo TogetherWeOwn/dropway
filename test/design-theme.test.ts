@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { APP_PAGE_CSP, THEME_COOKIE } from "@dropway/server";
 import { APP_CSS_HASH, THEME_COLORS } from "../packages/server/src/ui/design.generated";
 import { FONT_FILES } from "../packages/server/src/ui/fonts.generated";
+import { sanitizeHtml } from "../packages/server/src/viewers/sanitize";
 import { ORIGIN, form, freshInstance } from "./helpers";
 
 /** Security Print colour modes (PORT-SPEC 3) and the CSP each page class ships with (PORT-SPEC 7). */
@@ -152,6 +153,31 @@ describe("CSP: no inline script, no external font origin", () => {
     expect(listing.headers.get("x-kofra-viewer")).toBe("listing");
     expect(listing.headers.get("content-security-policy")).toContain(`font-src ${ORIGIN};`);
     expect(await listing.text()).not.toContain("<script");
+  });
+});
+
+describe("user content cannot wear Kofra's chrome", () => {
+  it("the sanitizer drops k- and dw- classes and ids, keeping the rest", async () => {
+    expect(await sanitizeHtml('<p class="k-banner k-ok note">x</p>')).toBe('<p class="note">x</p>');
+    expect(await sanitizeHtml('<div id="dw-main" class="k-btn">y</div>')).toBe("<div>y</div>");
+    expect(await sanitizeHtml('<h2 id="setup" class="intro">z</h2>')).toBe('<h2 id="setup" class="intro">z</h2>');
+  });
+});
+
+describe("error pages", () => {
+  it("app 500: an HTML page for navigations (no script, APP_PAGE_CSP, request id), text for everything else", async () => {
+    const dw = await freshInstance({}, { routes: [({ app }) => void app.get("/boom", () => { throw new Error("kaboom"); })] });
+    const page = await dw.call("/boom", { headers: { Accept: "text/html", "cf-ray": "ray-123" } });
+    expect(page.status).toBe(500);
+    expect(page.headers.get("content-security-policy")).toBe(APP_PAGE_CSP);
+    const html = await page.text();
+    expect(html).toContain("Something went wrong on our side");
+    expect(html).toContain('<span class="k-mono">ray-123</span>');
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("kaboom");
+    const api = await dw.call("/boom");
+    expect(api.status).toBe(500);
+    expect(await api.text()).toBe("Internal error");
   });
 });
 
