@@ -1,6 +1,6 @@
 /**
  * Public acceptance contract (PUB-20): root action.yml, composite bash steps.
- * Inputs: folder, api (Dropway instance), token (Dropway key), github-token.
+ * Inputs: folder, api (Kofra instance), token (Kofra key), github-token.
  * Outputs: url and slug on publish. Same repository + PR updates one preview;
  * another repository or PR gets another preview. Closed events need no folder.
  * Missing credentials and untrusted events must have no external side effects.
@@ -158,7 +158,7 @@ async function preview(options: { repository?: string; number?: number; action?:
       PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, HOME: temp, RUNNER_TEMP: temp,
       GITHUB_TOKEN: options.inputs?.["github-token"] ?? githubToken, GITHUB_API_URL: githubApi,
       TEST_NODE: process.execPath, TEST_CLI: cliBundle, TEST_ALLOWED_ORIGINS: `${api},${githubApi}`,
-      NODE_OPTIONS: `--import=${fetchGuard}`, DROPWAY_CONFIG_DIR: join(temp, "config"), CI: "true",
+      NODE_OPTIONS: `--import=${fetchGuard}`, KOFRA_CONFIG_DIR: join(temp, "config"), CI: "true",
       ...options.env,
     },
   });
@@ -183,7 +183,7 @@ it("control: the existing CLI publishes the fixture bytes and deletes its named 
   const folder = join(work, "control");
   await mkdir(folder);
   await writeFile(join(folder, "index.html"), html);
-  const env = { PATH: process.env.PATH, DROPWAY_API: api, DROPWAY_API_KEY: key, DROPWAY_CONFIG_DIR: join(work, "control-config") };
+  const env = { PATH: process.env.PATH, KOFRA_API: api, KOFRA_API_KEY: key, KOFRA_CONFIG_DIR: join(work, "control-config") };
   const result = await promisify(execFile)(process.execPath, [cliBundle, "publish", folder, "--site", "preview-harness-control", "--json", "--no-save"], { env });
   const output = JSON.parse(result.stdout);
   expect(await (await fetch(`${output.url}?raw=1`)).text()).toBe(html);
@@ -375,7 +375,7 @@ describe("composite PR preview acceptance", () => {
     await rm(marker, { force: true });
     const recorder = join(dir, "recorder.mjs");
     await writeFile(recorder, `import { appendFileSync } from "node:fs";
-if (process.env.DROPWAY_API_KEY && process.env.DW_PARENT_ONLY) appendFileSync(${JSON.stringify(marker)}, "leaked\\n");
+if (process.env.KOFRA_API_KEY && process.env.DW_PARENT_ONLY) appendFileSync(${JSON.stringify(marker)}, "leaked\\n");
 `);
     const result = await preview({ number: 212, env: { NODE_OPTIONS: `--import=${recorder}`, DW_PARENT_ONLY: "1" } });
     published(result);
@@ -397,10 +397,10 @@ if (process.env.DROPWAY_API_KEY && process.env.DW_PARENT_ONLY) appendFileSync(${
     expect(await (await fetch(`${first.outputs.url}?raw=1`)).text()).toBe(html);
   });
 
-  it("cleanup against a non-Dropway origin fails instead of reporting success", async () => {
+  it("cleanup against a non-Kofra origin fails instead of reporting success", async () => {
     const before = await sites();
     // The fake GitHub API stands in for a foreign origin: authenticated requests
-    // get plain 404s with no Dropway error envelope, which must never read as
+    // get plain 404s with no Kofra error envelope, which must never read as
     // "already absent".
     const result = await preview({ number: 214, action: "closed", folder: false, inputs: { api: githubApi, token: githubToken } });
     expect(result.code).not.toBe(0);
