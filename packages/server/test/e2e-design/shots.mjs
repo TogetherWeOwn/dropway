@@ -209,6 +209,25 @@ const SITE_FILES = () => ({
 
 // ------------------------------------------------------------------ worker
 
+/** Split a migration into statements; a CREATE TRIGGER ... BEGIN ... END; body stays one statement. */
+function sqlStatements(sql) {
+  const out = [];
+  let cur = "";
+  for (const part of sql.split(/;\s*(?:\n|$)/)) {
+    cur = cur ? `${cur};\n${part}` : part;
+    const t = cur.trim();
+    if (!t) {
+      cur = "";
+      continue;
+    }
+    if (/^CREATE\s+(TEMP\s+|TEMPORARY\s+)?TRIGGER\b/i.test(t) && !/\bEND$/i.test(t)) continue;
+    out.push(t);
+    cur = "";
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
 function bundle(dir) {
   execFileSync(join(ROOT, "node_modules/.bin/wrangler"), ["deploy", "--dry-run", "--outdir", dir, "--config", join(ROOT, "wrangler.jsonc")], { cwd: ROOT, stdio: "pipe" });
   return join(dir, "index.js");
@@ -236,7 +255,7 @@ async function startWorker(tmp) {
       .split("\n")
       .filter((l) => !l.trim().startsWith("--"))
       .join("\n");
-    for (const stmt of sql.split(/;\s*(?:\n|$)/).map((s) => s.trim()).filter(Boolean)) await db.prepare(stmt).run();
+    for (const stmt of sqlStatements(sql)) await db.prepare(stmt).run();
   }
   return { mf, db };
 }
