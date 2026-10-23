@@ -31,7 +31,8 @@
   scalars, including nullable fields, without letting JSON override path resources.
 - Bound JSON metadata bodies before parsing (8 MiB default, configurable per
   generated operation), cancel oversized streams and reject raw-body automatic
-  replay definitions that cannot distinguish changed bytes.
+  replay definitions that cannot distinguish changed bytes. Preserve Hono body
+  inspection by API middleware, rechecking cached bodies against the JSON budget.
 - Partition member idempotency replay by credential and current authorization,
   including tenant/site restrictions, role and scopes. Older member records
   expire unused; retries spanning the upgrade may execute again.

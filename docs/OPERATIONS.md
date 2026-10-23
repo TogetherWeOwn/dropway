@@ -54,7 +54,12 @@ remediation hint; both transports preserve it.
   decoding/parsing, cancels overflow and returns `413 request_too_large`.
   Use upload links instead of putting large file bytes in JSON. Legacy metadata
   adapters using `readJson()` use the same default; raw uploads keep their own
-  streaming reader and existing limits.
+  streaming reader and existing limits. `apiMiddleware` may inspect the body
+  through Hono's `c.req.json()`, `text()` or `arrayBuffer()` before `next()`;
+  the reader reuses that cache and checks the reconstructed bytes against the
+  same budget. Trusted middleware owns any buffering it performs before dispatch;
+  the generated reader cannot retroactively bound that allocation. Unread bodies
+  are still counted and cancelled as they stream, without cloning or teeing them.
 - Zod validates inputs and applies defaults before dispatch. Operation output is
   validated, then normalized to JSON for both transports.
 - Definitions must use flat object input/output schemas. Keep summaries at most

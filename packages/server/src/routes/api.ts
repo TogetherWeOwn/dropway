@@ -1,16 +1,20 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
+import { cloneRawRequest } from "hono/request";
 import { ApiError, badRequest } from "@dropway/core";
 import type { DropwayEnv } from "../env";
 
 /** Bound wire bytes before decoding or parsing an object body. Raw uploads use their own reader. */
 export async function readJson(c: Context<DropwayEnv>, maxBytes = 8 * 1024 * 1024): Promise<Record<string, unknown>> {
   const tooLarge = () => new ApiError(413, "request_too_large", `JSON requests accept up to ${maxBytes} bytes.`, "Split the request or use sha256 upload links for file bytes.", { limit: maxBytes });
-  const body = c.req.raw.body;
   if (Number(c.req.header("content-length")) > maxBytes) {
-    await body?.cancel().catch(() => {});
+    if (!c.req.raw.body?.locked) await c.req.raw.body?.cancel().catch(() => {});
     throw tooLarge();
   }
+  const cached = Object.keys(c.req.bodyCache).length > 0;
+  // Middleware may already have consumed the stream through Hono's cached readers.
+  // Only reconstruct cached bodies: cloning an unread stream would tee past the cap.
+  const body = cached ? (await cloneRawRequest(c.req)).body : c.req.raw.body;
   let text = "";
   if (body) {
     const reader = body.getReader();
@@ -32,6 +36,8 @@ export async function readJson(c: Context<DropwayEnv>, maxBytes = 8 * 1024 * 102
       reader.releaseLock();
     }
   }
+  // Hono stores promises in its runtime body cache; preserve reads after next() too.
+  if (!cached) Object.assign(c.req.bodyCache, { text: Promise.resolve(text) });
   if (!text.trim()) return {};
   try {
     const v = JSON.parse(text);
