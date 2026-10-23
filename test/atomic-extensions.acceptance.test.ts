@@ -847,7 +847,9 @@ describe("public createTenantWithOwner atomic composition", () => {
     expect(result.owner).toEqual({ id: expect.stringMatching(/^mem_/), tenant_id: result.tenant.id, role: "owner",
       name: "m".repeat(120), email: " Not-An-Email ", external_ref: " External Ref ", created_at: expect.any(Number), disabled_at: null });
     expect(await env.DB.prepare("SELECT * FROM tenants WHERE id = ?").bind(result.tenant.id).first()).toEqual(result.tenant);
-    expect(await env.DB.prepare("SELECT * FROM members WHERE id = ?").bind(result.owner.id).first()).toEqual(result.owner);
+    // Session activity is stored outside the prepared MemberRow contract and starts unset.
+    expect(await env.DB.prepare("SELECT * FROM members WHERE id = ?").bind(result.owner.id).first())
+      .toEqual({ ...result.owner, last_seen_at: null });
     expect(await env.DB.prepare("SELECT * FROM fixture_profiles WHERE tenant_id = ?").bind(result.tenant.id).first())
       .toEqual({ tenant_id: result.tenant.id, owner_id: result.owner.id, label: "new-profile" });
     expect((await coreSnapshot()).profiles).toContainEqual(h.before.profiles[0]);

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { diagnosticText } from "./diagnostics";
 import { createOperationRegistry } from "./operations/registry";
 import { installOperationRoutes, operationTools, type OperationDefinition } from "./operations";
 import {
@@ -60,7 +61,7 @@ function requestErrorDetails(request: Request, error: unknown) {
   if (url.searchParams.has("grant") || url.searchParams.has("recipient")) {
     return { url: safeUrl, error: "[redacted]" };
   }
-  return { url: safeUrl, error: String(error), stack: (error as Error)?.stack };
+  return { url: diagnosticText(safeUrl), error: diagnosticText(error), stack: diagnosticText((error as Error)?.stack ?? "") };
 }
 
 /**
@@ -73,6 +74,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
     identity: opts.adapters?.identity ?? defaultIdentity,
     policy: opts.adapters?.policy ?? defaultPolicy,
     metering: opts.adapters?.metering ?? noopMetering,
+    ...(opts.adapters?.email ? { email: opts.adapters.email } : {}),
   };
   const uiSlots: UiSlots = { navItems: [], pages: [], ...opts.uiSlots };
   const operations = createOperationRegistry(opts.operations);

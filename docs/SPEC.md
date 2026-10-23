@@ -164,7 +164,7 @@ Full matrix in section 10.
 | ID-03 | Scoped API keys: named, scopes, optional single-site restriction, optional path prefix, optional expiry, last-used time; shown once, stored as SHA-256; 50 per member | P0 | Done (path prefix R-32; new scopes R-17) |
 | ID-04 | Claim tokens (`dwc_`) for anonymous sites | P0 | Done |
 | ID-05 | Upload tokens (`dwu_`) scoped to one pending version | P0 | R-04 |
-| ID-06 | Dashboard sign-in: one-time login links minted by the owner, an agent or the CLI; email codes when an email binding exists; optional Cloudflare Access identity; revocable sessions | P1 | R-21 |
+| ID-06 | Dashboard sign-in: one-time login links minted by the owner, an agent or the CLI; email codes when an email binding exists; optional Cloudflare Access identity; revocable sessions | P1 | Implemented, unreleased (R-21); independent security and browser evidence pending |
 | ID-07 | OAuth 2.1 for MCP and the CLI (Client ID Metadata Documents, Dynamic Client Registration for older clients, PKCE loopback, device code for headless machines), step-up scopes | P1 | R-24 |
 | ID-08 | Audit log of every write (who, what, when, from which client) | P2 | R-38 |
 | ID-09 | Passkeys for dashboard sign-in | P2 | R-49 |
@@ -175,7 +175,7 @@ Full matrix in section 10.
 |---|---|---|---|
 | ANON-01 | Off by default (`ANONYMOUS_PUBLISH=false`); one setting turns it on | P0 | Done |
 | ANON-02 | Anonymous sites expire (default 24 h), have smaller caps, a per-IP hourly creation limit and `noindex` | P0 | Done |
-| ANON-03 | Claim token and claim URL (token in the URL fragment, never sent to the server); claim by API (`claim_site`) or by signing in | P0 | Done (sign-in claim in R-21) |
+| ANON-03 | Claim token and claim URL (token in the URL fragment, never sent to the server); claim by API (`claim_site`) or by signing in | P0 | API done; sign-in claim implemented, unreleased (R-21) |
 | ANON-04 | Anonymous sites are always sandboxed on a shared sites origin and carry a small "Report abuse" link | P0 | Sandbox and link done; report form R-37 |
 | ANON-05 | Optional Turnstile on browser uploads; agent-compatible challenge (`anonymous_challenge_required` with a `challengeUrl` a human opens once) when abuse pressure is on | P1 | R-37 |
 | ANON-06 | Moderation hook: hold suspicious anonymous HTML (password fields, forms posting elsewhere) until claimed | P1 | R-37 |
@@ -717,7 +717,7 @@ run before core viewers. Section 10 lists core viewers.
 
 ### 6.9 Testing kit and contract (R-01 done, R-18 remaining)
 
-- `@dropway/server` exports `EXTENSION_API_VERSION = 1`; extension API changes update that value and
+- `@dropway/server` exports `EXTENSION_API_VERSION = 2`; extension API changes update that value and
   the Extension API section in `CHANGELOG.md`.
 - `test/extension-contract.test.ts` builds `createDropway()` with fake adapters and exercises every
   existing point: identity and scopes, policy limits and refusals, all five metering event kinds,
@@ -1589,12 +1589,14 @@ origin and `Sec-Fetch-Site: same-origin`; the REST API authenticates by bearer t
 its CORS allows any origin without credentials. Subdomain mode on a separate registrable domain removes the
 caveat.
 
-**Current boundary:** built-in API-key sign-in issues no app cookie, and core REST ignores
-cookie-only credentials. Real app-cookie `__Host-` issuance and cookie-authenticated write
-integration checks are **deferred / not run** until R-21 introduces sessions, before any
-session is enabled. Cookie-rejection tests are not proof of either rule. An embedding
-identity adapter accepting cookies must enforce both header checks itself; this boundary
-does not approve a cookie-authenticated embedding deployment.
+**Built-in session boundary:** API-key sign-in still issues no app cookie, and ordinary
+REST resource routes and MCP ignore cookie-only credentials. R-21's explicit browser-auth
+operations at `/api/v1/auth/*` and app `POST /claim` use the real `__Host-dw_session`.
+Every cookie-authenticated write requires both checks above. The real login-link issuer
+and claim/logout/revoke write matrix are exercised against emulated D1; this is not a
+production activation or independent security approval. An embedding identity adapter
+accepting cookies must enforce both header checks itself; this boundary does not approve
+a cookie-authenticated embedding deployment.
 
 ### 11.3 Headers by response class
 

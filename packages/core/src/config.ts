@@ -35,6 +35,9 @@ export type SitesMode = "path" | "subdomain";
 export interface DropwayConfig {
   /** Shown in pages and API responses. */
   instanceName: string;
+  emailFrom: string | null;
+  accessTeamDomain: string | null;
+  accessAud: string | null;
   /** Public origin of the app + API, no trailing slash. null = the origin of each request. */
   appOrigin: string | null;
   /**
@@ -95,6 +98,9 @@ export type ConfigOverrides = Partial<Omit<DropwayConfig, "anonymous" | "limits"
 /** Worker vars and secrets read by resolveConfig. All optional strings. */
 export interface DropwayVars {
   INSTANCE_NAME?: string;
+  EMAIL_FROM?: string;
+  ACCESS_TEAM_DOMAIN?: string;
+  ACCESS_AUD?: string;
   APP_ORIGIN?: string;
   LEGACY_APP_ORIGINS?: string;
   LEGACY_DEPRECATED_AT?: string;
@@ -205,6 +211,9 @@ export function resolveConfig(vars: DropwayVars, overrides: ConfigOverrides = {}
   const adminBootstrapKey = overrides.adminBootstrapKey !== undefined ? overrides.adminBootstrapKey : vars.ADMIN_BOOTSTRAP_KEY?.trim() || null;
   return {
     instanceName: overrides.instanceName ?? (vars.INSTANCE_NAME?.trim() || "Kofra"),
+    emailFrom: overrides.emailFrom ?? (vars.EMAIL_FROM?.trim() || null),
+    accessTeamDomain: overrides.accessTeamDomain ?? (vars.ACCESS_TEAM_DOMAIN?.trim() || null),
+    accessAud: overrides.accessAud ?? (vars.ACCESS_AUD?.trim() || null),
     appOrigin,
     legacyAppOrigins,
     legacyDeprecatedAt: overrides.legacyDeprecatedAt ?? unixSeconds(vars.LEGACY_DEPRECATED_AT),
