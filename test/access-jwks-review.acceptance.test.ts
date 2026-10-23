@@ -176,8 +176,11 @@ describe("Access JWKS cooldown survives issuer capacity pressure", () => {
     for (const elapsed of [0, 29_999]) {
       now = startedAt + elapsed;
       const response = await newcomer.request(tokens[16]!);
-      expect.soft(response.status, `17th issuer at ${elapsed}ms must fail closed`).toBe(401);
-      if (response.status === 401) await denied(response);
+      expect.soft(response.status, `17th issuer at ${elapsed}ms is an operational capacity denial`).toBe(503);
+      expect.soft(await response.json()).toMatchObject({ error: {
+        code: "access_key_cache_busy", hint: expect.stringMatching(/retry|try again|capacity|busy|temporar/i),
+      } });
+      expect.soft(response.headers.getSetCookie()).toEqual([]);
       expect.soft(newcomer.endpoint.calls, "no free state means no fetch").toBe(0);
       const statuses: number[] = [];
       for (let i = 0; i < 16; i++) {

@@ -103,6 +103,13 @@ async function denied(response: Response) {
   expect(await response.json()).toMatchObject({ error: { code: "invalid_access_identity" } });
   expect(response.headers.getSetCookie()).toEqual([]);
 }
+async function cacheBusy(response: Response) {
+  expect.soft(response.status).toBe(503);
+  expect.soft(await response.json()).toMatchObject({ error: {
+    code: "access_key_cache_busy", hint: expect.stringMatching(/retry|try again|capacity|busy|temporar/i),
+  } });
+  expect.soft(response.headers.getSetCookie()).toEqual([]);
+}
 async function counts() {
   return {
     members: await env.DB.prepare("SELECT COUNT(*) AS n FROM members").first(),
@@ -346,17 +353,17 @@ describe("Access JWKS hard capacity bounds", () => {
     const fixtures = await Promise.all(Array.from({ length: 17 }, () => fixture(dw)));
     const tokens = await Promise.all(fixtures.map((f) => f.token()));
     for (let i = 0; i < fixtures.length; i++) {
-      const status = (await fixtures[i]!.request(tokens[i]!)).status;
-      // The seventeenth may evict an idle entry or fail closed, but the
-      // first sixteen are below capacity and must establish usable trust.
-      if (i < 16) expect(status).toBe(200);
-      else expect([200, 401]).toContain(status);
+      const response = await fixtures[i]!.request(tokens[i]!);
+      // All original states are still cooling, so none is eligible for eviction.
+      if (i < 16) expect(response.status).toBe(200);
+      else await cacheBusy(response);
     }
     for (const f of fixtures) f.endpoint.reply = () => new Response(null, { status: 503 });
     let stillTrusted = 0;
     for (let i = 0; i < fixtures.length; i++) {
       const response = await fixtures[i]!.request(tokens[i]!);
       if (response.status === 200) stillTrusted++;
+      else if (i === 16) await cacheBusy(response);
       else await denied(response);
     }
     expect(stillTrusted, "an unbounded issuer cache would still authorize all 17").toBeLessThanOrEqual(16);
@@ -374,7 +381,7 @@ describe("Access JWKS hard capacity bounds", () => {
       await gate.promise;
       return mode === "failure" ? new Response(null, { status: 503 }) : jwks();
     };
-    const pending = fixtures.map((f, i) => f.verify(tokens[i]!).then(() => "member", () => "denied"));
+    const pending = fixtures.map((f, i) => f.verify(tokens[i]!).then(() => "member", (error: unknown) => i === 16 ? error : "denied"));
     await entered.promise;
     // No real sleeps and no wait for request 17: it must not start a fetch.
     const starts = fixtures.reduce((n, f) => n + f.endpoint.calls, 0);
@@ -382,6 +389,8 @@ describe("Access JWKS hard capacity bounds", () => {
     const results = await Promise.all(pending);
     expect.soft(starts, "all 16 slots in flight: the 17th must be denied, not admitted").toBe(16);
     expect(results.filter((v) => v === "member")).toHaveLength(mode === "success" ? 16 : 0);
+    expect(results[16]).toMatchObject({ status: 503, code: "access_key_cache_busy",
+      hint: expect.stringMatching(/retry|try again|capacity|busy|temporar/i) });
     expect(fixtures[16]!.endpoint.calls).toBe(0);
   });
 
