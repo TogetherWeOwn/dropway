@@ -231,6 +231,7 @@ function openInFrame(dw: DropwayContext, req: Request, url: URL, live: LiveSite,
   const asked = url.searchParams.get("next") ?? "";
   const next = safeNext(asked) === asked && asked.startsWith(mode.base) ? asked : mode.base;
   const target = new URL(next, url);
+  target.searchParams.delete("theme"); // only this route decides whether the mode goes along
   const theme = themeOf(dw);
   if (theme !== "auto") {
     // Resolve `next` the way a frame navigation to it would be served.

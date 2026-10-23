@@ -152,7 +152,7 @@ The frame is an `ef` ring at r 98 (0.8) plus r 95.5 (0.4), and the dot is `fm` (
 
 ## 7. Components (class names in security-print.css)
 
-- **Nav** `.top` with `.wm`, `.tag` and `nav a`. The current page gets `aria-current="page"` (2px accent underline). A `.btn.sm` may sit at the end as the one call to action. Below 720px the nav wraps to its own line.
+- **Nav** `.top` with `.wm`, `.tag` and `nav a`. The current page gets `aria-current="page"` (2px accent underline). A `.btn.sm` may sit at the end as the one call to action. Below 1100px the nav wraps to its own line (see Mode switch).
 - **Footer** `.foot` holds the wordmark, the domains, links and `.end`. `.trust` carries the line "Kofra does not scan files; open files only from people you trust." on every page that shows files.
 - **Hero** `.hero` is a two-column grid: kicker, h1, `.lede`, an optional `.qs` numbered question list, and a `.plate` figure.
 - **Section head** `.sec` with `.sec-h` holds `.num` (01, 02), an h2 and a one-line `p`.
@@ -209,4 +209,4 @@ The system is quiet and mechanical, like a printing press, with no bounce and no
 - Seals get `role="img"` and an `aria-label` that names the transfer or file. Microtext, bands and the lathe are `aria-hidden`.
 - The mode switch is a group of three submit buttons with `aria-pressed`. Light or Dark persists in the `__Host-dw_theme` cookie; Auto removes it. `?theme=` applies to one response.
 - Forced colours and reduced motion are handled as listed in section 3.
-- Layouts reflow to one column at 720px with no horizontal scroll at 390px. Only `.table-wrap` and `pre` scroll inside themselves.
+- Layouts reflow to one column at 720px with no horizontal scroll at 320px. Only `.table-wrap`, `pre` (reachable with the keyboard) and the file tree scroll inside themselves.

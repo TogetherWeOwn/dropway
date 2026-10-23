@@ -155,6 +155,8 @@ describe("server-rendered colour mode (no flash, no script)", () => {
     expect(await location(`${base}docs/b.md?view=1&embed=1`)).toBe(`${base}docs/b.md?view=1&embed=1&theme=dark`); // a viewer
     expect(await location(`${base}nope.html`)).toBe(`${base}nope.html?theme=dark`); // Kofra's page-not-found
     expect(await location(`${base}docs/`, "auto")).toBe(`${base}docs/`);
+    // A mode written into `next` never reaches the site's own page.
+    expect(await location(`${base}?theme=dark`)).toBe(base);
     // Only paths on this site.
     for (const bad of ["//evil.test/", "https://evil.test/", "/elsewhere/", `${base}\\evil`]) expect(await location(bad)).toBe(base);
 
