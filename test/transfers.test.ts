@@ -350,7 +350,16 @@ describe("ownership and guarded updates", () => {
     }
     const foreign = await op(dw, "get_transfer", ref(t), bob.key);
     const missing = await op(dw, "get_transfer", { transfer: "nonexistent-transfer-id" }, bob.key);
-    expect(foreign.body).toEqual(missing.body);
+    // Correlation is per request, not part of the ownership oracle. Compare
+    // every other envelope/error field exactly, including any future fields.
+    const { requestId: foreignRequestId, ...foreignBody } = foreign.body;
+    const { requestId: missingRequestId, ...missingBody } = missing.body;
+    for (const [response, requestId] of [[foreign, foreignRequestId], [missing, missingRequestId]] as const) {
+      expect(requestId).toEqual(expect.any(String));
+      expect(requestId.length).toBeGreaterThan(0);
+      expect(response.res.headers.get("X-Request-Id")).toBe(requestId);
+    }
+    expect(foreignBody).toEqual(missingBody);
     refusal(await op(dw, "update_transfer", { ...ref(t), message: "not mine" }, bob.key), 404);
     refusal(await op(dw, "revoke_transfers", { ids: [t.id] }, bob.key), 404);
   });
