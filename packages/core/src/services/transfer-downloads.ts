@@ -1,5 +1,5 @@
 import type { DropwayContext } from "../context";
-import { appOrigin } from "../context";
+import { siteUrl } from "../context";
 import { readBlob, readBlobRange } from "./blobs";
 import { ApiError, forbidden, rateLimited } from "../errors";
 import { hmacHex, newSecret, sha256Hex, timingSafeEqualStr, verifyPassword } from "../lib/crypto";
@@ -81,7 +81,7 @@ export async function recordTransferDownload(dc: DropwayContext, t: PublicTransf
   const increment = count ? 1 : 0;
   const recipientPath = index >= 0 && count ? `$[${index}].downloads` : null;
   const [updated] = await dc.env.DB.batch([
-    dc.env.DB.prepare(`UPDATE transfers SET downloads = downloads + ?, revision = revision + 1, mutation_id = ?,
+    dc.env.DB.prepare(`UPDATE transfers SET downloads = downloads + ?, mutation_id = ?,
       recipients_json = CASE WHEN ? IS NULL THEN recipients_json ELSE json_set(recipients_json, ?, json_extract(recipients_json, ?) + 1) END
       WHERE id = ? AND revision = ? AND deleted_at IS NULL AND revoked_at IS NULL AND expired_at IS NULL
         AND takedown_at IS NULL AND purged_at IS NULL AND expires_at >= ? AND (download_limit IS NULL OR downloads < download_limit)
@@ -101,7 +101,9 @@ export async function recordTransferDownload(dc: DropwayContext, t: PublicTransf
 }
 
 export async function openTransferDownload(dc: DropwayContext, request: Request, slug: string, path: string) {
-  if (new URL(request.url).origin === new URL(appOrigin(dc)).origin) throw transferMissing();
+  const origin = new URL(request.url).origin;
+  const isolated = dc.config.sitesOrigin || (dc.config.sitesMode === "subdomain" && dc.config.sitesDomain);
+  if (!isolated || origin !== new URL(siteUrl(dc, slug)).origin || (dc.config.appOrigin && origin === new URL(dc.config.appOrigin).origin)) throw transferMissing();
   const t = await publicTransfer(dc, slug);
   const file = await publicTransferFile(dc, t, path);
   checkTransferGate(t);

@@ -64,7 +64,8 @@ async function validate(dc: DropwayContext, p: Principal, input: TransferInput, 
     throw badRequest("invalid_transfer", "Invalid download limit.", "Use an integer from 1 to 10,000, or null for no limit.");
   }
   const limits = await dc.adapters.policy.limits(p, { tenantId: member.tenantId, siteId }, dc);
-  const days = Math.min(3650, dc.config.limits.transferMaxExpiryDays ?? 30, limits.transferMaxExpiryDays ?? 30);
+  const instanceDays = Math.min(3650, dc.config.limits.transferMaxExpiryDays ?? 30);
+  const days = Math.min(instanceDays, limits.transferMaxExpiryDays ?? instanceDays);
   if (input.expiresAt !== undefined && (!Number.isSafeInteger(input.expiresAt) || input.expiresAt < Date.now() + 3_600_000 || input.expiresAt > Date.now() + days * TRANSFER_DAY)) {
     throw badRequest("invalid_transfer_expiry", "Invalid transfer expiry.", `Choose a deadline from one hour to ${days} days from now.`);
   }
@@ -120,12 +121,15 @@ export async function createTransfer(dc: DropwayContext, p: Principal, input: Tr
       SELECT ?, path, sha256, size, content_type FROM version_files WHERE version_id = ?`).bind(site.id, deploy.deploy.id).run();
     await finalizeDeploy(dc, p, initial, deploy.deploy.id, true);
   } catch (error) {
-    await dc.env.DB.batch([
-      dc.env.DB.prepare("UPDATE transfers SET purged_at = ?, deleted_at = ? WHERE id = ?").bind(Date.now(), Date.now(), site.id),
-      dc.env.DB.prepare("DELETE FROM transfer_files WHERE transfer_id = ?").bind(site.id),
-      dc.env.DB.prepare("DELETE FROM transfers WHERE id = ?").bind(site.id),
-    ]);
-    await discardNewSite(dc, site);
+    // Finalization may have committed before a cache or notification failed.
+    // Retain lifecycle ownership and usage unless the real references were removed.
+    if (await discardNewSite(dc, site)) {
+      await dc.env.DB.batch([
+        dc.env.DB.prepare("UPDATE transfers SET purged_at = ?, deleted_at = ? WHERE id = ?").bind(Date.now(), Date.now(), site.id),
+        dc.env.DB.prepare("DELETE FROM transfer_files WHERE transfer_id = ?").bind(site.id),
+        dc.env.DB.prepare("DELETE FROM transfers WHERE id = ?").bind(site.id),
+      ]);
+    }
     throw error;
   }
   const t = await ownedTransfer(dc, p, site.id);
@@ -133,9 +137,10 @@ export async function createTransfer(dc: DropwayContext, p: Principal, input: Tr
   return describeTransfer(dc, t);
 }
 
-const LIVE = "revoked_at IS NULL AND expired_at IS NULL AND deleted_at IS NULL AND expires_at >= ? AND legal_hold = 0 AND takedown_at IS NULL AND (download_limit IS NULL OR downloads < download_limit)";
+const REVOKABLE = "revoked_at IS NULL AND expired_at IS NULL AND deleted_at IS NULL AND expires_at >= ? AND takedown_at IS NULL AND (download_limit IS NULL OR downloads < download_limit)";
+const LIVE = `${REVOKABLE} AND legal_hold = 0`;
 function assertMutable(t: TransferRow, update: boolean) {
-  if (t.revoked_at !== null || t.expired_at !== null || t.deleted_at !== null || t.expires_at < Date.now() || t.legal_hold || t.takedown_at !== null || (t.download_limit !== null && t.downloads >= t.download_limit) || (update && t.notified_at !== null)) throw transferConflict();
+  if (t.revoked_at !== null || t.expired_at !== null || t.deleted_at !== null || t.expires_at < Date.now() || t.takedown_at !== null || (t.download_limit !== null && t.downloads >= t.download_limit) || (update && (t.legal_hold || t.notified_at !== null))) throw transferConflict();
 }
 export async function updateTransfer(dc: DropwayContext, p: Principal, reference: string, input: TransferInput) {
   const t = await ownedTransfer(dc, p, reference, true);
@@ -161,8 +166,16 @@ export async function updateTransfer(dc: DropwayContext, p: Principal, reference
   if (message === t.message && expiry === t.expires_at && limit === t.download_limit && !recipientChanged && digest === current?.password_hash) return describeTransfer(dc, t);
   const mutation = newSecret("dwm_");
   const [updated] = await dc.env.DB.batch([
-    dc.env.DB.prepare(`UPDATE transfers SET message = ?, expires_at = ?, download_limit = ?, recipients_json = ?, revision = revision + 1, mutation_id = ?
-      WHERE id = ? AND revision = ? AND ${LIVE} AND notified_at IS NULL`).bind(message, expiry, limit, JSON.stringify(recipients), mutation, t.id, t.revision, Date.now()),
+    // Download counts do not change the management revision. Merge retained
+    // recipients' counts from the current row, not the pre-validation snapshot.
+    dc.env.DB.prepare(`UPDATE transfers SET message = ?, expires_at = ?, download_limit = ?,
+      recipients_json = CASE WHEN ? = 0 THEN recipients_json ELSE
+        (SELECT json_group_array(json_set(incoming.value, '$.downloads', COALESCE(
+          (SELECT json_extract(stored.value, '$.downloads') FROM json_each(transfers.recipients_json) stored
+            WHERE json_extract(stored.value, '$.token') = json_extract(incoming.value, '$.token')), 0)))
+          FROM json_each(?) incoming) END,
+      revision = revision + 1, mutation_id = ?
+      WHERE id = ? AND revision = ? AND ${LIVE} AND notified_at IS NULL`).bind(message, expiry, limit, recipientChanged ? 1 : 0, JSON.stringify(recipients), mutation, t.id, t.revision, Date.now()),
     dc.env.DB.prepare(`UPDATE sites SET password_hash = ?, updated_at = ? WHERE id = ? AND EXISTS
       (SELECT 1 FROM transfers WHERE id = ? AND mutation_id = ?)`).bind(digest, Date.now(), t.site_id, t.id, mutation),
   ]);
@@ -175,7 +188,7 @@ export async function revokeTransfers(dc: DropwayContext, p: Principal, input: {
   const member = requireMember(p, "sites:write");
   if ((!input.allLive && !input.ids?.length) || (input.allLive && input.ids !== undefined) || (input.ids && input.ids.length > 100)) throw badRequest("invalid_transfer", "Choose transfer IDs or allLive.", "Supply 1-100 IDs, or allLive: true, not both.");
   const rows = input.allLive
-    ? (await dc.env.DB.prepare(`SELECT * FROM transfers WHERE tenant_id = ? AND member_id = ? AND ${LIVE} ${member.siteId ? "AND site_id = ?" : ""}`).bind(member.tenantId, member.memberId, Date.now(), ...(member.siteId ? [member.siteId] : [])).all<TransferRow>()).results
+    ? (await dc.env.DB.prepare(`SELECT * FROM transfers WHERE tenant_id = ? AND member_id = ? AND ${REVOKABLE} ${member.siteId ? "AND site_id = ?" : ""}`).bind(member.tenantId, member.memberId, Date.now(), ...(member.siteId ? [member.siteId] : [])).all<TransferRow>()).results
     : await Promise.all([...new Set(input.ids!)].map((id) => ownedTransfer(dc, p, id, true)));
   for (const t of rows) assertMutable(t, false);
   if (!rows.length) return { count: 0 };
@@ -183,7 +196,7 @@ export async function revokeTransfers(dc: DropwayContext, p: Principal, input: {
   // member of a bulk request must not leave earlier deliveries partly revoked.
   const { results: changed } = await dc.env.DB.prepare(`WITH expected AS MATERIALIZED
       (SELECT json_extract(value, '$[0]') AS id, json_extract(value, '$[1]') AS revision FROM json_each(?)),
-    eligible AS MATERIALIZED (SELECT t.id FROM transfers t JOIN expected e ON t.id = e.id AND t.revision = e.revision WHERE ${LIVE}),
+    eligible AS MATERIALIZED (SELECT t.id FROM transfers t JOIN expected e ON t.id = e.id AND t.revision = e.revision WHERE ${REVOKABLE}),
     readiness AS MATERIALIZED (SELECT (SELECT COUNT(*) FROM expected) = (SELECT COUNT(*) FROM eligible) AS ready)
     UPDATE transfers SET revoked_at = ?, revision = revision + 1
     WHERE id IN (SELECT id FROM eligible) AND (SELECT ready FROM readiness) RETURNING id, revision`)

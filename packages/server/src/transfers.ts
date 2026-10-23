@@ -23,6 +23,31 @@ export function transferError(error: unknown): Response {
   if (!(error instanceof ApiError)) throw error;
   return Response.json(error.toJSON(), { status: error.status, headers: { ...headers, ...(error.status === 429 ? { "Retry-After": String(error.details?.retryAfterSeconds ?? 60) } : {}) } });
 }
+async function readPasswordForm(request: Request): Promise<string> {
+  const maxBytes = 16_384;
+  const tooLarge = () => new ApiError(413, "request_too_large", "Form too large.", "Send a password form of at most 16,384 bytes.");
+  if (Number(request.headers.get("Content-Length")) > maxBytes) {
+    await request.body?.cancel().catch(() => {});
+    throw tooLarge();
+  }
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const buffer = new Uint8Array(maxBytes);
+  let bytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (bytes + value.byteLength > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw tooLarge();
+      }
+      buffer.set(value, bytes);
+      bytes += value.byteLength;
+    }
+    return new TextDecoder().decode(buffer.subarray(0, bytes));
+  } finally { reader.releaseLock(); }
+}
 export function installTransferPages(app: Hono<DropwayEnv>) {
   app.on(["GET", "HEAD", "POST"], "/t/:slug", async (c) => {
     const dc = c.get("dw");
@@ -34,9 +59,7 @@ export function installTransferPages(app: Hono<DropwayEnv>) {
       if (recipient && !transferRecipients(t).some((r) => r.token === recipient)) throw transferMissing();
       if (c.req.method === "POST") {
         if (c.req.header("Origin") !== appOrigin(dc) || ["cross-site", "same-site"].includes(c.req.header("Sec-Fetch-Site") ?? "")) return new Response("Origin refused", { status: 403, headers });
-        if (Number(c.req.header("Content-Length") ?? 0) > 16_384) return new Response("Form too large", { status: 413, headers });
-        const text = new TextDecoder().decode(await c.req.arrayBuffer());
-        if (new TextEncoder().encode(text).length > 16_384) return new Response("Form too large", { status: 413, headers });
+        const text = await readPasswordForm(c.req.raw);
         const grant = await unlockTransfer(dc, t, new URLSearchParams(text).get("password"), c.req.header("CF-Connecting-IP") ?? "unknown");
         return new Response(null, { status: 303, headers: { ...headers, Location: transferPageUrl(dc, t.slug, recipient),
           "Set-Cookie": `${transferCookieName(t)}=${grant}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=900` } });

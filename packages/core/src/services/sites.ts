@@ -351,13 +351,11 @@ export async function updateSite(dc: DropwayContext, p: Principal, slug: string,
 export async function deleteSite(dc: DropwayContext, p: Principal, slug: string): Promise<{ deleted: true; slug: string }> {
   const site = await getSiteFor(dc, p, slug, "sites:write");
   const now = Date.now();
-  if (site.mode === "transfer") {
-    const held = await dc.env.DB.prepare("SELECT legal_hold FROM transfers WHERE site_id = ?").bind(site.id).first<{ legal_hold: number }>();
-    if (held?.legal_hold) throw conflict("transfer_conflict", "This delivery is held.", "Release the hold before deleting it; revocation remains available.");
-  }
-  await dc.env.DB.prepare("UPDATE sites SET deleted_at = ?, deleted_slug = slug, slug = ?, claim_token_hash = NULL WHERE id = ?")
+  const deleted = await dc.env.DB.prepare(`UPDATE sites SET deleted_at = ?, deleted_slug = slug, slug = ?, claim_token_hash = NULL
+    WHERE id = ? AND NOT EXISTS (SELECT 1 FROM transfers WHERE site_id = sites.id AND legal_hold <> 0)`)
     .bind(now, `~deleted~${site.id}`, site.id)
     .run();
+  if (!deleted.meta.changes) throw conflict("transfer_conflict", "This delivery is held.", "Release the hold before deleting it; revocation remains available.");
   await dropLive(dc, site.slug);
   emit(dc, "onDelete", { site: { id: site.id, slug: site.slug, tenantId: site.tenant_id, url: siteUrl(dc, site.slug) }, principal: p, reason: "api", at: now });
   meter(dc, { type: "site_deleted", tenantId: site.tenant_id, siteId: site.id, at: now });
@@ -373,17 +371,20 @@ export async function deleteSite(dc: DropwayContext, p: Principal, slug: string)
  */
 export async function discardNewSite(dc: DropwayContext, site: Pick<SiteRow, "id" | "slug" | "tenant_id">): Promise<boolean> {
   const db = dc.env.DB;
-  const neverLive = "EXISTS (SELECT 1 FROM sites WHERE id = ? AND current_version_id IS NULL)";
+  const neverLive = `EXISTS (SELECT 1 FROM sites s WHERE s.id = ? AND s.current_version_id IS NULL
+    AND NOT EXISTS (SELECT 1 FROM transfers t WHERE t.site_id = s.id AND (t.legal_hold <> 0 OR t.takedown_at IS NOT NULL)))`;
   try {
     const results = await db.batch([
       db.prepare(`DELETE FROM version_files WHERE version_id IN (SELECT id FROM versions WHERE site_id = ?) AND ${neverLive}`).bind(site.id, site.id),
       db.prepare(`DELETE FROM versions WHERE site_id = ? AND ${neverLive}`).bind(site.id, site.id),
       db.prepare(`DELETE FROM blob_scopes WHERE scope = ? AND ${neverLive}`).bind(`s:${site.id}`, site.id),
-      db.prepare("DELETE FROM sites WHERE id = ? AND current_version_id IS NULL").bind(site.id),
+      db.prepare(`DELETE FROM sites WHERE id = ? AND ${neverLive}`).bind(site.id, site.id),
     ]);
-    await dropLive(dc, site.slug);
     const removed = (results[3]?.meta.changes ?? 0) > 0;
-    if (removed) meter(dc, { type: "site_deleted", tenantId: site.tenant_id, siteId: site.id, at: Date.now() });
+    if (removed) {
+      await dropLive(dc, site.slug);
+      meter(dc, { type: "site_deleted", tenantId: site.tenant_id, siteId: site.id, at: Date.now() });
+    }
     return removed;
   } catch (e) {
     // Never mask the error that made the create fail; the site is left for its owner to delete.
