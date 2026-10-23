@@ -326,6 +326,9 @@ export function buildOpenApi(origin: string, instanceName: string, anonymousPubl
         get: op("health", "Health check", { tags: ["agents"], security: false, responses: { 200: json({ type: "object", properties: { ok: { type: "boolean" }, service: { type: "string" } } }) }, mcpExclude: "monitoring" }),
       },
       "/claim": { get: op("claim_page", "Claim page for anonymous sites (token in the URL fragment)", { tags: ["agents"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use claim_site" }) },
+      "/__dropway/encrypted/{slug}": { get: op("encrypted_page", "Decrypt a CLI-encrypted site locally (key only in URL fragment)", { tags: ["pages"], security: false, params: [slugParam], responses: { 200: text("First-party decryptor HTML", "text/html") }, mcpExclude: "browser-only WebCrypto; never send the share key to an API or MCP tool" }) },
+      "/__dropway/encrypted-loader.js": { get: op("encrypted_script", "First-party encrypted-site decryptor", { tags: ["pages"], security: false, responses: { 200: text("JavaScript", "text/javascript") }, mcpExclude: "static browser asset" }) },
+      "/__dropway/encrypted-frame": { get: op("encrypted_frame", "Opaque sandbox for authenticated decrypted content", { tags: ["pages"], security: false, responses: { 200: text("Isolated content runtime", "text/html") }, mcpExclude: "browser-only sandbox bootstrap" }) },
       "/login": {
         get: op("login_page", "Sign-in page (API key; first-run setup)", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page" }),
         post: op("login_form_fallback", "Where the sign-in forms post before the page script has loaded: redirects back to /login and ignores the body", { tags: ["pages"], security: false, responses: { 303: { description: "Redirect to /login?retry=1" } }, mcpExclude: "browser page" }),
