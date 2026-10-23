@@ -7,6 +7,22 @@
 import type { Limits } from "./config";
 import type { DropwayContext } from "./context";
 import type { Principal } from "./principal";
+import type { ApiError } from "./errors";
+
+/** SQL prepared on the same dc.env.DB, committed after core SQL in one batch. */
+export interface AtomicWriteExtension {
+  statements: readonly D1PreparedStatement[];
+  /** Translate recognized SQL failures only; undefined preserves the original error. */
+  mapError?(error: unknown): ApiError | undefined;
+}
+
+export interface SiteNameMutation {
+  operation: "create" | "rename";
+  siteId: string;
+  tenantId: string | null;
+  slug: string;
+  previousSlug: string | null;
+}
 
 /** Resolves the caller of a request. Owns tenancy: a member principal names its tenant. */
 export interface IdentityAdapter {
@@ -28,8 +44,18 @@ export interface SiteOwner {
 export interface PolicyAdapter {
   /** Caps for a publish by `principal` to a site owned by `owner`. */
   limits(principal: Principal, owner: SiteOwner, dc: DropwayContext): Limits | Promise<Limits>;
-  /** Called before a site is created. */
+  /** Once-per-create preflight (null for generated names), not an atomic allocation guard. */
   beforeCreateSite?(principal: Principal, input: { slug: string | null; tenantId: string | null }, dc: DropwayContext): void | Promise<void>;
+  /**
+   * Prepare once per concrete create/rename candidate, outside the transaction.
+   * Do not write independently here. Enforce refusal with a failing SQL constraint
+   * in the returned batch, not a SELECT/zero-row result or an after-commit check.
+   */
+  siteNameMutation?(
+    principal: Principal,
+    input: Readonly<SiteNameMutation>,
+    dc: DropwayContext,
+  ): AtomicWriteExtension | Promise<AtomicWriteExtension>;
   /** Called before a deploy is recorded, with its totals. */
   beforeDeploy?(
     principal: Principal,
