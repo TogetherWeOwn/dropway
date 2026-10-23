@@ -32,8 +32,9 @@ packages/server           @dropway/server: createDropway() Hono app factory
   src/path-rewrite.ts     Path mode: prefixes root-relative URLs in HTML/CSS
   src/viewers/            File viewers, one per kind (code, markdown, json, csv, media, notebook, binary...)
   src/ui/                 App-origin UI: home, sign-in, dashboard, file viewer, the dashboard script
-  src/routes/api.ts       REST API v1 (thin)
-  src/routes/api-agent.ts REST twins of the agent tools (PATCH files, PUT access, rename, GET version)
+  src/routes/api.ts       API middleware, JSON parsing and error responses
+  src/operations/         Operation families and compatibility adapters; core.ts fixes stable order
+  src/operations.ts       Operation types, validation and REST/MCP generation
   src/mcp/                Remote MCP server (/mcp): endpoint (index.ts), core tools (tools.ts), schemas
   src/app.ts              App-origin routes: home (./ui), /openapi.json, discovery routes, /claim, /mcp
   src/openapi.ts          OpenAPI 3.1 document for every route (operationId = MCP tool name)
@@ -67,8 +68,8 @@ throws `ApiError` with a stable `code` and a `hint` for the caller.
 | `cleanup.ts` | Hourly cron: expire anonymous sites, purge deleted sites, drop stale uploads, delete orphan blobs |
 | `events.ts` | Runs hooks and metering after the response (never throws) |
 
-The REST routes (`packages/server/src/routes/api.ts`) only parse input, call
-one service and shape JSON. **The MCP server and the CLI's server side must call
+The registry operations (`packages/server/src/operations/`) only parse input,
+call a service and shape JSON. **The MCP server and the CLI's server side must call
 the same services**, never the REST API over HTTP, so permissions, limits and
 errors are identical everywhere.
 
@@ -215,7 +216,8 @@ export default createDropway({
   hooks: [{ onPublish, onDelete, onRequest }], // after the response; errors are logged only
   apiMiddleware: [/* Hono middleware on /api/*, after the principal is resolved */],
   routes: [({ api, app }) => { api.get("/extra", handler); }], // registered BEFORE core routes (can override)
-  mcpTools: [/* McpToolDefinition: name, description, JSON Schema in/out, scopes, toolset, handler(args, { dw, principal, client }) */],
+  operations: [/* defineOperation: zod input/output, service handler, REST path, MCP and CLI metadata */],
+  mcpTools: [/* compatibility escape hatch: MCP-only tools, or replacement by name */],
   mcp: createMcpEndpoint({ name, instructions }), // optional: the default endpoint is mounted at /mcp already
   uiSlots: { navItems: [], pages: [{ path, title, nav, handler }], landing, headHtml, banner, settingsSections, session },
   viewers: [/* extra viewers, tried before core ones */],
@@ -362,20 +364,22 @@ No public registration route or core migration is added.
 
 ### Where to add things
 
-- **A REST endpoint (core):** service function in `packages/core/src/services`,
-  thin route in `packages/server/src/routes/api.ts`, path in `openapi.ts` with the
-  operationId equal to the MCP tool name, a test in `test/`. `llms.txt` and
-  `llms-full.txt` are generated from `openapi.ts`; a test fails when a route is
-  missing from the OpenAPI document.
-- **An MCP tool (core):** add an `McpToolDefinition` to `CORE_MCP_TOOLS` in
-  `packages/server/src/mcp/tools.ts` (name = operationId, toolset, scopes,
-  annotations, flat JSON Schema input, small output schema, `summarize`). The
-  handler calls a service with `ctx.dw` and `ctx.principal`. The endpoint
-  (`mcp/index.ts`) resolves the principal with the identity adapter, applies
-  `idempotencyKey`, scope checks and `?toolsets=` / `?read_only=1`, and turns
-  `ApiError`s into `isError` results. See `docs/MCP.md`.
-- **An MCP tool (extension):** pass it in `createDropway({ mcpTools })`; a tool with
-  a core tool's name replaces it.
+- **An API operation (core):** service function in `packages/core/src/services`,
+  then one `defineOperation()` in the relevant `packages/server/src/operations/`
+  family (listed in `core.ts`) with
+  Zod input/output schemas, a thin service handler, method/path, scopes,
+  description, examples, annotations and optional CLI metadata. REST, OpenAPI,
+  MCP and the command table are generated; do not add a second route or tool.
+  Raw-byte/bootstrap endpoints have an explicit `mcp.exclude` reason.
+  Tests in `test/` enforce registration, metadata and stable tool ordering.
+  `npm run openapi:lint` independently validates the generated document in CI.
+- **An API operation (extension):** pass `defineOperation()` results through
+  `createDropway({ operations })`. Definitions replace by id without reordering;
+  each app gets its own registry and generated discovery. See `docs/OPERATIONS.md`.
+- **An MCP-only tool (compatibility):** `createDropway({ mcpTools })` remains an
+  escape hatch; tools replace by name. Prefer operations for new capabilities.
+  The MCP endpoint still resolves identity, enforces scope checks and applies
+  idempotency, toolset/read-only filtering and ApiError shaping. See `docs/MCP.md`.
 - **Dashboard pages:** register through `uiSlots.pages` (with `nav: true` for a
   navigation link) and render them with `renderAppPage(c, { title, page, body })`
   from `@dropway/server`, which adds the dashboard frame, navigation, banner and

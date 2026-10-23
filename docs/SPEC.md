@@ -206,7 +206,7 @@ Full matrix in section 10.
 
 | ID | Feature | Pri | Status |
 |---|---|---|---|
-| AX-01 | REST API v1 and OpenAPI 3.1, generated from one operation registry | P0 | Partial (hand-written today); R-02 |
+| AX-01 | REST API v1 and OpenAPI 3.1, generated from one operation registry | P0 | Done (R-02); legacy wire adapters preserved |
 | AX-02 | Remote MCP server, Streamable HTTP, stateless, API-key auth, `core` toolset | P0 | R-06 |
 | AX-03 | MCP: OAuth, every toolset, `?toolsets=`, read-only mode, single-site scope, resources, prompts, an MCP Apps site card | P1 | R-24, R-25 |
 | AX-04 | CLI `npx dropway`: `publish --json --wait`, management commands, exit codes, `dropway api` escape hatch | P0 | R-09, R-10 |
