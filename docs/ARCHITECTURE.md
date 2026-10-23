@@ -288,10 +288,15 @@ The session/claim script deliberately calls `POST /api/v1/auth/sessions/refresh`
 naturally carries Origin. It renews the same cookie and D1 authority together after an
 hour; before then it is a no-op. This cookie-only operation skips unrelated bearer
 identity resolution (and API-key last-use writes), not its core session/browser checks.
-Login-link requests carrying browser Fetch Metadata show the destination member and a
-native confirmation form; its guarded `POST /login/confirm` consumes the unspent proof.
-Headerless programmatic GET exchanges retain the one-use issuer contract. The login
-page is no-store/no-referrer; router diagnostics redact URL queries and credential tokens.
+Any `Sec-Fetch-*` header (even empty), or an explicit HTML/XHTML Accept entry (even
+`q=0`), selects read-only identity confirmation. Inspection never slides an existing
+session, even when both write headers are present. The confirmation form's guarded
+`POST /login/confirm` revalidates and consumes the unspent proof. Malformed/empty Accept
+is refused without mutation. Metadata-less GET requests with absent Accept or valid
+non-HTML Accept (including JSON and `*/*`) retain the real one-use issuer contract;
+absence of browser evidence is not universal browser/scanner attestation. Legacy
+browsers without the required write headers cannot confirm or claim. The login page
+is no-store/no-referrer; router diagnostics redact URL queries and credential tokens.
 Auth API operations are registered alongside other core operations, with browser-only
 MCP exclusions; the shared services enforce their real session or email proof.
 `/dashboard/sessions` lists/revokes sessions and signs out. The existing resource dashboard
@@ -303,7 +308,10 @@ POST. No user content runs on these pages. API-key sign-in remains cookie-free.
 (Cloudflare Email Service) delivers; without either, email options are hidden and the
 operations return `feature_unavailable`. Enabled email-code requests require both browser
 headers even without cookies, before challenge creation or delivery, for known and unknown
-emails alike. `EMAIL_FROM` sets the verified sender. Embedding
+emails alike. A consumed code permits a new challenge after the one-minute send
+cooldown; atomic reservation prevents simultaneous reissue deliveries. Unconsumed
+resends preserve their original deadline and remaining five-try budget. `EMAIL_FROM`
+sets the verified sender. Embedding
 cookie adapters and `uiSlots.session` remain separate and require their own security proof.
 
 ## Conventions

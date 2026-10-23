@@ -74,7 +74,7 @@ export async function issueSession(dc: DropwayContext, member: MemberRow, reques
 }
 
 /** Explicit browser surfaces only; ordinary REST and MCP never resolve cookies. */
-async function sessionState(dc: DropwayContext, request: Request) {
+async function sessionState(dc: DropwayContext, request: Request, readOnly = false) {
   if (!["GET", "HEAD"].includes(request.method)) requireBrowserWrite(dc, request);
   const token = sessionToken(request);
   if (!token || new URL(request.url).origin !== appOrigin(dc) || new URL(request.url).protocol !== "https:") throw unauthorized("Sign in to continue.", "Open /login.", "invalid_session");
@@ -85,7 +85,7 @@ async function sessionState(dc: DropwayContext, request: Request) {
   const member = await activeMember(dc, row.member_id);
   if (!member) throw unauthorized();
   // Ordinary navigation omits Origin. It may read, but must not slide authority.
-  const refreshed = browserWriteAllowed(dc, request) && now - row.last_seen_at >= 3600_000;
+  const refreshed = !readOnly && browserWriteAllowed(dc, request) && now - row.last_seen_at >= 3600_000;
   if (refreshed) {
     const changed = await dc.env.DB.prepare("UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ? AND revoked_at IS NULL AND expires_at > ? RETURNING id")
       .bind(now, now + SESSION_TTL, row.id, now).first();
@@ -116,7 +116,7 @@ export async function inspectLoginLink(dc: DropwayContext, token: unknown, reque
   if (!member) throw unauthorized("This login link is invalid or expired.", "Request a new login link.", "invalid_login_link");
   // Do not silently swap a different signed-in account when following a link.
   if (sessionToken(request)) {
-    const current = await resolveSession(dc, request).catch(() => null);
+    const current = await sessionState(dc, request, true).then((state) => state.principal).catch(() => null);
     if (current && current.memberId !== member.id) throw forbidden("Sign out before using a link for a different member.", "Sign out deliberately, then reopen the link.", "session_account_mismatch");
   }
   return { member, hash };

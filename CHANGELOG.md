@@ -22,8 +22,10 @@
   and signed-in anonymous-site claiming. Ordinary REST resources remain bearer-only;
   explicit browser auth and claim writes require exact app `Origin` **and**
   `Sec-Fetch-Site: same-origin`. API-key sign-in stays cookie-free.
-- Browser Fetch Metadata selects deliberate identity confirmation before a login link
-  is consumed. Untrusted session reads cannot slide authority or refresh cookies;
+- Any Fetch Metadata or explicit HTML/XHTML Accept selects read-only identity
+  confirmation before a login link is consumed; malformed Accept is refused. Real
+  metadata-less non-HTML programmatic exchanges remain supported. Confirmation
+  inspection cannot renew a session. Untrusted session reads cannot slide authority or refresh cookies;
   first-party pages use a guarded POST to renew D1 and the same cookie after an hour.
   Access-derived unsafe calls and enabled email-code requests enforce both browser
   headers, regardless of Cookie presence. Explicit bearer clients remain independent.

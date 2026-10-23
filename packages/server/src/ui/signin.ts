@@ -5,13 +5,13 @@ import type { DropwayEnv } from "../env";
 import { escapeHtml, htmlPage } from "../html";
 
 const SCRIPT_PATH = "/__dropway/auth.js";
-const headers = {
+export const SIGNIN_HEADERS = {
   "Content-Security-Policy": "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
 };
 
 function page(c: Context<DropwayEnv>, title: string, body: string) {
-  return c.html(htmlPage({ title, head: `<script src="${SCRIPT_PATH}" defer></script>`, body: `<main class="dw-system"><p><a href="/">Home</a> · <a href="/dashboard/sessions">My sessions</a></p><h1>${escapeHtml(title)}</h1>${body}<p id="dw-auth-status" role="status" aria-live="polite"></p></main>` }), 200, headers);
+  return c.html(htmlPage({ title, head: `<script src="${SCRIPT_PATH}" defer></script>`, body: `<main class="dw-system"><p><a href="/">Home</a> · <a href="/dashboard/sessions">My sessions</a></p><h1>${escapeHtml(title)}</h1>${body}<p id="dw-auth-status" role="status" aria-live="polite"></p></main>` }), 200, SIGNIN_HEADERS);
 }
 
 export async function loginConfirmationPage(c: Context<DropwayEnv>, token: string) {
@@ -38,7 +38,7 @@ export async function claimSubmission(c: Context<DropwayEnv>) {
     const site = await claimSite(dw, p, input.get("slug") ?? "", input.get("claimToken"));
     return c.redirect(`/dashboard/sessions?claimed=${encodeURIComponent(site.slug)}`, 303);
   } catch (err) {
-    if (err instanceof ApiError) return c.text(`${err.message} ${err.hint ?? ""}`, err.status as 400, headers);
+    if (err instanceof ApiError) return c.text(`${err.message} ${err.hint ?? ""}`, err.status as 400, SIGNIN_HEADERS);
     throw err;
   }
 }
@@ -52,7 +52,7 @@ export function installSigninUi(app: Hono<DropwayEnv>) {
       c.header("Set-Cookie", session.cookie);
       return c.redirect("/dashboard/sessions", 303);
     } catch (err) {
-      if (err instanceof ApiError) return c.text(`${err.message} ${err.hint ?? ""}`, err.status as 400, headers);
+      if (err instanceof ApiError) return c.text(`${err.message} ${err.hint ?? ""}`, err.status as 400, SIGNIN_HEADERS);
       throw err;
     }
   });

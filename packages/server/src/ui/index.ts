@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import { ApiError, consumeLoginLink } from "@dropway/core";
-import { installSigninUi, loginConfirmationPage } from "./signin";
+import { installSigninUi, loginConfirmationPage, SIGNIN_HEADERS } from "./signin";
+import { loginNeedsConfirmation } from "./login-intent";
 import type { DropwayEnv } from "../env";
 import type { UiSlots } from "../extensions";
 import { clientScriptResponse } from "./assets";
@@ -19,16 +20,18 @@ export function installUi(app: Hono<DropwayEnv>, slots: UiSlots) {
     c.header("Cache-Control", "no-store");
     c.header("Referrer-Policy", "no-referrer");
     if (c.req.query("token") !== undefined) {
+      for (const [name, value] of Object.entries(SIGNIN_HEADERS)) c.header(name, value);
       try {
-        // Modern browser requests carry Fetch Metadata; explicit programmatic
-        // GET clients retain the one-use exchange contract without these headers.
-        if (["Sec-Fetch-Mode", "Sec-Fetch-Dest", "Sec-Fetch-Site"].some((name) => c.req.header(name) !== undefined)) {
+        // Explicit HTML and any Fetch Metadata require non-consuming inspection.
+        // Only the supported metadata-less, non-HTML profile exchanges directly.
+        if (loginNeedsConfirmation(c.req.raw.headers)) {
           return await loginConfirmationPage(c, c.req.query("token")!);
         }
         const session = await consumeLoginLink(c.get("dw"), c.req.query("token"), c.req.raw);
         c.header("Set-Cookie", session.cookie);
         return c.redirect("/dashboard/sessions", 303);
       } catch (err) {
+        if (err instanceof ApiError && err.code === "invalid_accept") return c.text(`${err.message} ${err.hint ?? ""}`, 400);
         if (err instanceof ApiError && err.code === "session_account_mismatch") return c.text(`${err.message} ${err.hint ?? ""}`, 403);
         return c.redirect("/login?invalid=1", 303);
       }
