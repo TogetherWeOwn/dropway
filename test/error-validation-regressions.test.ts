@@ -130,7 +130,8 @@ describe("REST manifest contentType runtime validation", () => {
     });
     expect(await storedDeploys()).toEqual(before);
     expect.soft(result.status).toBe(400);
-    expect(result.body.error?.code).toBe("invalid_request");
+    // Compatibility deploys retain the first semantic error, not the schema-parser code.
+    expect(result.body.error?.code).toBe("invalid_path");
     expect(fieldPaths(result.body.error?.details?.fields)).toEqual(expect.arrayContaining([
       "files.0.path", "files.0.size", "files.0.sha256", "files.0.contentType",
     ]));
@@ -147,7 +148,7 @@ describe("REST manifest contentType runtime validation", () => {
       });
       expect(await storedDeploys()).toEqual(before);
       expect.soft(result.status).toBe(400);
-      expect(result.body.error?.code).toBe("invalid_request");
+      expect(result.body.error?.code).toBe("invalid_manifest");
       expect(fieldPaths(result.body.error?.details?.fields)).toContain("files.0.contentType");
     });
   }
