@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import * as core from "@dropway/core";
 import { ApiError, setSiteAccess, type DropwayContext, type PolicyAdapter, type Principal, type SiteOwner } from "@dropway/core";
 import { type ServerBindings } from "@dropway/server";
-import { form, freshInstance, jsonBody, ORIGIN, type Instance } from "./helpers";
+import { form, freshInstance, jsonBody, manifestEntry, ORIGIN, type Instance } from "./helpers";
 import { connectMcp } from "./mcp-helpers";
 import { echoOperation, type OperationFixture } from "./operation-fixtures";
 
@@ -37,7 +38,9 @@ async function boundJson(dw: Instance, bindings: ServerBindings, path: string, i
 async function site(dw: Instance, slug = "policy-site") {
   const result = await dw.json("/api/v1/sites", { key: dw.ownerKey, ...jsonBody({ slug }) });
   expect(result.status).toBe(201);
-  return result.body.site;
+  const row = await env.DB.prepare("SELECT id FROM sites WHERE slug = ?").bind(slug).first<{ id: string }>();
+  expect(row, "resolve the stored id, not the public site's serialized fields").not.toBeNull();
+  return row!;
 }
 
 function passwordPolicy(): PolicyContract {
@@ -71,6 +74,27 @@ describe("R-17 capability policy", () => {
     // Exact message/hint assertions also reject core-added commercial wording.
     const row = await env.DB.prepare("SELECT password_hash FROM sites WHERE id = ?").bind(created.id).first<{ password_hash: string | null }>();
     expect(row!.password_hash).toBeNull();
+  });
+
+  it.each([false, true])("denies an initial password create (with deploy: %s) without persisting or metering a site", async (withDeploy) => {
+    const events: string[] = [];
+    const dw = await freshInstance({}, { adapters: {
+      policy: passwordPolicy(), metering: { record(event) { events.push(event.type); } },
+    } });
+    events.length = 0;
+    const result = await dw.json("/api/v1/sites", { key: dw.ownerKey, ...jsonBody({
+      slug: "denied-password-create", password: "acceptance-password",
+      ...(withDeploy ? { files: [await manifestEntry("index.txt", "four")] } : {}),
+    }) });
+    expect(result.status).toBe(403);
+    expect(result.body.error).toMatchObject({
+      code: "limit_reached", message: "Password protection is disabled here.",
+      hint: "Ask the instance administrator to enable passwords.", details: { feature: "site_password" },
+    });
+    expect(await env.DB.prepare("SELECT id FROM sites WHERE slug = 'denied-password-create'").first()).toBeNull();
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM versions").first<{ n: number }>())!.n).toBe(0);
+    expect((await env.FILES.list({ prefix: "blobs/" })).objects).toHaveLength(0);
+    expect(events).toEqual([]);
   });
 
   it("MCP set_site_access preserves the same policy refusal", async () => {
@@ -140,7 +164,7 @@ describe("R-17 capability policy", () => {
   });
 
   it("registry capability metadata refuses an unavailable feature before its handler", async () => {
-    const op = { ...echoOperation(), capability: "screenshots" };
+    const op = { ...echoOperation(), capability: "screenshots" as const };
     const policy: PolicyContract = { limits, capability: () => ({ allowed: true }) };
     const extra = { operations: [op], adapters: { policy } };
     const dw = await freshInstance({}, extra);
@@ -164,6 +188,22 @@ describe("R-17 quotas", () => {
     expect(await env.DB.prepare("SELECT id FROM sites WHERE slug = 'over-limit'").first()).toBeNull();
     const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM sites WHERE deleted_at IS NULL").first<{ n: number }>();
     expect(count!.n).toBe(quota);
+  });
+
+  it("concurrent creates cannot both consume the last site slot", async () => {
+    const policy: PolicyContract = { limits, quota: (_p, key) => key === "sites" ? 1 : null };
+    const dw = await freshInstance({}, { adapters: { policy } });
+    const results = await Promise.all(["concurrent-one", "concurrent-two"].map((slug) =>
+      dw.json("/api/v1/sites", { key: dw.ownerKey, ...jsonBody({ slug }) })));
+    expect(results.map((r) => r.status).sort()).toEqual([201, 403]);
+    const refused = results.find((r) => r.status === 403)!;
+    expect(refused.body.error.code).toBe("limit_reached");
+    const rows = await env.DB.prepare("SELECT slug FROM sites WHERE deleted_at IS NULL").all<{ slug: string }>();
+    expect(rows.results).toHaveLength(1);
+    expect(rows.results[0]!.slug).toBe(results[0]!.status === 201 ? "concurrent-one" : "concurrent-two");
+    const me = await dw.json("/api/v1/me", { key: dw.ownerKey });
+    expect(me.status).toBe(200);
+    expect(me.body.usage).toMatchObject({ sites: 1, storage_bytes: 0 });
   });
 
   it("null adapter quotas mean unlimited rather than zero", async () => {
@@ -273,6 +313,47 @@ describe("R-17 beforeOperation", () => {
     }
     const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM sites").first<{ n: number }>();
     expect(count!.n).toBe(0);
+  });
+
+  it.each([false, true])("raw REST passes parsed path/query defaults to policy and honors refusal (refuse: %s)", async (refuse) => {
+    const seen: unknown[] = [];
+    const policy: PolicyContract = { limits, beforeOperation(principal, op, input) {
+      if (op.id !== "acceptance_raw_policy") return;
+      expect(principal).toMatchObject({ kind: "member", role: "owner" });
+      seen.push(input);
+      if (refuse) throw new ApiError(409, "raw_write_paused", "Raw writes are paused.", "Retry after maintenance.");
+    } };
+    const op = echoOperation({
+      id: "acceptance_raw_policy", path: "/api/v1/acceptance/raw/{name}", rawBody: true,
+      mcp: { exclude: "Requires original request bytes" }, cli: undefined,
+      input: z.object({ name: z.string().min(1), count: z.coerce.number().int().min(1).max(3).default(1) }),
+      output: z.object({ name: z.string(), count: z.number(), content: z.string() }),
+      async handler(input, ctx) {
+        const content = await ctx.request.text();
+        await ctx.dw.env.CACHE.put("acceptance-raw-handler", content);
+        return { ...input, content };
+      },
+    });
+    const dw = await freshInstance({}, { operations: [op], adapters: { policy } });
+    const invalid = await dw.json("/api/v1/acceptance/raw/parsed%20name?count=0", {
+      key: dw.ownerKey, method: "POST", headers: { "Content-Type": "text/plain" }, body: "invalid input",
+    });
+    expect(invalid.status).toBe(400);
+    expect(seen).toEqual([]);
+    expect(await env.CACHE.get("acceptance-raw-handler")).toBeNull();
+    const content = '{ "name": "body-name", "count": 3 }\r\n';
+    const result = await dw.json("/api/v1/acceptance/raw/parsed%20name", {
+      key: dw.ownerKey, method: "POST", headers: { "Content-Type": "application/json" }, body: content,
+    });
+    expect(result.status).toBe(refuse ? 409 : 200);
+    expect(seen).toEqual([{ name: "parsed name", count: 1 }]);
+    if (refuse) {
+      expect(result.body.error).toMatchObject({ code: "raw_write_paused", hint: "Retry after maintenance." });
+      expect(await env.CACHE.get("acceptance-raw-handler")).toBeNull();
+    } else {
+      expect(result.body).toEqual({ name: "parsed name", count: 1, content });
+      expect(await env.CACHE.get("acceptance-raw-handler")).toBe(content);
+    }
   });
 
   it("runs for core registry operations, not only extension operations", async () => {
