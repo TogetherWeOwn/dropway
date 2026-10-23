@@ -6,7 +6,7 @@ import { jsonBody, manifestEntry, type Instance } from "./helpers";
 import { DAY, instance, storageUsage } from "./transfer-fixtures";
 import {
   assertStoredBytes, databaseBoundary, delivery, fileLinks, lifecycle, operationRequest,
-  references, request, REVIEW_PASSWORD, reviewInput,
+  references, request, REVIEW_FILES, REVIEW_PASSWORD, reviewInput,
 } from "./delivery-review-fixtures";
 
 // These catch loss of protected pending evidence through generic cleanup and raw
@@ -112,20 +112,53 @@ describe("pending uploads remain evidence until protection is released", () => {
   });
 
   it.each(protections)("rechecks a %s arriving after stale pending-candidate selection at the destructive write", async (kind: Protection) => {
-    const pending = await failedPendingDelivery(kind);
+    const slug = "pending-ownership-race";
+    const created = await dw.json("/api/v1/sites", { key: dw.ownerKey, ...jsonBody({ slug }) });
+    expect(created.status).toBe(201);
+    const files = await Promise.all(REVIEW_FILES.map((file) => manifestEntry(file.path, file.content, file.contentType)));
+    const started = await dw.json(`/api/v1/sites/${slug}/deploys`, {
+      key: dw.ownerKey, ...jsonBody({ files: files.map(({ bytes, ...entry }) => entry) }),
+    });
+    expect(started.status).toBe(201);
+    for (const file of files) {
+      const uploaded = await dw.call(`/api/v1/blobs/${file.sha256}`, {
+        method: "PUT", key: dw.ownerKey, body: file.bytes, headers: { "Content-Length": String(file.size) },
+      });
+      expect(uploaded.status).toBe(201);
+      await uploaded.text();
+    }
+    const site = await lifecycle(slug);
+    expect(site?.transfer_id, "candidate begins as an ordinary abandoned upload").toBeNull();
+    const pending = { siteId: site!.site_id, versions: await pendingVersions(site!.site_id), refs: await references(site!.site_id) };
+    expect(pending.versions.map((version) => version.status)).toEqual(["pending"]);
+    await assertStoredBytes(pending.siteId);
+    expect(await storageUsage()).toBe(0);
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.now() + 4 * DAY);
-    // Retain protection during the transfer-specific pass. Remove it only at
-    // pending-candidate selection, then restore it just before the actual write.
+    // No transfer exists at selection. Attach ownership and protection only
+    // before the real destructive write, after the candidate query has returned.
     let selected = false;
     let raced = false;
     const db = databaseBoundary(async (sql) => {
       if (!selected && sql.some((statement) => /\bSELECT\b[\s\S]*\bFROM\s+versions\b[\s\S]*\bstatus\s*=\s*'pending'/i.test(statement))) {
+        expect((await lifecycle(slug))?.transfer_id).toBeNull();
         selected = true;
-        await protection(pending.siteId, kind, false);
       } else if (selected && !raced && sql.some((statement) => /\bDELETE\s+FROM\s+(?:version_files|versions)\b/i.test(statement))) {
-        raced = true;
+        expect(await pendingVersions(pending.siteId)).toEqual(pending.versions);
+        const transferId = crypto.randomUUID();
+        await env.DB.batch([
+          env.DB.prepare(`INSERT INTO transfers (id, site_id, tenant_id, member_id, slug, expires_at, storage_bytes, created_at)
+            SELECT ?, id, tenant_id, created_by, slug, ?, 18, ? FROM sites WHERE id = ?`)
+            .bind(transferId, Date.now() + 2 * DAY, Date.now(), pending.siteId),
+          env.DB.prepare(`INSERT INTO transfer_files (transfer_id, path, sha256, size, content_type)
+            SELECT ?, vf.path, vf.sha256, vf.size, vf.content_type FROM version_files vf
+            JOIN versions v ON v.id = vf.version_id WHERE v.site_id = ?`).bind(transferId, pending.siteId),
+          env.DB.prepare("UPDATE sites SET mode = 'transfer' WHERE id = ?").bind(pending.siteId),
+        ]);
         await protection(pending.siteId, kind, true);
+        expect((await lifecycle(slug))?.transfer_id).toBe(transferId);
+        expect(await storageUsage(), "real transfer insertion accounts for its bytes").toBe(18);
+        raced = true;
       }
     });
     await cleanup({ DB: db });
