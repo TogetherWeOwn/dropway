@@ -132,4 +132,3 @@ export async function openTransferDownload(dc: DropwayContext, request: Request,
   if (request.method === "HEAD") await body.cancel();
   return { locked: false as const, transfer: t, file, body: request.method === "HEAD" ? null : body, offset, length, ranged: !!range };
 }
-
