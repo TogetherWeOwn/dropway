@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { createExecutionContext, createScheduledController, env, waitOnExecutionContext } from "cloudflare:test";
 import * as core from "@dropway/core";
-import { ApiError, type DropwayContext } from "@dropway/core";
+import { ApiError, type DropwayContext, type PolicyAdapter, type Principal, type SiteOwner } from "@dropway/core";
 import { type ServerBindings } from "@dropway/server";
 import { freshInstance, jsonBody, manifestEntry, type Instance } from "./helpers";
 import { connectMcp } from "./mcp-helpers";
+
+type QuotaPolicy = PolicyAdapter & {
+  quota?(p: Principal, key: string, owner: SiteOwner | null, dc: DropwayContext): number | null | Promise<number | null>;
+};
 
 async function publish(dw: Instance, slug: string, files: { path: string; content: string }[], headers?: HeadersInit) {
   const result = await dw.json("/api/v1/publish", { key: dw.ownerKey, ...jsonBody({ slug, files }), ...(headers ? { headers } : {}) });
@@ -125,6 +129,37 @@ describe("R-17 persisted usage lifecycle", () => {
     expect(await usage(await tenantId())).toMatchObject({ sites: 1, storage_bytes: 5 });
   });
 
+  it.each(["sequential", "concurrent"])("%s finalizes recheck storage when two pending deploys would exceed the quota together", async (mode) => {
+    const policy: QuotaPolicy = {
+      limits: (_p, _o, dc) => dc.config.limits,
+      quota: (_p, key) => key === "storage_bytes" ? 5 : null,
+    };
+    const dw = await freshInstance({}, { adapters: { policy } });
+    const slugs = ["pending-quota-one", "pending-quota-two"];
+    for (const slug of slugs) expect((await dw.json("/api/v1/sites", { key: dw.ownerKey, ...jsonBody({ slug }) })).status).toBe(201);
+    // Both manifests fit independently while usage is zero, but 4 + 4 exceeds 5.
+    const pending = [await deploy(dw, slugs[0]!, "four"), await deploy(dw, slugs[1]!, "FIVE")];
+    for (const item of pending) expect((await dw.json(`/api/v1/blobs/${item.entry.sha256}`, {
+      key: dw.ownerKey, method: "PUT", body: item.entry.bytes, headers: { "Content-Length": "4" },
+    })).status).toBe(201);
+    const results = mode === "concurrent"
+      ? await Promise.all(pending.map((item, i) => finalize(dw, slugs[i]!, item.id)))
+      : [await finalize(dw, slugs[0]!, pending[0]!.id), await finalize(dw, slugs[1]!, pending[1]!.id)];
+    expect(results.map((r) => r.status).sort()).toEqual([200, 403]);
+    expect(results.find((r) => r.status === 403)!.body.error.code).toBe("limit_reached");
+    const ready = await env.DB.prepare("SELECT id FROM versions WHERE status = 'ready'").all<{ id: string }>();
+    expect(ready.results).toHaveLength(1);
+    const winner = results.findIndex((r) => r.status === 200);
+    expect(ready.results[0]!.id).toBe(pending[winner]!.id);
+    for (const [i, slug] of slugs.entries()) {
+      const row = await env.DB.prepare("SELECT current_version_id FROM sites WHERE slug = ?").bind(slug).first<{ current_version_id: string | null }>();
+      expect(row!.current_version_id).toBe(i === winner ? pending[i]!.id : null);
+    }
+    expect(await usage(await tenantId())).toMatchObject({ sites: 2, storage_bytes: 4 });
+    expect((await finalize(dw, slugs[winner]!, pending[winner]!.id)).body.replayed).toBe(true);
+    expect(await usage(await tenantId())).toMatchObject({ sites: 2, storage_bytes: 4 });
+  });
+
   it("idempotent publish and unchanged republish do not double-count sites or bytes", async () => {
     const dw = await freshInstance();
     const files = [{ path: "index.txt", content: "four" }];
@@ -135,6 +170,23 @@ describe("R-17 persisted usage lifecycle", () => {
     const unchanged = await publish(dw, "replayed-publish", files);
     expect(unchanged.unchanged).toBe(true);
     expect(await usage(await tenantId())).toMatchObject({ sites: 1, storage_bytes: 4 });
+  });
+
+  it.each(["zero", "conflicting"])("a verified hash cannot be reused with %s declared sizes to corrupt storage accounting", async (shape) => {
+    const dw = await freshInstance();
+    await publish(dw, "verified-size", [{ path: "index.txt", content: "hello" }]);
+    const entry = await manifestEntry("index.txt", "hello");
+    const files = [{ path: "zero.txt", sha256: entry.sha256, size: 0 }];
+    if (shape === "conflicting") files.push({ path: "real.txt", sha256: entry.sha256, size: 5 });
+    const result = await dw.json("/api/v1/sites/verified-size/deploys", { key: dw.ownerKey, ...jsonBody({ files }) });
+    expect(result.status).toBe(400);
+    expect(result.body.error).toMatchObject({ code: expect.stringMatching(/^[a-z][a-z0-9_]*$/), hint: expect.any(String) });
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM versions").first<{ n: number }>())!.n).toBe(1);
+    expect((await env.DB.prepare("SELECT size FROM blobs WHERE sha256 = ?").bind(entry.sha256).first<{ size: number }>())!.size).toBe(5);
+    expect(await usage(await tenantId())).toMatchObject({ sites: 1, storage_bytes: 5 });
+    const served = await dw.call("/s/verified-size/?raw=1");
+    expect(served.status).toBe(200);
+    expect(await served.text()).toBe("hello");
   });
 
   it("shared hashes remain charged once until their last active site is deleted", async () => {
@@ -160,6 +212,40 @@ describe("R-17 persisted usage lifecycle", () => {
       key: dw.ownerKey, ...jsonBody({ claimToken: anonymous.body.claimToken }),
     });
     expect(claim.status).toBe(200);
+    expect(await usage(id)).toMatchObject({ sites: 2, storage_bytes: 9 });
+  });
+
+  it.each(["sites", "storage_bytes"])("claim cannot exceed the tenant's %s quota or consume the claim token on refusal", async (resource) => {
+    let limit: number | null = null;
+    const policy: QuotaPolicy = {
+      limits: (_p, _o, dc) => dc.config.limits,
+      quota: (_p, key) => key === resource ? limit : null,
+    };
+    const dw = await freshInstance({ anonymous: { enabled: true } }, { adapters: { policy } });
+    await publish(dw, "claim-quota-owned", [{ path: "owned.txt", content: "four" }]);
+    const anonymous = await dw.json("/api/v1/publish", jsonBody({ files: [{ path: "anonymous.txt", content: "hello" }] }));
+    expect(anonymous.status).toBe(201);
+    const slug = anonymous.body.slug as string;
+    const before = await env.DB.prepare("SELECT tenant_id, claim_token_hash, expires_at, current_version_id FROM sites WHERE slug = ?").bind(slug).first();
+    expect(before).toMatchObject({ tenant_id: null, claim_token_hash: expect.any(String), current_version_id: expect.any(String) });
+    limit = resource === "sites" ? 1 : 8;
+    const claim = () => dw.json(`/api/v1/sites/${slug}/claim`, {
+      key: dw.ownerKey, ...jsonBody({ claimToken: anonymous.body.claimToken }),
+    });
+    const denied = await claim();
+    expect(denied.status).toBe(403);
+    expect(denied.body.error.code).toBe("limit_reached");
+    const after = await env.DB.prepare("SELECT tenant_id, claim_token_hash, expires_at, current_version_id FROM sites WHERE slug = ?").bind(slug).first();
+    expect(after).toEqual(before);
+    const id = await tenantId();
+    expect(await usage(id)).toMatchObject({ sites: 1, storage_bytes: 4 });
+    const served = await dw.call(`/s/${slug}/?raw=1`);
+    expect(served.status).toBe(200);
+    expect(await served.text()).toBe("hello");
+    limit = null;
+    expect((await claim()).status).toBe(200);
+    expect(await usage(id)).toMatchObject({ sites: 2, storage_bytes: 9 });
+    expect((await claim()).status).toBe(409);
     expect(await usage(id)).toMatchObject({ sites: 2, storage_bytes: 9 });
   });
 

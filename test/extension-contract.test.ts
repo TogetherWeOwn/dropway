@@ -18,8 +18,8 @@ async function storedSite(slug: string) {
 }
 
 describe("extension API contract", () => {
-  it("exports extension API version 2 from the public server entry point", () => {
-    expect(server).toHaveProperty("EXTENSION_API_VERSION", 2);
+  it("exports extension API version 3 from the public server entry point", () => {
+    expect(server).toHaveProperty("EXTENSION_API_VERSION", 3);
   });
 
   it("uses an extension identity without an API key and enforces its scopes", async () => {
