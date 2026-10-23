@@ -18,6 +18,50 @@ const expectDeprecated = (res: Response, successor: string) => {
   expect(res.headers.get("link")).toContain(`<${successor}>; rel="successor-version"`);
 };
 
+/**
+ * fetch() in CORS mode as a browser runs it from a page on `pageOrigin` (Fetch standard): follows
+ * redirects and applies the CORS check to every response, redirects included, sending
+ * `Origin: null` once a redirect crossed origins. Throws TypeError, as the browser does, at the
+ * first response that fails the check.
+ */
+async function corsFetch(url: string, pageOrigin: string, credentials: "omit" | "include" = "omit"): Promise<Response[]> {
+  const hops: Response[] = [];
+  let current = new URL(url);
+  let tainted = false;
+  for (let i = 0; i < 20; i++) {
+    const origin = tainted ? "null" : pageOrigin;
+    const res = await dw.call(current.href, { headers: { Origin: origin, "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty" } });
+    const allow = res.headers.get("access-control-allow-origin");
+    const ok = credentials === "omit" ? allow === "*" || allow === origin : allow === origin && res.headers.get("access-control-allow-credentials") === "true";
+    if (!ok) throw new TypeError(`Failed to fetch: CORS check failed at ${current.href} (${res.status})`);
+    hops.push(res);
+    const location = res.headers.get("location");
+    if (res.status < 300 || res.status > 399 || !location) return hops;
+    const next = new URL(location, current);
+    if (next.origin !== current.origin && pageOrigin !== current.origin) tainted = true;
+    current = next;
+  }
+  throw new TypeError("Failed to fetch: too many redirects");
+}
+
+/**
+ * One row per path family servedOnLegacyOrigin() keeps (legacy.ts), read with GET and HEAD on the
+ * old host. Each must answer in place with the migration headers; dropping its exemption turns
+ * the row red (the read would get an empty 308 without them).
+ */
+const SERVED_READS: Array<[path: string, status: number, withKey: boolean]> = [
+  ["/api/v1/me", 200, true],
+  ["/mcp", 401, false],
+  ["/mcp/x", 401, false], // sub-paths, mounted with app.all("/mcp/*")
+  ["/health", 200, false],
+  ["/.well-known/agent-skills/index.json", 200, false],
+  ["/.well-known/agent-skills/dropway/SKILL.md", 200, false],
+  ["/llms.txt", 200, false],
+  ["/llms-full.txt", 200, false],
+  ["/openapi.json", 200, false],
+  ["/skill.md", 200, false],
+];
+
 describe("config", () => {
   it("parses LEGACY_APP_ORIGINS and LEGACY_DEPRECATED_AT; needs APP_ORIGIN; drops the current origin", () => {
     const c = resolveConfig({
@@ -50,6 +94,16 @@ describe("legacy app origin: agents keep working, pages move", () => {
     expectDeprecated(bad, `${NEW}/api/v1/sites`);
   });
 
+  for (const method of ["GET", "HEAD"]) {
+    it.each(SERVED_READS)(`answers ${method} %s in place on the old host (status %i), never redirected`, async (path, status, withKey) => {
+      const res = await dw.call(path, { method, key: withKey ? dw.ownerKey : null, headers: { Accept: "*/*" } });
+      expect(res.status).toBe(status);
+      expect(res.headers.get("location")).toBeNull();
+      expectDeprecated(res, `${NEW}${path}`);
+      if (method === "GET") expect((await res.text()).length).toBeGreaterThan(0);
+    });
+  }
+
   it("serves MCP, /health and /.well-known/* without redirecting; their URLs point at the new origin", async () => {
     const mcp = await dw.call("/mcp", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" }, body: "{}" });
     expect(mcp.status).toBe(401);
@@ -79,10 +133,22 @@ describe("legacy app origin: agents keep working, pages move", () => {
     expect(text).toMatch(/^# Kofra\n/);
     expect(text).toContain(`${NEW}/mcp`);
     expect(text).not.toContain(ORIGIN);
-    expect((await (await dw.call("/llms-full.txt")).text()).includes(ORIGIN)).toBe(false);
+
+    const full = await dw.call("/llms-full.txt");
+    expect(full.status).toBe(200);
+    expectDeprecated(full, `${NEW}/llms-full.txt`);
+    const ref = await full.text();
+    expect(ref).toMatch(/^# Kofra\n/);
+    expect(ref).toContain("\n# Full reference\n");
+    expect(ref).toContain("\n## REST operations\n");
+    expect(ref).toContain("\n## MCP tools\n");
+    expect(ref).toContain(`${NEW}/mcp`);
+    expect(ref).toContain(`homepage: ${NEW}`);
+    expect(ref).not.toContain(ORIGIN);
 
     const api = await dw.json("/openapi.json");
     expect(api.status).toBe(200);
+    expectDeprecated(api.res, `${NEW}/openapi.json`);
     expect(api.body.servers[0].url).toContain(NEW);
 
     const skill = await dw.call("/skill.md");
@@ -101,10 +167,27 @@ describe("legacy app origin: agents keep working, pages move", () => {
       expect(res.status, path).toBe(308);
       expect(res.headers.get("location"), path).toBe(`${NEW}${path.replace(/#.*$/, "")}`);
       expect(res.headers.get("cache-control")).toBe("no-store");
+      expect(res.headers.get("access-control-allow-origin"), path).toBe("*");
+      expect(res.headers.get("access-control-allow-credentials"), path).toBeNull();
     }
     const head = await dw.call("/dashboard", { method: "HEAD" });
     expect(head.status).toBe(308);
     expect(head.headers.get("location")).toBe(`${NEW}/dashboard`);
+  });
+
+  it("keeps published files readable cross-origin at their old URLs: the 308 carries Access-Control-Allow-Origin: *, never credentials", async () => {
+    const pub = await dw.json("/api/v1/publish", { method: "POST", key: dw.ownerKey, body: form({ "index.html": "<p>hi</p>", "data.json": '{"n":1}' }) });
+    expect(pub.status).toBe(201);
+    const old = `${ORIGIN}/s/${pub.body.slug}/data.json?v=2`;
+    // A page on another origin reads the file at its old URL; the browser follows the 308.
+    const hops = await corsFetch(old, "https://reader.example");
+    expect(hops.map((r) => r.status)).toEqual([308, 200]);
+    const [moved, file] = hops as [Response, Response];
+    expect(moved.headers.get("location")).toBe(`${NEW}/s/${pub.body.slug}/data.json?v=2`);
+    expect(moved.headers.get("access-control-allow-credentials")).toBeNull();
+    expect(await file.json()).toEqual({ n: 1 });
+    // Credentialed reads stop at the redirect, as they did at the old file.
+    await expect(corsFetch(old, "https://reader.example", "include")).rejects.toThrow(TypeError);
   });
 
   it("serves other methods in place (webhooks and form posts are never redirected)", async () => {

@@ -188,8 +188,10 @@ Keep `"workers_dev": true`, set `APP_ORIGIN` to the new origin and list the old 
   headers. They are not redirected: HTTP clients drop the `Authorization` header on a cross-origin
   redirect, so a redirected agent would get 401. The CLI prints a one-line note with the new address.
 - Other `GET`/`HEAD` requests (pages, the dashboard, sign-in links) answer `308` to the same path and
-  query on the new origin. The redirect is not cached, so moving back works at once. Other methods
-  (webhooks, form posts) are served in place.
+  query on the new origin. The redirect is not cached, so moving back works at once. It carries
+  `Access-Control-Allow-Origin: *` (never credentials), so cross-origin reads of published files at
+  their old URLs (`/s/<site>/...`) follow it; the new origin decides whether the read is allowed.
+  Other methods (webhooks, form posts) are served in place.
 - Browser sessions are per host: people sign in again on the new origin.
 
 ## Upgrades, backups, removal
