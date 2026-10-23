@@ -1,6 +1,6 @@
 import { browserSignin } from "./auth-client";
 import type { Context, Hono } from "hono";
-import { ApiError, claimSite, getMember, listSessions, resolveSession, sessionSetCookie, sessionToken } from "@dropway/core";
+import { ApiError, browserWriteAllowed, claimSite, consumeLoginLink, getMember, inspectLoginLink, listSessions, requireBrowserWrite, resolveSession, sessionSetCookie, sessionToken } from "@dropway/core";
 import type { DropwayEnv } from "../env";
 import { escapeHtml, htmlPage } from "../html";
 
@@ -12,6 +12,11 @@ const headers = {
 
 function page(c: Context<DropwayEnv>, title: string, body: string) {
   return c.html(htmlPage({ title, head: `<script src="${SCRIPT_PATH}" defer></script>`, body: `<main class="dw-system"><p><a href="/">Home</a> · <a href="/dashboard/sessions">My sessions</a></p><h1>${escapeHtml(title)}</h1>${body}<p id="dw-auth-status" role="status" aria-live="polite"></p></main>` }), 200, headers);
+}
+
+export async function loginConfirmationPage(c: Context<DropwayEnv>, token: string) {
+  const { member } = await inspectLoginLink(c.get("dw"), token, c.req.raw);
+  return page(c, "Confirm sign-in", `<div id="dw-login-confirm"><p>This link signs you in as <strong>${escapeHtml(member.email ?? member.name ?? member.id)}</strong>. Only continue if this is your account.</p><form method="post" action="/login/confirm"><input type="hidden" name="token" value="${escapeHtml(token)}"><button type="submit">Sign in as this member</button></form><p><a href="/login">Cancel</a></p></div>`);
 }
 
 export async function claimPage(c: Context<DropwayEnv>) {
@@ -39,6 +44,18 @@ export async function claimSubmission(c: Context<DropwayEnv>) {
 }
 
 export function installSigninUi(app: Hono<DropwayEnv>) {
+  app.post("/login/confirm", async (c) => {
+    try {
+      requireBrowserWrite(c.get("dw"), c.req.raw);
+      const body = new URLSearchParams(await c.req.text());
+      const session = await consumeLoginLink(c.get("dw"), body.get("token"), c.req.raw);
+      c.header("Set-Cookie", session.cookie);
+      return c.redirect("/dashboard/sessions", 303);
+    } catch (err) {
+      if (err instanceof ApiError) return c.text(`${err.message} ${err.hint ?? ""}`, err.status as 400, headers);
+      throw err;
+    }
+  });
   app.get(SCRIPT_PATH, (c) => c.body(`(${browserSignin.toString()})();`, 200, { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" }));
   app.get("/dashboard/sessions", async (c) => {
     const dw = c.get("dw");
@@ -48,7 +65,7 @@ export function installSigninUi(app: Hono<DropwayEnv>) {
     const member = await getMember(dw, principal.memberId);
     const result = await listSessions(dw, principal);
     const rows = result.sessions.map((session) => `<li>${escapeHtml(String(session.via))} · ${escapeHtml(new Date(Number(session.createdAt)).toISOString())} <button type="button" data-revoke="${escapeHtml(String(session.id))}">Revoke session</button></li>`).join("");
-    c.header("Set-Cookie", sessionSetCookie(sessionToken(c.req.raw)!));
+    if (browserWriteAllowed(dw, c.req.raw)) c.header("Set-Cookie", sessionSetCookie(sessionToken(c.req.raw)!));
     return page(c, "Your sessions", `<p>Signed in as ${escapeHtml(member.email ?? "member")}.</p><p>Browser sessions can claim anonymous sites. The API-key dashboard and agents use bearer credentials, never this cookie.</p><ul>${rows}</ul><form method="post" action="/api/v1/auth/logout"><button type="submit">Sign out</button></form><p><a href="/login">API-key dashboard</a></p>`);
   });
 }

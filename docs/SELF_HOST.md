@@ -72,8 +72,13 @@ curl -X POST "$DROPWAY_URL/api/v1/login-links" \
 Open the returned secret `url` in the intended person's browser. Administrators may
 specify `memberId` for another existing member, but cannot grant greater authority.
 Restricted API keys cannot become full-role browser sessions. Use an HTTPS app origin.
+Modern browser requests show the member's identity first: confirm only if it is your
+account. Rendering or refreshing that page does not consume the link. Confirmation
+requires a deliberate same-origin POST with both browser security headers. Programmatic
+GET clients without Fetch Metadata retain direct exchange; protect the URL as a secret.
 `/dashboard/sessions` lists sessions, revokes selected sessions and signs out. Sessions
-last 30 days and slide with activity. Removing a member invalidates their sessions.
+last 30 days and slide only on activity supplying both browser security headers; ordinary
+GET navigation without Origin is read-only. Removing a member invalidates their sessions.
 API-key sign-in and the resource dashboard remain available; ordinary REST resources
 and MCP use bearer tokens, not cookies. No persistent API key is minted by browser login.
 
@@ -81,7 +86,10 @@ Email sign-in is optional: configure a Cloudflare Email Service `send_email` bin
 named `EMAIL` and `EMAIL_FROM` with a sender on your verified sending domain. Without a
 sender override the adapter uses `noreply@<app-host>` (which must be a verified sending
 host for delivery). Existing members receive a six-digit code with five tries and a
-15-minute expiry. Resending during that interval does not reset the budget. Without
+15-minute expiry. Successful resends have a one-minute cooldown and keep the original
+expiry and remaining attempt budget. Failed delivery permits a deliberate immediate
+retry without resetting attempts or reopening a consumed code. Surrounding copy/paste
+whitespace is trimmed; the code must still be exactly six ASCII digits. Without
 `EMAIL` or an embedding `EmailAdapter`, the UI hides email sign-in and both operations
 return `feature_unavailable`. Delivery uses the current
 [Cloudflare Email Service structured Workers API](https://developers.cloudflare.com/email-service/api/send-emails/workers-api/),
