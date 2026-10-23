@@ -206,19 +206,36 @@ describe("Access JWKS cooldown survives issuer capacity pressure", () => {
     now += 30_000;
     expect((await fixtures[16]!.request(tokens[16]!)).status).toBe(200);
     for (const f of fixtures) f.endpoint.reply = () => new Response(null, { status: 503 });
+    const callsBefore = fixtures.reduce((sum, f) => sum + f.endpoint.calls, 0);
     let trusted = 0;
     let refetched = 0;
+    let capacityDenied = 0;
     for (let i = 0; i < 17; i++) {
       const before = fixtures[i]!.endpoint.calls;
       const response = await fixtures[i]!.request(tokens[i]!);
-      if (response.status === 200) trusted++;
-      else await denied(response);
-      if (fixtures[i]!.endpoint.calls > before) {
+      const fetched = fixtures[i]!.endpoint.calls - before;
+      if (fetched > 0) {
         refetched++;
+        expect(fetched, "an evicted issuer attempts only one retrieval").toBe(1);
         expect(response.status, "evicted key material cannot survive failed retrieval").toBe(401);
+        await denied(response);
+      } else if (response.status === 200) {
+        trusted++;
+      } else {
+        // Churn can leave all 16 slots cooling before this issuer is visited.
+        // No attempted fetch means capacity denial, not an endpoint failure.
+        capacityDenied++;
+        expect(response.status).toBe(503);
+        expect(await response.json()).toMatchObject({ error: {
+          code: "access_key_cache_busy", hint: expect.stringMatching(/retry|try again|capacity|busy|temporar/i),
+        } });
+        expect(response.headers.getSetCookie()).toEqual([]);
+        expect(fixtures[i]!.endpoint.calls, "capacity denial never starts a fetch").toBe(before);
       }
     }
     expect(trusted, "at most 16 live issuer states, never a hidden stale-key store").toBeLessThanOrEqual(16);
     expect(refetched, "at least one evicted issuer must retrieve again and fail closed").toBeGreaterThanOrEqual(1);
+    expect(capacityDenied, "sequential churn eventually pins all 16 slots in cooldown").toBeGreaterThanOrEqual(1);
+    expect(fixtures.reduce((sum, f) => sum + f.endpoint.calls, 0), "no extra network beyond the failed refetches").toBe(callsBefore + refetched);
   });
 });
