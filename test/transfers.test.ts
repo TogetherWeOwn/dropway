@@ -193,7 +193,7 @@ describe("origin separation and inert transfer pages", () => {
     expect(r.status).toBe(200);
     expect(r.headers.get("content-disposition")).toMatch(/^attachment(?:;|$)/i);
     expect(r.headers.get("x-content-type-options")).toBe("nosniff");
-    expect(r.headers.get("x-dropway-viewer")).toBeNull();
+    expect(r.headers.get("x-kofra-viewer")).toBeNull();
     expect(await r.text()).toBe(FILES[1]!.content);
   });
 
