@@ -3,12 +3,15 @@ import { siteUrl } from "../context";
 import { blobKey } from "./blobs";
 import { emit, meter } from "./events";
 import { dropLive } from "./live";
+import { cleanupTransfers } from "./transfer-cleanup";
 
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
 
 export interface CleanupReport {
   expiredSites: number;
+  expiredTransfers: number;
+  purgedTransfers: number;
   purgedSites: number;
   abandonedDeploys: number;
   deletedBlobs: number;
@@ -23,12 +26,12 @@ export interface CleanupReport {
  * Each step is bounded so one run stays well inside Worker limits.
  */
 export async function runCleanup(dc: DropwayContext, now = Date.now()): Promise<CleanupReport> {
-  const report: CleanupReport = { expiredSites: 0, purgedSites: 0, abandonedDeploys: 0, deletedBlobs: 0 };
+  const report: CleanupReport = { expiredSites: 0, purgedSites: 0, abandonedDeploys: 0, deletedBlobs: 0, ...await cleanupTransfers(dc, now) };
   const db = dc.env.DB;
 
   // 1. Expire anonymous sites.
   const { results: expired } = await db
-    .prepare("SELECT id, slug, tenant_id FROM sites WHERE expires_at IS NOT NULL AND expires_at < ? AND deleted_at IS NULL LIMIT 200")
+    .prepare("SELECT id, slug, tenant_id FROM sites WHERE mode = 'site' AND expires_at IS NOT NULL AND expires_at < ? AND deleted_at IS NULL LIMIT 200")
     .bind(now)
     .all<{ id: string; slug: string; tenant_id: string | null }>();
   for (const s of expired) {
@@ -44,7 +47,7 @@ export async function runCleanup(dc: DropwayContext, now = Date.now()): Promise<
 
   // 2. Purge deleted sites (rows only; their blobs become orphans for step 4).
   const { results: gone } = await db
-    .prepare("SELECT id FROM sites WHERE deleted_at IS NOT NULL AND deleted_at < ? LIMIT 50")
+    .prepare("SELECT id FROM sites WHERE mode = 'site' AND deleted_at IS NOT NULL AND deleted_at < ? LIMIT 50")
     .bind(now - HOUR)
     .all<{ id: string }>();
   for (const s of gone) {
@@ -57,17 +60,21 @@ export async function runCleanup(dc: DropwayContext, now = Date.now()): Promise<
     report.purgedSites++;
   }
 
-  // 3. Abandoned uploads.
+  // 3. Abandoned uploads. Transfer references belong to cleanupTransfers, even
+  // before publication: its live retention fence and purge accounting must win.
+  const abandoned = `status = 'pending' AND created_at < ?
+    AND NOT EXISTS (SELECT 1 FROM transfers t WHERE t.site_id = versions.site_id)`;
   const { results: stale } = await db
-    .prepare("SELECT id FROM versions WHERE status = 'pending' AND created_at < ? LIMIT 200")
+    .prepare(`SELECT id FROM versions WHERE ${abandoned} LIMIT 200`)
     .bind(now - DAY)
     .all<{ id: string }>();
   for (const v of stale) {
-    await db.batch([
-      db.prepare("DELETE FROM version_files WHERE version_id = ?").bind(v.id),
-      db.prepare("DELETE FROM versions WHERE id = ? AND status = 'pending'").bind(v.id),
+    const result = await db.batch([
+      db.prepare(`DELETE FROM version_files WHERE version_id = ?
+        AND EXISTS (SELECT 1 FROM versions WHERE id = ? AND ${abandoned})`).bind(v.id, v.id, now - DAY),
+      db.prepare(`DELETE FROM versions WHERE id = ? AND ${abandoned}`).bind(v.id, now - DAY),
     ]);
-    report.abandonedDeploys++;
+    if (result[1]?.meta.changes) report.abandonedDeploys++;
   }
 
   // 4. Unreferenced blobs. The row is deleted only if still unreferenced at that instant;

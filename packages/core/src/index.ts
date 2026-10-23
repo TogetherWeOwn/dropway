@@ -6,6 +6,7 @@
  * permissions are identical on every surface.
  */
 export * from "./errors";
+export * from "./error-codes";
 export * from "./config";
 export * from "./context";
 export * from "./principal";
@@ -30,3 +31,5 @@ export * from "./services/cleanup";
 export * from "./services/idempotency";
 export * from "./services/site-ops";
 export * from "./services/sources";
+export * from "./services/transfers";
+export * from "./services/transfer-downloads";

@@ -277,6 +277,34 @@ Full matrix in section 10.
 | OPS-07 | Upgrade by re-running the deploy (migrations first); restore D1 with Time Travel (30 days) | P0 | Done |
 | OPS-08 | Versioned extension API, contract tests and a testing kit for embedding apps | P0/P1 | R-01 done: version 1 and existing-point contracts; testing kit and future-point contracts R-18 |
 
+### File deliveries
+
+| ID | Capability | Priority | Status |
+|---|---|---|---|
+| XFR-01 | `create_transfer`: immutable files, up to 50 normalized recipient addresses, a plain-text message, password, expiry and optional download limit; general and per-recipient links | P1 | Implemented; deployment verification pending |
+| XFR-02 | App-origin delivery/password pages; sites-host attachment-only downloads; 404 before 451 before 410 before password protection | P1 | Implemented; deployment verification pending |
+| XFR-03 | Sender-only management, per-file/recipient counts, guarded updates and bulk revocation; same-call current-password proof and digest-bound unlock grants | P1 | Implemented; deployment verification pending |
+| XFR-04 | Permanent sender-owned slug reservations; idempotent hourly expiry; holds fence purge, storage released once at purge | P1 | Implemented; deployment verification pending |
+
+Delivery files cannot be replaced through site publishing, settings, access or
+version operations. Create another transfer instead. A password is 8–1,024
+characters without NUL; empty means no password. Expiry is one hour to the
+instance ceiling (`TRANSFER_MAX_EXPIRY_DAYS`, default 30, at most 3,650 days),
+further lowered by `PolicyAdapter.limits`. Download limits are 1–10,000.
+Recipient addresses attribute links; they do not authenticate recipients or
+prevent a recipient from forwarding a link. No email is sent by these operations.
+
+A counted download is a served GET without a Range, or a range starting at zero.
+Pages, HEAD, resumed ranges, invalid ranges and denied requests do not count.
+Unlock cookies live only on the app host; the app renders short-lived signed
+sites-host download links after unlock. Their grant is bound to the password
+digest, is checked against live transfer state and never bypasses revocation,
+takedown, expiry or limits. Query grants are bearer credentials for 15 minutes;
+pages and downloads use no-store and no-referrer. Transfer metadata remains
+readable to the sender after expiry/revocation. Byte references are purged after
+24 hours closed, only while no hold/takedown is live. See `docs/errors.md` for
+transfer errors.
+
 ### 4.16 Not in this edition
 
 These are deliberately absent. Section 6 shows the generic extension points an embedding

@@ -8,6 +8,7 @@ import * as server from "@dropway/server";
 import { renderAppPage, type McpToolDefinition, type ServerBindings, type Viewer } from "@dropway/server";
 import { form, freshInstance, jsonBody, manifestEntry, ORIGIN } from "./helpers";
 import { connectMcp } from "./mcp-helpers";
+import { create as createTransfer, DAY, input as transferInput, instance as transferInstance, op, update as updateTransfer } from "./transfer-fixtures";
 
 // Public-boundary tests: real routing, services and emulated storage; only the
 // adapters supplied by an embedding application are fakes.
@@ -18,8 +19,42 @@ async function storedSite(slug: string) {
 }
 
 describe("extension API contract", () => {
-  it("exports extension API version 2 from the public server entry point", () => {
-    expect(server).toHaveProperty("EXTENSION_API_VERSION", 2);
+  it("exports extension API version 3 from the public server entry point", () => {
+    expect(server).toHaveProperty("EXTENSION_API_VERSION", 3);
+  });
+
+  it("enforces the extension's transferMaxExpiryDays on creation and update", async () => {
+    const dw = await transferInstance({}, { adapters: { policy: {
+      limits: (_principal, _owner, dc): Limits => ({ ...dc.config.limits, transferMaxExpiryDays: 2 }),
+    } } });
+    const t = await createTransfer(dw, { expiresAt: Date.now() + DAY });
+    const refusedCreate = await op(dw, "create_transfer", transferInput({ slug: "extension-expiry-refused", expiresAt: Date.now() + 3 * DAY }));
+    expect(refusedCreate.status).toBe(400);
+    expect(refusedCreate.body.error.hint.length).toBeGreaterThan(0);
+    const refusedUpdate = await updateTransfer(dw, t, { expiresAt: Date.now() + 3 * DAY });
+    expect(refusedUpdate.status).toBe(400);
+    expect(refusedUpdate.body.error.hint.length).toBeGreaterThan(0);
+    expect((await updateTransfer(dw, t, { expiresAt: Date.now() + DAY + DAY / 2 })).status).toBe(200);
+  });
+
+  it("delivers committed transfer changes to onEvent without letting a failing hook undo them", async () => {
+    const events: unknown[] = [];
+    const dw = await transferInstance({}, { hooks: [
+      { onEvent() { throw new Error("extension event sink unavailable"); } },
+      { onEvent(event) { events.push(event); } },
+    ] });
+    const t = await createTransfer(dw);
+    events.length = 0;
+    const changed = await updateTransfer(dw, t, { message: "Extension event sample" });
+    expect(changed.status).toBe(200);
+    expect(events.length).toBeGreaterThan(0);
+    expect(JSON.stringify(events)).toContain(t.id);
+    const saved = await op(dw, "get_transfer", { transfer: t.id });
+    expect(saved.status).toBe(200);
+    expect((saved.body.transfer ?? saved.body).message).toBe("Extension event sample");
+    const count = events.length;
+    expect((await updateTransfer(dw, t, { message: "Extension event sample" })).status).toBe(200);
+    expect(events).toHaveLength(count);
   });
 
   it("uses an extension identity without an API key and enforces its scopes", async () => {

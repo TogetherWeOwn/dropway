@@ -51,6 +51,18 @@ export { CORE_MCP_TOOLS };
 
 const contexts = new WeakMap<Request, DropwayContext>();
 
+/** Download grants and recipient links are credentials, including in upstream errors. */
+function requestErrorDetails(request: Request, error: unknown) {
+  const url = new URL(request.url);
+  const safeUrl = `${url.origin}${url.pathname}`;
+  // Exceptions can echo credentials using any equivalent URL encoding, not just
+  // the spelling on this request. Do not serialize their message or stack here.
+  if (url.searchParams.has("grant") || url.searchParams.has("recipient")) {
+    return { url: safeUrl, error: "[redacted]" };
+  }
+  return { url: safeUrl, error: String(error), stack: (error as Error)?.stack };
+}
+
 /**
  * Build a Kofra Worker. The open-source entry (apps/worker) calls this with no
  * options; a hosted layer passes adapters, hooks, routes, MCP tools and UI slots.
@@ -116,7 +128,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
   });
   app.onError((err, c) => {
     if (c.req.path.startsWith("/api/")) return apiErrorResponse(c, err);
-    console.error(JSON.stringify({ event: "app_error", path: c.req.path, error: String(err), stack: (err as Error)?.stack }));
+    console.error(JSON.stringify({ event: "app_error", ...requestErrorDetails(c.req.raw, err) }));
     return c.text("Internal error", 500);
   });
 
@@ -150,7 +162,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
         }
       }
     } catch (e) {
-      console.error(JSON.stringify({ event: "serve_error", url: request.url, error: String(e), stack: (e as Error)?.stack }));
+      console.error(JSON.stringify({ event: "serve_error", ...requestErrorDetails(request, e) }));
       return new Response("Internal error", { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
     }
   }

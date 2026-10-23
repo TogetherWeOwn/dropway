@@ -195,7 +195,8 @@ export function operationTools(operations: readonly OperationDefinition[]): McpT
       ...op.tool,
       name: op.id,
       title: op.summary,
-      description: op.description,
+      // Schemas carry field guidance; full prose stays in OpenAPI and llms-full.txt.
+      description: op.summary,
       toolset: op.toolset,
       scopes: op.scopes,
       annotations: op.annotations,
