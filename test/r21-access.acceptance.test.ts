@@ -1,5 +1,10 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { callWithBindings, env, freshInstance, member } from "./r21-helpers";
+import { createMcpEndpoint } from "@dropway/server";
+import {
+  callWithBindings, env, freshInstance, issuedSessionCookies, member,
+  ORIGIN, ownerId, sessionCookie, storedRows, type Instance,
+} from "./r21-helpers";
+import { deniedBrowserHeaders, WORKER_APP, WORKER_SIBLING } from "./r21-browser-headers";
 
 const TEAM = "https://signin-fixture.cloudflareaccess.com";
 const AUD = "fixture-access-application";
@@ -93,4 +98,150 @@ describe("R-21 cryptographically verified optional Access identity", () => {
     const response = await callWithBindings(dw, "/api/v1/sites", bindings, { headers: { "Cf-Access-Jwt-Assertion": await jwt() } });
     expect([401, 403]).toContain(response.status);
   });
+});
+
+const UNSAFE_ACCESS = [
+  { surface: "REST", operation: "create site" },
+  { surface: "REST", operation: "mint login link" },
+  { surface: "MCP", operation: "create site" },
+  { surface: "MCP", operation: "mint login link" },
+] as const;
+type UnsafeAccess = typeof UNSAFE_ACCESS[number];
+
+function accessInstance(origin: string) {
+  // Configure only the app hostname through the documented transport option.
+  // This does not allow siblings or replace the required exact-origin guard.
+  return freshInstance({ appOrigin: origin }, {
+    mcp: createMcpEndpoint({ allowedOriginHostnames: [new URL(origin).hostname] }),
+  });
+}
+
+function accessWrite(dw: Instance, target: UnsafeAccess, memberId: string, headers: Record<string, string>, origin = ORIGIN) {
+  const mint = target.operation === "mint login link";
+  const args = mint ? { memberId } : { slug: "access-intent-site" };
+  const path = target.surface === "REST" ? (mint ? "/api/v1/login-links" : "/api/v1/sites") : (mint ? "/mcp?toolsets=members" : "/mcp");
+  const body = target.surface === "REST" ? args : {
+    jsonrpc: "2.0", id: 1, method: "tools/call",
+    params: { name: mint ? "create_login_link" : "create_site", arguments: args },
+  };
+  // Simple text/plain POSTs are reachable by forms; REST parsing must not be
+  // mistaken for browser intent. MCP keeps its actual JSON transport contract.
+  return callWithBindings(dw, `${origin}${path}`, { ...BINDINGS, APP_ORIGIN: origin }, {
+    method: "POST", body: JSON.stringify(body), headers: {
+      "Content-Type": target.surface === "REST" ? "text/plain" : "application/json",
+      Host: new URL(origin).host, Accept: "application/json, text/event-stream", ...headers,
+    },
+  });
+}
+
+async function accessOwner(dw: Instance, origin: string) {
+  const id = await ownerId(dw);
+  localJwksOnly();
+  const headers = { "Cf-Access-Jwt-Assertion": await jwt() };
+  const me = await callWithBindings(dw, `${origin}/api/v1/me`, BINDINGS, { headers });
+  expect(me.status, "the real signature/JWKS/member path must work before testing browser intent").toBe(200);
+  expect((await me.json() as { member: { id: string } }).member.id).toBe(id);
+  return { id, headers };
+}
+
+async function expectAccessWrite(response: Response, target: UnsafeAccess, memberId: string, origin: string) {
+  const expectedStatus = target.surface === "REST" ? 201 : 200;
+  expect(response.status, response.status === expectedStatus ? undefined : await response.text()).toBe(expectedStatus);
+  const text = await response.text();
+  const envelopes = response.headers.get("Content-Type")?.includes("text/event-stream")
+    ? text.split(/\r?\n/).filter((line) => line.startsWith("data: ")).map((line) => JSON.parse(line.slice(6)) as Record<string, any>)
+    : [JSON.parse(text) as Record<string, any>];
+  expect(envelopes).toHaveLength(1);
+  const envelope = envelopes[0]!;
+  if (target.surface === "MCP") {
+    expect(envelope.error).toBeUndefined();
+    expect(envelope.result.isError).not.toBe(true);
+  }
+  const rows = await storedRows();
+  const sites = rows.filter(({ table }) => table === "sites");
+  const links = rows.filter(({ table }) => table === "login_links");
+  expect(rows.filter(({ table }) => table === "sessions")).toEqual([]);
+  expect(issuedSessionCookies(response)).toEqual([]);
+  if (target.operation === "create site") {
+    expect(sites).toHaveLength(1);
+    expect(sites[0]!.row.slug).toBe("access-intent-site");
+    const tenant = await env.DB.prepare("SELECT id FROM tenants").first<{ id: string }>();
+    expect(sites[0]!.row.tenant_id).toBe(tenant!.id);
+    expect(links).toEqual([]);
+    return null;
+  }
+  expect(sites).toEqual([]);
+  expect(links).toHaveLength(1);
+  expect(links[0]!.row.member_id).toBe(memberId);
+  const data = target.surface === "REST" ? envelope : envelope.result.structuredContent;
+  expect(typeof data.url).toBe("string");
+  const url = new URL(data.url);
+  expect(url.origin).toBe(origin);
+  expect(url.pathname).toBe("/login");
+  expect(Boolean(url.searchParams.get("token"))).toBe(true);
+  return url.href;
+}
+
+// Break caught: treating a proxy assertion as an explicit bearer credential.
+// No Cookie is sent: a trusted proxy can strip it and inject ambient identity.
+// Signature verification remains real; only the external JWKS fetch is local.
+describe.each(UNSAFE_ACCESS)("R-21 Access browser intent: $surface $operation", (target) => {
+  it.each(deniedBrowserHeaders())("denies $name without any D1 mutation", async ({ origin, headers }) => {
+    const dw = await accessInstance(origin);
+    const access = await accessOwner(dw, origin);
+    const before = await storedRows();
+    const response = await accessWrite(dw, target, access.id, { ...access.headers, ...headers }, origin);
+    expect.soft(response.status).toBe(403);
+    expect.soft(issuedSessionCookies(response)).toEqual([]);
+    expect(await storedRows(), "denial must precede site writes and login-link minting").toEqual(before);
+  });
+
+  it.each([ORIGIN, WORKER_APP])("positive control: both exact browser headers at %s permit precisely the intended write", async (origin) => {
+    const dw = await accessInstance(origin);
+    const access = await accessOwner(dw, origin);
+    const response = await accessWrite(dw, target, access.id, {
+      ...access.headers, Origin: origin, "Sec-Fetch-Site": "same-origin",
+    }, origin);
+    const url = await expectAccessWrite(response, target, access.id, origin);
+    if (url) sessionCookie(await dw.call(url));
+  });
+
+  it("positive control: an explicit headerless bearer writes even with an invalid unused Access assertion", async () => {
+    const dw = await accessInstance(ORIGIN);
+    const id = await ownerId(dw);
+    const network = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      throw new Error("bearer precedence must not consult Access JWKS");
+    });
+    const response = await accessWrite(dw, target, id, {
+      Authorization: `Bearer ${dw.ownerKey}`, "Cf-Access-Jwt-Assertion": "not-a-valid-assertion",
+    });
+    await expectAccessWrite(response, target, id, ORIGIN);
+    expect(network).not.toHaveBeenCalled();
+  });
+
+  if (target.surface === "REST") {
+    it("positive control: a bearer with hostile browser headers is not reclassified as ambient Access", async () => {
+      const dw = await accessInstance(ORIGIN);
+      const id = await ownerId(dw);
+      const response = await accessWrite(dw, target, id, {
+        Authorization: `Bearer ${dw.ownerKey}`, "Cf-Access-Jwt-Assertion": "not-a-valid-assertion",
+        Origin: WORKER_SIBLING, "Sec-Fetch-Site": "cross-site",
+      });
+      await expectAccessWrite(response, target, id, ORIGIN);
+    });
+  }
+});
+
+it("R-21 a valid bearer member takes precedence over a different valid Access member", async () => {
+  const dw = await accessInstance(ORIGIN);
+  const existing = await member(dw);
+  localJwksOnly();
+  const headers = { Authorization: `Bearer ${existing.key}`, "Cf-Access-Jwt-Assertion": await jwt() };
+  const me = await callWithBindings(dw, "/api/v1/me", BINDINGS, { headers });
+  expect(me.status).toBe(200);
+  expect((await me.json() as { member: { id: string } }).member.id).toBe(existing.id);
+  const before = await storedRows();
+  const mint = await accessWrite(dw, { surface: "REST", operation: "mint login link" }, await ownerId(dw), headers);
+  expect(mint.status, "the Access owner's role must not elevate the explicit member bearer").toBe(403);
+  expect(await storedRows()).toEqual(before);
 });

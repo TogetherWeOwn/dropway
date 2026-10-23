@@ -179,7 +179,9 @@ describe("R-21 email-code sign-in at the actual delivery boundary", () => {
     const before = await env.DB.prepare("SELECT COUNT(*) AS n FROM members").first();
     await requestCode(dw);
     const code = deliveredCode(capture.messages);
-    const unknown = await dw.json("/api/v1/auth/email-code", { ...jsonBody({ email: "unknown@example.com" }) });
+    const unknown = await dw.json("/api/v1/auth/email-code", {
+      ...jsonBody({ email: "unknown@example.com" }), headers: { ...SAME_ORIGIN, "Content-Type": "application/json" },
+    });
     expect([200, 202, 404]).toContain(unknown.status);
     expect(capture.messages).toHaveLength(1);
     const response = await verify(dw, code, "unknown@example.com");

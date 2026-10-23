@@ -15,7 +15,7 @@ function clock() {
 }
 
 async function sessionList(dw: Instance, cookie: string) {
-  return dw.json("/api/v1/auth/sessions", { headers: { Cookie: cookie } });
+  return dw.json("/api/v1/auth/sessions", { headers: { ...SAME_ORIGIN, Cookie: cookie } });
 }
 
 function thirtyDayCookie(response: Response) {
