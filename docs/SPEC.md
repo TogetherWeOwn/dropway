@@ -1630,8 +1630,10 @@ moderation adapter (hold pages with password fields or forms posting elsewhere u
 `anonymous_challenge_required` flow for API callers under abuse pressure, and owner takedown with a
 blocked-hash list.
 
-Anonymous HTML responses carry a fixed, script-free "Report abuse" link injected by
-`HTMLRewriter`, including fragments. It opens the site's absolute `__dropway/report` URL
+Anonymous `text/html` responses carry a fixed, script-free "Report abuse" link injected by
+`HTMLRewriter`, including fragments. XHTML (`application/xhtml+xml`) is excluded: appending
+an HTML link after its root element would break XML well-formedness. Existing path-mode
+rewriting is unchanged. The link opens the site's absolute `__dropway/report` URL
 in a new window with `noopener noreferrer`, so an untrusted `<base>` cannot redirect it
 and it works without script authority in the sandbox. Raw/download responses and stored
 bytes are not changed; claimed and owned sites carry no anonymous link. Transformed HTML
