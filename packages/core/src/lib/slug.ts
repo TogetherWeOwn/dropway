@@ -40,7 +40,7 @@ export const RESERVED_SLUGS = new Set([
 
 export function generateSlug(): string {
   const pick = (list: string[]) => list[crypto.getRandomValues(new Uint32Array(1))[0]! % list.length]!;
-  return `${pick(ADJECTIVES)}-${pick(NOUNS)}-${randomString(4)}`;
+  return `${pick(ADJECTIVES)}-${pick(NOUNS)}-${randomString(6)}`;
 }
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/;
