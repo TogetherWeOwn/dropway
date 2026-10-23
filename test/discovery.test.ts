@@ -4,8 +4,10 @@ import { CORE_MCP_TOOLS, skillMarkdown } from "@dropway/server";
 import repoSkill from "../skills/dropway/SKILL.md?raw";
 import { freshInstance, jsonBody, type Instance } from "./helpers";
 import { connectMcp } from "./mcp-helpers";
+import { assertDiscoveryFixtureLifecycle } from "./discovery-fixture-acceptance";
 
 let dw: Instance;
+const expectAnonymousMode = assertDiscoveryFixtureLifecycle(() => dw);
 beforeEach(async () => {
   dw = await freshInstance();
 });
@@ -22,6 +24,7 @@ describe.each([
   { mode: "anonymous disabled", config: { anonymous: { enabled: false } }, claimEnabled: false },
   { mode: "anonymous enabled", config: { anonymous: { enabled: true } }, claimEnabled: true },
 ])("/openapi.json ($mode)", ({ config, claimEnabled }) => {
+  expectAnonymousMode(claimEnabled);
   beforeEach(async () => {
     dw = await freshInstance(config);
   });
