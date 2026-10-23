@@ -30,6 +30,7 @@ import { strToU8, zipSync } from "fflate";
 import { unstable_startWorker } from "wrangler";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { run, type Io } from "../../src/main.ts";
+import { workerEntry } from "../encrypted-mutation-worker.ts";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const marker = "private-r47-page-c9a1d4";
@@ -70,7 +71,7 @@ beforeAll(async () => {
   const config = join(work, "wrangler.json");
   const persist = join(work, "state");
   await writeFile(config, JSON.stringify({
-    name: "dropway-encrypted-acceptance", main: join(root, "apps/worker/src/index.ts"),
+    name: "dropway-encrypted-acceptance", main: await workerEntry(root, work),
     compatibility_date: "2026-10-01", compatibility_flags: ["nodejs_compat"],
     vars: { APP_ORIGIN: "", SITES_MODE: "path", SITES_ORIGIN: "", SITES_DOMAIN: "", ANONYMOUS_PUBLISH: "false" },
     d1_databases: [{ binding: "DB", database_name: "encrypted-acceptance", migrations_dir: join(root, "packages/core/migrations") }],
@@ -221,9 +222,11 @@ async function visit(url: string, mutation?: Mutation) {
     await route.fulfill({ response, body });
   });
   const page = await context.newPage();
+  const responses: any[] = [];
+  page.on("response", (response: any) => responses.push(response));
   const response = await page.goto(url, { waitUntil: "networkidle" });
   return {
-    context, page, wire, response,
+    context, page, wire, response, responses,
     altered: () => altered,
     records: async (): Promise<Decrypt[]> => (await Promise.all(page.frames().map((f: any) => f.evaluate(() => (globalThis as any).__encryptedAcceptance?.decrypts ?? [])))).flat(),
     fixtureResults: async (): Promise<any[]> => (await Promise.all(page.frames().map((f: any) => f.evaluate(() => (globalThis as any).fixtureResult ?? null)))).filter(Boolean),
@@ -369,6 +372,33 @@ describe("encrypted publish acceptance against a real local Worker and Chromium"
     }
   });
 
+  it("fresh keys: identical publishes use independent 32-byte keys and cannot cross-authenticate", async () => {
+    const first = await encrypted();
+    const second = await encrypted();
+    const firstKey = fragmentKey(first.json.url);
+    const secondKey = fragmentKey(second.json.url);
+    expect(firstKey.bytes.length).toBe(32);
+    expect(secondKey.bytes.length).toBe(32);
+    expect(firstKey.bytes.equals(secondKey.bytes), "fresh IVs do not substitute for a fresh per-publish key").toBe(false);
+    const view = await visit(second.json.url);
+    try {
+      await restored(view);
+      const records = await authenticatedRecords(view, secondKey.bytes);
+      const wrongKey = await webcrypto.subtle.importKey("raw", firstKey.bytes, "AES-GCM", false, ["decrypt"]);
+      for (const record of records) {
+        let authenticated = false;
+        try {
+          await webcrypto.subtle.decrypt({
+            name: "AES-GCM", iv: Buffer.from(record.iv), tagLength: record.tagLength,
+            ...(record.aad ? { additionalData: Buffer.from(record.aad) } : {}),
+          }, wrongKey, Buffer.from(record.ciphertext));
+          authenticated = true;
+        } catch { /* the first publish's key must not unlock the second */ }
+        expect(authenticated, "the first fragment key must fail authentication of the second container").toBe(false);
+      }
+    } finally { await view.context.close(); }
+  });
+
   it.each(["missing", "malformed", "wrong"] as const)("%s fragment key fails closed and is never sent to an endpoint", async kind => {
     const result = await encrypted();
     const key = fragmentKey(result.json.url);
@@ -416,6 +446,207 @@ describe("encrypted publish acceptance against a real local Worker and Chromium"
       expect(await bad.fixtureResults()).toEqual([]);
       assertPrivate(bad.wire, key);
     } finally { await bad.context.close(); }
+  });
+
+  it("SPA refusal: --encrypt --spa is a local exit-2 error with zero HTTP mutations", async () => {
+    const result = await cli(["publish", fixture, "--encrypt", "--spa", "--json", "--no-save"]);
+    expect(result.wire.filter(request => !["GET", "HEAD", "OPTIONS"].includes(request.method)).length, "SPA refusal must precede site, deploy and blob mutations").toBe(0);
+    expect(result.code).toBe(2);
+    expect(result.json?.error?.code).toBe("encrypted_spa_unsupported");
+    expect(result.json?.error?.hint).toMatch(/spa|static|remove|without/i);
+  }, 5000);
+
+  it("encrypted wait: polls raw ciphertext without sending a fragment key and reports live", async () => {
+    const result = await cli(["publish", fixture, "--encrypt", "--wait", "--wait-timeout", "1", "--json", "--no-save"]);
+    expect(result.code, "encrypted --wait must succeed within its explicit one-second readiness bound").toBe(0);
+    expect(result.json?.live).toBe(true);
+    const polls = result.wire.filter(request => ["GET", "HEAD"].includes(request.method) && !new URL(request.url).pathname.startsWith("/api/"));
+    expect(polls.length, "--wait must actually perform a readiness request").toBeGreaterThan(0);
+    for (const request of polls) {
+      const url = new URL(request.url);
+      expect(url.pathname.endsWith("/encrypted.bin"), "encrypted --wait must poll ciphertext, never the HTML loader").toBe(true);
+      expect(url.searchParams.get("raw")).toBe("1");
+      expect(url.hash.length, "even the Request handed to fetch must not carry the share fragment").toBe(0);
+    }
+    assertPrivate(result.wire, fragmentKey(result.json.url));
+  }, 8000);
+
+  it("CLI raw overflow: 16 MiB + 1 source bytes returns exit 6 before any HTTP mutation", async () => {
+    const dir = join(work, "raw-overflow");
+    await mkdir(dir);
+    await writeFile(join(dir, "index.html"), new Uint8Array(16 * 1024 * 1024 + 1));
+    const result = await cli(["publish", dir, "--encrypt", "--json", "--no-save"]);
+    expect(result.wire.filter(request => !["GET", "HEAD", "OPTIONS"].includes(request.method)).length).toBe(0);
+    expect(result.code).toBe(6);
+    expect(result.json?.error?.code).toBe("encrypted_input_too_large");
+    expect(result.json?.error?.hint).toMatch(/smaller|reduce|remove|split|limit/i);
+  });
+
+  it("CLI path refusal: a real Unix backslash filename is rejected before any HTTP mutation", async () => {
+    const dir = join(work, "invalid-path");
+    await mkdir(dir);
+    await writeFile(join(dir, "index.html"), "<h1>valid entry</h1>");
+    await writeFile(join(dir, "unrelated\\\\asset.txt"), "invalid-path-synthetic-asset");
+    const result = await cli(["publish", dir, "--encrypt", "--json", "--no-save"]);
+    expect(result.wire.filter(request => !["GET", "HEAD", "OPTIONS"].includes(request.method)).length, "an unrelated invalid asset must not create an orphan site or upload").toBe(0);
+    expect(result.code).toBe(6);
+    expect(result.json?.error?.code).toBe("encrypted_invalid_path");
+    expect(result.json?.error?.hint).toMatch(/rename|remove/i);
+  });
+
+  it("valid Unicode, spaces and punctuation survive the real CLI/loader without silent path normalization", async () => {
+    const dir = join(work, "unicode-paths");
+    const path = "assets/你好 café + (v1)! &@.txt";
+    const contents = "unicode-path-exact-bytes-19bc";
+    await mkdir(join(dir, "assets"), { recursive: true });
+    await writeFile(join(dir, "index.html"), `<h1>Unicode paths</h1><script src="./app.js"></script>`);
+    await writeFile(join(dir, "app.js"), `fetch('./${path}').then(r => { if (!r.ok) throw Error('missing original path'); return r.text(); }).then(text => { window.unicodePathResult = text; });`);
+    await writeFile(join(dir, path), contents);
+    const result = await cli(["publish", dir, "--encrypt", "--json", "--no-save"]);
+    expect(result.code === 0, "valid paths must remain supported").toBe(true);
+    const view = await visit(result.json.url);
+    try {
+      await expect.poll(async () => (await Promise.all(view.page.frames().map((frame: any) => frame.evaluate(() => (globalThis as any).unicodePathResult ?? null)))).filter(Boolean), { timeout: 3000 }).toEqual([contents]);
+    } finally { await view.context.close(); }
+  });
+
+  it("hostile bundled content can navigate synthetic decrypted bytes to the same app under the shipped CSP", async () => {
+    const dir = join(work, "hostile-content");
+    const syntheticSecret = "synthetic-private-navigation-bytes-30c7";
+    await mkdir(dir);
+    await writeFile(join(dir, "index.html"), '<h1>Executable trust fixture</h1><script src="./hostile.js"></script>');
+    await writeFile(join(dir, "private.txt"), syntheticSecret);
+    await writeFile(join(dir, "hostile.js"), `fetch('./private.txt').then(r => r.text()).then(secret => { location.href = ${JSON.stringify(api + "/health?leak=")} + encodeURIComponent(secret); });`);
+    const result = await cli(["publish", dir, "--encrypt", "--json", "--no-save"]);
+    expect(result.code === 0, "executable sites are supported; this is a trust warning, not a script ban").toBe(true);
+    const view = await visit(result.json.url);
+    try {
+      const leaked = (url: string) => { const u = new URL(url); return u.origin === api && u.pathname === "/health" && u.searchParams.get("leak") === syntheticSecret; };
+      await expect.poll(() => view.responses.some((response: any) => leaked(response.url())), { timeout: 3000 }).toBe(true);
+      expect(view.wire.some(request => leaked(request.url)), "the navigation request really carried bytes read from another decrypted bundled file").toBe(true);
+      expect(view.response.headers()["content-security-policy"]).toMatch(/frame-src[^;]*'self'/);
+      const frameResponse = view.responses.find((response: any) => new URL(response.url()).pathname === "/__dropway/encrypted-frame");
+      expect(Boolean(frameResponse), "hostile content must execute in the shipped HTTP-delivered frame").toBe(true);
+      expect((await frameResponse.allHeaders())["content-security-policy"], "navigation leaks despite connect-src none; do not weaken that policy").toMatch(/connect-src\s+'none'/);
+      const sandbox = await view.page.locator("iframe").getAttribute("sandbox");
+      expect(sandbox).toContain("allow-scripts");
+      expect(sandbox).not.toContain("allow-same-origin");
+      assertPrivate(view.wire, fragmentKey(result.json.url));
+    } finally { await view.context.close(); }
+  });
+
+  it.each(["before decryption", "after decryption"])("loader warning %s: trust ALL bundled executable content; navigation can leak data", async phase => {
+    const result = await encrypted();
+    const url = new URL(result.json.url);
+    if (phase === "before decryption") url.hash = "";
+    const view = await visit(url.href);
+    try {
+      if (phase === "after decryption") await restored(view);
+      const text = await view.page.locator("body").innerText();
+      expect(text, "warning must be visible independently of the decrypted child frame").toMatch(/trust(?:ed)?[\s\S]{0,120}(?:scripts?|executable|content)|(?:scripts?|executable|content)[\s\S]{0,120}trust/i);
+      expect(text).toMatch(/all|every|only.{0,80}trust/i);
+      expect(text).toMatch(/navigat/i);
+      expect(text).toMatch(/leak|disclos|send.{0,60}(?:data|content)|(?:data|content).{0,60}(?:leave|escape)/i);
+      expect(text).not.toMatch(/network[- ]free|no[- ]network|no network (?:access|requests)|cannot (?:make|send) network/i);
+    } finally { await view.context.close(); }
+  });
+
+  it("packaged threat guidance requires trusted executable content and makes no network-free promise", async () => {
+    const guide = await readFile(join(root, "packages/cli/README.md"), "utf8");
+    expect(guide).toMatch(/trust(?:ed)?[\s\S]{0,120}(?:scripts?|executable|content)|(?:scripts?|executable|content)[\s\S]{0,120}trust/i);
+    expect(guide).toMatch(/navigat/i);
+    expect(guide).toMatch(/leak|disclos|send.{0,60}(?:data|content)/i);
+    expect(guide).not.toMatch(/network[- ]free|no[- ]network|no network (?:access|requests)|cannot (?:make|send) network/i);
+  });
+
+  it.each([24 * 1024 * 1024 - 1, 24 * 1024 * 1024, 24 * 1024 * 1024 + 1])("loader stream cap: %i chunked bytes with no Content-Length", async targetBytes => {
+    const result = await encrypted();
+    const context = await browser.newContext();
+    const wire: Wire[] = [];
+    try {
+      await context.addInitScript(() => {
+        const state = { calls: 0, successes: 0, rejections: 0 };
+        (globalThis as any).__streamCrypto = state;
+        const prototype = Object.getPrototypeOf(crypto.subtle);
+        const decrypt = prototype.decrypt;
+        prototype.decrypt = async function (...args: any[]) {
+          state.calls++;
+          try { const bytes = await decrypt.apply(this, args); state.successes++; return bytes; }
+          catch (error) { state.rejections++; throw error; }
+        };
+      });
+      // Substitute only the encrypted network response body. The actual HTTP
+      // loader, response CSP and native WebCrypto remain untouched. Padding an
+      // otherwise genuine binary container preserves its magic/header but breaks
+      // authentication. Accepted-size controls must therefore reach real crypto
+      // and report auth failure, not a transport-size or format refusal.
+      await context.addInitScript(({ targetBytes }: { targetBytes: number }) => {
+        const state = { pulls: 0, bytes: 0, cancels: 0, ends: 0, substituted: 0, contentLength: "unset" as string | null };
+        (globalThis as any).__streamAcceptance = state;
+        const original = globalThis.fetch;
+        globalThis.fetch = async function (...args: Parameters<typeof fetch>) {
+          const response = await original.apply(this, args);
+          const input = args[0];
+          const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, (globalThis as any).location.href);
+          if (!url.pathname.endsWith("/encrypted.bin")) return response;
+          const prefix = new Uint8Array(await response.arrayBuffer());
+          if (prefix.byteLength >= targetBytes) throw Error("stream fixture must fit beneath the chosen boundary");
+          let offset = 0;
+          const stream = new ReadableStream<Uint8Array>({
+            pull(controller) {
+              state.pulls++;
+              if (offset === targetBytes) { state.ends++; controller.close(); return; }
+              const length = Math.min(256 * 1024, targetBytes - offset);
+              const chunk = new Uint8Array(length).fill(32);
+              if (offset < prefix.byteLength) chunk.set(prefix.subarray(offset, Math.min(offset + length, prefix.byteLength)));
+              offset += length;
+              state.bytes += length;
+              controller.enqueue(chunk);
+            },
+            cancel() { state.cancels++; },
+          }, { highWaterMark: 0 });
+          const headers = new Headers(response.headers);
+          headers.delete("Content-Length");
+          headers.delete("Content-Encoding");
+          const replacement = new Response(stream, { status: response.status, headers });
+          state.contentLength = replacement.headers.get("Content-Length");
+          state.substituted++;
+          return replacement;
+        };
+      }, { targetBytes });
+      await context.route("**/*", async (route: any) => {
+        const request = route.request();
+        if (new URL(request.url()).origin !== api) return route.abort("blockedbyclient");
+        wire.push({ method: request.method(), url: request.url(), headers: JSON.stringify(await request.allHeaders()), body: request.postDataBuffer() ?? Buffer.alloc(0) });
+        return route.continue();
+      });
+      const page = await context.newPage();
+      const response = await page.goto(result.json.url, { waitUntil: "networkidle" });
+      expect(response.headers()["content-security-policy"]).toBeTruthy();
+      await expect.poll(async () => page.evaluate(() => {
+        const stream = (globalThis as any).__streamAcceptance;
+        return stream.cancels + stream.ends;
+      }), { timeout: 5000 }).toBeGreaterThan(0);
+      const state = await page.evaluate(() => (globalThis as any).__streamAcceptance);
+      expect(state.substituted).toBe(1);
+      expect(state.contentLength).toBeNull();
+      expect(state.bytes).toBe(targetBytes);
+      if (targetBytes > 24 * 1024 * 1024) {
+        expect(state.cancels, "the shipped loader must cancel immediately after crossing its encoded bound").toBe(1);
+        expect(state.ends, "oversized responses must not be drained to completion").toBe(0);
+        expect(await page.evaluate(() => (globalThis as any).__streamCrypto.calls), "size refusal must happen before ANY decrypt call").toBe(0);
+        expect(await page.locator("iframe").count(), "no decrypted content frame after size refusal").toBe(0);
+        expect(await page.locator("body").innerText()).toMatch(/large|limit|size|24\s*MiB/i);
+      } else {
+        expect(state.cancels).toBe(0);
+        await expect.poll(async () => page.evaluate(() => (globalThis as any).__streamCrypto.rejections), { timeout: 5000 }).toBe(1);
+        expect(await page.evaluate(() => (globalThis as any).__streamCrypto.calls), "accepted boundary must reach native authenticated crypto, not a size/format error").toBe(1);
+        const text = await page.locator("body").innerText();
+        expect(text).toMatch(/incorrect key|damaged ciphertext|authenticat/i);
+        expect(text).not.toMatch(/too large|invalid encrypted site format/i);
+      }
+      assertPrivate(wire, fragmentKey(result.json.url));
+    } finally { await context.close(); }
   });
 
   it("encrypted dry-run is recognized and never contacts the Worker", async () => {
