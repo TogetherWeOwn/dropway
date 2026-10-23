@@ -6,6 +6,7 @@
  * permissions are identical on every surface.
  */
 export * from "./errors";
+export * from "./error-codes";
 export * from "./config";
 export * from "./context";
 export * from "./principal";

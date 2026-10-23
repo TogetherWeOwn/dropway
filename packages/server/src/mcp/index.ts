@@ -14,6 +14,8 @@ import type { DropwayEnv } from "../env";
 import type { McpHandlerFactory, McpToolDefinition } from "../extensions";
 import { IDEMPOTENCY_KEY } from "./schemas";
 import { requireOperationScopes } from "../operations";
+import { fromSchema } from "../operations/shared";
+import type { z } from "zod";
 
 /**
  * Remote MCP server at /mcp: Streamable HTTP, stateless, built with createMcpHandler
@@ -44,6 +46,7 @@ export interface McpEndpointOptions {
 type CompiledTool = {
   def: McpToolDefinition;
   input: ReturnType<typeof fromJsonSchema>;
+  validate: z.ZodType<any>;
   output: ReturnType<typeof fromJsonSchema> | undefined;
 };
 
@@ -75,7 +78,11 @@ function compile(tools: readonly McpToolDefinition[]): CompiledTool[] {
       const props = (schema.properties as Record<string, unknown> | undefined) ?? {};
       schema = { ...schema, properties: { ...props, idempotencyKey: IDEMPOTENCY_KEY } };
     }
-    return { def, input: fromJsonSchema(schema), output: def.outputSchema ? fromJsonSchema(def.outputSchema) : undefined };
+    const input = fromJsonSchema(schema);
+    // Keep the advertised schema, but validate inside our error boundary so SDK
+    // validation failures have the same complete details.fields as REST errors.
+    const wireInput = { "~standard": { ...input["~standard"], validate: (value: unknown) => ({ value }) } };
+    return { def, input: wireInput, validate: fromSchema(schema), output: def.outputSchema ? fromJsonSchema(def.outputSchema) : undefined };
   });
 }
 
@@ -110,8 +117,8 @@ function clientName(server: McpServer, request: Request): string | null {
   return ua ? ua.split(/\s+/)[0]!.slice(0, 120) : null;
 }
 
-function errorText(err: ApiError, requestId: string): string {
-  const json = err.toJSON(requestId);
+function errorText(err: ApiError, requestId: string, dw: DropwayContext): string {
+  const json = err.toJSON(requestId, appOrigin(dw));
   return `${err.code}: ${err.message}${err.hint ? ` Fix: ${err.hint}` : ""}\n${JSON.stringify(json)}`;
 }
 
@@ -131,7 +138,7 @@ function buildServer(compiled: CompiledTool[], ctx: { dw: DropwayContext; princi
     { name: options.name ?? "dropway", title: dw.config.instanceName, version: MCP_SERVER_VERSION, websiteUrl: appOrigin(dw) },
     { instructions: (options.instructions ?? mcpInstructions)(dw) },
   );
-  for (const { def, input, output } of compiled) {
+  for (const { def, input, validate, output } of compiled) {
     server.registerTool(
       def.name,
       {
@@ -143,9 +150,15 @@ function buildServer(compiled: CompiledTool[], ctx: { dw: DropwayContext; princi
         ...(def.alwaysLoad ? { _meta: { "anthropic/alwaysLoad": true } } : {}),
       },
       async (rawArgs: unknown) => {
-        const args = { ...((rawArgs ?? {}) as Record<string, unknown>) };
         try {
           scopeCheck(principal, def);
+          const parsed = validate.safeParse(rawArgs ?? {});
+          if (!parsed.success) {
+            throw new ApiError(400, "invalid_request", `Invalid input for ${def.name}.`, "Correct the listed fields and retry.", {
+              fields: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })),
+            });
+          }
+          const args = { ...(parsed.data as Record<string, unknown>) };
           const idempotencyKey = def.idempotent ? validateIdempotencyKey(args.idempotencyKey) : null;
           delete args.idempotencyKey;
           const toolCtx = { dw, principal, request, client: clientName(server, request), idempotencyKey };
@@ -170,7 +183,7 @@ function buildServer(compiled: CompiledTool[], ctx: { dw: DropwayContext; princi
           return { content, structuredContent: data } as never;
         } catch (e) {
           const err = toApiError(e, def.name, requestId);
-          return { isError: true, content: [{ type: "text", text: errorText(err, requestId) }] } as never;
+          return { isError: true, content: [{ type: "text", text: errorText(err, requestId, dw) }] } as never;
         }
       },
     );
@@ -182,7 +195,7 @@ const CORS = {
   origin: "*",
   headers: "Content-Type, Accept, Authorization, mcp-session-id, MCP-Protocol-Version, Mcp-Method, Mcp-Name, Last-Event-ID, X-Dropway-Client, X-Dropway-Toolsets, X-Dropway-Read-Only",
   methods: "GET, POST, DELETE, OPTIONS",
-  exposeHeaders: "mcp-session-id, WWW-Authenticate, X-Request-Id",
+  exposeHeaders: "mcp-session-id, WWW-Authenticate, X-Request-Id, Retry-After",
   maxAge: 86400,
 };
 
@@ -192,13 +205,14 @@ function authError(dw: DropwayContext, err: ApiError, requestId: string): Respon
     "Content-Type": "application/json",
     "Cache-Control": "no-store",
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Expose-Headers": "WWW-Authenticate, X-Request-Id",
+    "Access-Control-Expose-Headers": "WWW-Authenticate, X-Request-Id, Retry-After",
     "X-Request-Id": requestId,
   });
   if (err.status === 401) {
     headers.set("WWW-Authenticate", `Bearer realm="${dw.config.instanceName}", error="invalid_token", error_description="${err.message.replace(/"/g, "'")}"`);
   }
-  const body = err.toJSON(requestId);
+  const body = err.toJSON(requestId, o);
+  if (err.status === 429 || err.status === 503) headers.set("Retry-After", String(body.error.retryAfterSeconds));
   body.error.hint ??= `Connect with an API key: claude mcp add --transport http dropway ${o}/mcp --header "Authorization: Bearer dw_..."`;
   return new Response(JSON.stringify(body), { status: err.status, headers });
 }
@@ -228,7 +242,7 @@ export function createMcpEndpoint(options: McpEndpointOptions = {}): McpHandlerF
       try {
         principal = await dw.adapters.identity.resolve(request, dw);
         if (principal.kind === "anonymous") {
-          throw new ApiError(401, "unauthorized", "The MCP endpoint needs an API key.", undefined);
+          throw new ApiError(401, "unauthorized", "The MCP endpoint needs an API key.", `Connect with an API key: claude mcp add --transport http dropway ${appOrigin(dw)}/mcp --header "Authorization: Bearer dw_..."`);
         }
         if (principal.kind === "bootstrap") {
           throw new ApiError(403, "forbidden", "The bootstrap key can only set up the instance.", "Use the owner API key returned by POST /api/v1/setup.");

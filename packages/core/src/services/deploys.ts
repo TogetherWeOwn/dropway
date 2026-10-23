@@ -56,21 +56,41 @@ export function validateManifest(files: unknown, lim: Limits): { entries: Normal
   const seen = new Set<string>();
   const entries: NormalisedEntry[] = [];
   let totalBytes = 0;
-  for (const raw of files) {
+  let firstError: ApiError | undefined;
+  const fields: Array<{ path: string; message: string }> = [];
+  const invalid = (error: ApiError, path: string) => {
+    firstError ??= error;
+    fields.push({ path, message: error.message });
+  };
+  files.forEach((raw, i) => {
     const f = raw as Partial<ManifestEntry>;
-    if (!f || typeof f !== "object") throw badRequest("invalid_manifest", "Each file must be an object with path, size and sha256.");
-    const path = normaliseFilePath(String(f.path ?? ""));
-    if (seen.has(path)) throw badRequest("duplicate_path", `The path "${path}" appears more than once.`);
-    seen.add(path);
+    const field = `files.${i}`;
+    if (!f || typeof f !== "object" || Array.isArray(f)) {
+      invalid(badRequest("invalid_manifest", "Each file must be an object with path, size and sha256."), field);
+      return;
+    }
+    let path = String(f.path ?? "");
+    try {
+      path = normaliseFilePath(path);
+      if (seen.has(path)) invalid(badRequest("duplicate_path", `The path "${path}" appears more than once.`), `${field}.path`);
+      seen.add(path);
+    } catch (error) {
+      if (!(error instanceof ApiError)) throw error;
+      invalid(error, `${field}.path`);
+    }
     const size = Number(f.size);
-    if (!Number.isInteger(size) || size < 0) throw badRequest("invalid_size", `size for "${path}" must be a non-negative integer (bytes).`);
-    if (size > lim.maxFileBytes) {
-      throw tooLarge("file_too_large", `"${path}" is ${size} bytes; the per-file limit is ${lim.maxFileBytes}.`, "Compress or split the file.", { path, size, limit: lim.maxFileBytes });
+    if (!Number.isInteger(size) || size < 0) {
+      invalid(badRequest("invalid_size", `size for "${path}" must be a non-negative integer (bytes).`), `${field}.size`);
+    } else if (size > lim.maxFileBytes) {
+      invalid(tooLarge("file_too_large", `"${path}" is ${size} bytes; the per-file limit is ${lim.maxFileBytes}.`, "Compress or split the file.", { path, size, limit: lim.maxFileBytes }), `${field}.size`);
     }
     const sha256 = String(f.sha256 ?? "").toLowerCase();
-    if (!SHA256_RE.test(sha256)) throw badRequest("invalid_sha256", `sha256 for "${path}" must be 64 hex characters.`, "Compute it with `sha256sum <file>` or `shasum -a 256 <file>`.");
+    if (!SHA256_RE.test(sha256)) invalid(badRequest("invalid_sha256", `sha256 for "${path}" must be 64 hex characters.`, "Compute it with `sha256sum <file>` or `shasum -a 256 <file>`."), `${field}.sha256`);
     totalBytes += size;
     entries.push({ path, size, sha256, contentType: normaliseContentType(f.contentType, path) });
+  });
+  if (firstError) {
+    throw Object.assign(firstError, { details: { ...firstError.details, fields } });
   }
   if (totalBytes > lim.maxSiteBytes) {
     throw tooLarge("site_too_large", `This version is ${totalBytes} bytes; the limit is ${lim.maxSiteBytes}.`, "Split the content across several sites.", {
@@ -137,7 +157,7 @@ export async function createDeploy(dc: DropwayContext, p: Principal, site: SiteR
   await dc.adapters.policy.beforeDeploy?.(p, { siteId: site.id, tenantId: site.tenant_id, fileCount: entries.length, totalBytes }, dc);
 
   const baseVersionId = opts.baseVersionId == null || opts.baseVersionId === "" ? null : String(opts.baseVersionId);
-  if (baseVersionId && baseVersionId !== site.current_version_id) throw versionConflict(site);
+  if (baseVersionId && baseVersionId !== site.current_version_id) throw await versionConflict(dc, site);
 
   const hash = await manifestHash(entries);
   const origin = appOrigin(dc);
@@ -256,12 +276,26 @@ export async function createSiteWithDeploy(
   }
 }
 
-function versionConflict(site: SiteRow) {
-  return conflict(
+/** Read the live pointer and publication metadata together, not from a stale caller snapshot. */
+export async function versionConflict(dc: DropwayContext, site: SiteRow, base?: VersionRow): Promise<ApiError> {
+  const live = await dc.env.DB.prepare(
+    `SELECT s.current_version_id AS id, v.number, v.client, v.finalized_at
+       FROM sites s LEFT JOIN versions v ON v.id = s.current_version_id AND v.site_id = s.id
+      WHERE s.id = ? AND s.deleted_at IS NULL`,
+  ).bind(site.id).first<{ id: string | null; number: number | null; client: string | null; finalized_at: number | null }>();
+  return new ApiError(
+    409,
     "version_conflict",
-    "The live version changed since baseVersionId (someone else published).",
-    "Fetch the site (GET /api/v1/sites/:slug), reconcile with its files, and deploy again with the new currentVersionId as baseVersionId.",
-    { liveVersionId: site.current_version_id },
+    `The live version is ${live?.number != null ? `v${live.number}` : "none"}; someone published since your base version.`,
+    "Call get_site to see what changed, re-apply your change, and pass the live version id as baseVersionId.",
+    {
+      liveVersionId: live?.id ?? null,
+      liveVersionNumber: live?.number ?? null,
+      liveVersionClient: live?.client ?? null,
+      liveVersionAt: live?.finalized_at ?? null,
+      ...(base ? { yourBase: base.id, yourBaseNumber: base.number, liveClient: live?.client ?? null } : {}),
+    },
+    { next: [{ tool: "get_site", args: { site: site.slug }, why: "Read the live version before re-applying your change." }] },
   );
 }
 
@@ -370,7 +404,7 @@ export async function finalizeDeploy(dc: DropwayContext, p: Principal, site: Sit
     await dc.env.DB.prepare("UPDATE versions SET status = 'pending', finalized_at = NULL WHERE id = ?").bind(version.id).run();
     const fresh = await dc.env.DB.prepare("SELECT * FROM sites WHERE id = ?").bind(site.id).first<SiteRow>();
     if (!fresh || fresh.deleted_at) throw notFound("site_not_found", `Site ${site.slug} was deleted.`);
-    throw versionConflict(fresh);
+    throw await versionConflict(dc, fresh);
   }
   await refreshLive(dc, site.id);
   const finalized: VersionRow = { ...version, status: "ready", finalized_at: now };

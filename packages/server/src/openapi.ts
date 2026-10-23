@@ -168,11 +168,21 @@ export function buildOpenApi(origin: string, instanceName: string, anonymousOrOp
           properties: {
             error: {
               type: "object",
-              required: ["code", "message"],
+              required: ["code", "message", "retryable", "retryAfterSeconds", "docs", "next"],
               properties: {
                 code: { type: "string" },
                 message: { type: "string" },
                 hint: { type: "string" },
+                retryable: { type: "boolean" },
+                retryAfterSeconds: { type: ["integer", "null"], minimum: 0 },
+                docs: { type: "string", format: "uri" },
+                next: {
+                  type: "array",
+                  items: {
+                    type: "object", required: ["tool", "args", "why"],
+                    properties: { tool: { type: "string" }, args: { type: "object", additionalProperties: true }, why: { type: "string" } },
+                  },
+                },
                 details: { type: "object", additionalProperties: true },
               },
             },

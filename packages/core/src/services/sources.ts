@@ -7,7 +7,7 @@ import { normaliseContentType } from "../lib/mime";
 import { normaliseFilePath } from "../lib/paths";
 import type { Principal } from "../principal";
 import { blobScope, putVerifiedBlob } from "./blobs";
-import { createDeploy, finalizeDeploy, type Warning } from "./deploys";
+import { createDeploy, finalizeDeploy, versionConflict, type Warning } from "./deploys";
 import { discardNewSite, findSite, getVersion, serializeSite, serializeVersion, type SiteRow, type VersionRow } from "./sites";
 import { resolvePublishTarget } from "./publish";
 import { getSiteByRef, resolveSiteSlug, resolveVersionRef } from "./site-ops";
@@ -633,14 +633,7 @@ export async function updateSiteFiles(dc: DropwayContext, p: Principal, siteRef:
   if (input.baseVersionId !== undefined && input.baseVersionId !== null && input.baseVersionId !== "") {
     base = await resolveVersionRef(dc, site, input.baseVersionId);
     if (base.id !== site.current_version_id) {
-      const live = site.current_version_id ? await getVersion(dc, site.id, site.current_version_id) : null;
-      throw new ApiError(
-        409,
-        "version_conflict",
-        `The live version is ${live ? `v${live.number}` : "none"}, not v${base.number}: someone published since your base version.`,
-        "Call get_site (or list_files) to see the live files, re-apply your change, and pass the live version as baseVersionId.",
-        { liveVersionId: site.current_version_id, liveVersionNumber: live?.number ?? null, yourBase: base.id, yourBaseNumber: base.number, liveClient: live?.client ?? null },
-      );
+      throw await versionConflict(dc, site, base);
     }
   } else if (site.current_version_id) {
     base = await getVersion(dc, site.id, site.current_version_id);
