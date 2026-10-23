@@ -562,8 +562,9 @@ Delivers: new (add the SPEC rows in the build PR). Depends: R-02.
   Tombstones outlive the transfer and the member.
 - The hourly cleanup claims live transfers past their expiry idempotently (a re-run claims nothing).
   Expiry is never blocked by a hold; purging the bytes is (R-54).
-- No scanning (owner 2026-10-22): downloads are never gated on a scan, and the page says nothing about
-  scanning.
+- No scanning (owner 2026-10-22): downloads are never gated on a scan, and the page never claims files
+  are scanned. It states plainly that Kofra does not scan files and shows each file's exact type, size
+  and SHA-256 checksum instead.
 
 ### R-53 Delivery email, receipts and download notifications (2-3 days)
 Delivers: new. Depends: R-52, R-21.
