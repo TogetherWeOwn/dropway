@@ -159,32 +159,38 @@ const filesUnder = (rel) => {
 };
 
 // 1. Moves. A branch rebased onto the rename can bring files back under the old name while the
-// new one exists: each is moved across (or dropped when the new copy is identical); a file present
-// under both names with different content is a collision, reported (by --check too) and left for a
-// person to merge.
+// new one exists: each is moved across, or dropped when the new copy is identical. A file present
+// under both names with different content is a collision: it stops the run before anything is
+// written (with --check too), so a person merges the pair first.
+const moves = []; // [kind, from, to, rename]: "tree" moves the whole path, "file" one file, "drop" deletes an identical copy
 const collisions = [];
 for (const [from, to] of RENAMES) {
   if (!existsSync(join(ROOT, from))) continue;
   if (!existsSync(join(ROOT, to))) {
-    bump(`move ${from} -> ${to}`, 1);
-    touched.add(from);
-    if (!CHECK) move(from, to);
+    moves.push(["tree", from, to, `${from} -> ${to}`]);
     continue;
   }
   for (const rel of filesUnder(from)) {
     const target = to + rel.slice(from.length);
-    const exists = existsSync(join(ROOT, target));
-    if (exists && !readFileSync(join(ROOT, rel)).equals(readFileSync(join(ROOT, target)))) {
-      collisions.push(`${rel} and ${target} both exist with different content`);
-      continue;
-    }
-    bump(`move ${from} -> ${to}`, 1);
-    touched.add(rel);
-    if (CHECK) continue;
-    if (exists) remove(rel);
-    else move(rel, target);
+    if (!existsSync(join(ROOT, target))) moves.push(["file", rel, target, `${from} -> ${to}`]);
+    else if (readFileSync(join(ROOT, rel)).equals(readFileSync(join(ROOT, target)))) moves.push(["drop", rel, target, `${from} -> ${to}`]);
+    else collisions.push(`${rel} and ${target} both exist with different content`);
   }
-  if (!CHECK && existsSync(join(ROOT, from)) && !filesUnder(from).length) rmSync(join(ROOT, from), { recursive: true });
+}
+if (collisions.length) {
+  for (const c of collisions) console.error(`  collision: ${c}`);
+  console.error("rebrand: merge each pair into the new path, delete the old file, then run again. Nothing was written.");
+  process.exit(1);
+}
+for (const [kind, from, to, rename] of moves) {
+  bump(`move ${rename}`, 1);
+  touched.add(from);
+  if (CHECK) continue;
+  if (kind === "drop") remove(from);
+  else move(from, to);
+}
+if (!CHECK) {
+  for (const [from] of RENAMES) if (existsSync(join(ROOT, from)) && !filesUnder(from).length) rmSync(join(ROOT, from), { recursive: true });
 }
 
 // 2. Text rules on tracked files.
@@ -241,11 +247,6 @@ if (!CHECK && manifestsChanged && !flag("--no-lock") && existsSync(join(ROOT, "p
 const total = [...counts.values()].reduce((a, b) => a + b, 0);
 for (const [name, n] of [...counts].sort((a, b) => b[1] - a[1])) console.log(`${String(n).padStart(6)}  ${name}`);
 console.log(`${String(total).padStart(6)}  total replacements in ${touched.size} files${CHECK ? " (check mode, nothing written)" : ""}`);
-if (collisions.length) {
-  for (const c of collisions) console.error(`  collision: ${c}`);
-  console.error("rebrand: merge each file pair into the new path by hand, delete the old one, then run again.");
-  process.exit(1);
-}
 if (CHECK && total > 0) {
   for (const f of [...touched].sort()) console.error(`  ${f}`);
   console.error("rebrand: user-visible Dropway names remain. Run: node scripts/rebrand.mjs");
@@ -314,10 +315,12 @@ function selfTest() {
   expect("--check reports a collision", checked.code === 1 && checked.out.includes("collision: skills/dropway/SKILL.md"));
   expect("--check writes nothing", read(b, "skills/dropway/extra.md") === "extra\n" && read(b, "skills/kofra/extra.md") === null);
   const applied = runOn(b);
-  expect("apply fails on a collision", applied.code === 1 && applied.out.includes("collision: skills/dropway/SKILL.md"));
+  expect("apply fails on a collision and writes nothing", applied.code === 1 && applied.out.includes("collision: skills/dropway/SKILL.md") && read(b, "skills/dropway/extra.md") === "extra\n" && read(b, "skills/dropway/same.md") === "same\n");
+  rmSync(join(b, "skills/dropway/SKILL.md")); // a person merged the pair into skills/kofra/SKILL.md
+  expect("apply succeeds once the collision is merged", runOn(b).code === 0);
   expect("new file moved across", read(b, "skills/kofra/extra.md") === "extra\n" && read(b, "skills/dropway/extra.md") === null);
-  expect("identical copy dropped", read(b, "skills/dropway/same.md") === null && read(b, "skills/kofra/same.md") === "same\n");
-  expect("both sides of a collision kept", read(b, "skills/dropway/SKILL.md") !== null && read(b, "skills/kofra/SKILL.md") === "name: kofra\n");
+  expect("identical copy dropped and the old folder removed", read(b, "skills/kofra/same.md") === "same\n" && !existsSync(join(b, "skills/dropway")));
+  expect("idempotent after the merge", runOn(b, "--check").code === 0);
 
   for (const dir of [a, b]) rmSync(dir, { recursive: true, force: true });
   for (const f of failures) console.error(`  FAIL ${f}`);
