@@ -14,7 +14,8 @@ jobs:
   # unit and end-to-end tests against a local Worker.
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Cold Chromium/system dependency setup shares this budget with all test suites.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
