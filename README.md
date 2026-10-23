@@ -1,4 +1,4 @@
-# Dropway
+# Kofra
 
 Instant web hosting for AI agents and people, built entirely on Cloudflare.
 Publish a file, a folder or a whole site to a live URL with one command or one
@@ -11,6 +11,8 @@ runs on your own Cloudflare account.
 Prefer not to self-host? A hosted version is coming.
 
 > Status: early MVP. The REST API, the remote MCP server, the CLI, the dashboard and the file viewers work today.
+
+> Kofra was called Dropway. The old names keep working: the `dropway` command, `DROPWAY_*` variables and `X-Dropway-*` headers (sent and accepted alongside `X-Kofra-*`). <!-- rebrand:keep -->
 
 ## What you get
 
@@ -39,16 +41,16 @@ Prefer not to self-host? A hosted version is coming.
 You need an instance URL and an API key. Self-host one in a few minutes (next section), then:
 
 ```sh
-export DROPWAY_API=https://<your-instance>          # e.g. https://dropway.<you>.workers.dev
-export DROPWAY_API_KEY=dw_...
+export KOFRA_API=https://<your-instance>          # e.g. https://dropway.<you>.workers.dev
+export KOFRA_API_KEY=dw_...
 ```
 
 ### CLI
 
 ```sh
-npx dropway publish ./dist --json          # prints {"ok":true,"url":"https://...", ...}
-npx dropway publish ./dist --site docs     # update the site "docs" (created if missing)
-npx dropway versions docs                  # every version; restore with: npx dropway restore docs v2
+npx kofra publish ./dist --json          # prints {"ok":true,"url":"https://...", ...}
+npx kofra publish ./dist --site docs     # update the site "docs" (created if missing)
+npx kofra versions docs                  # every version; restore with: npx kofra restore docs v2
 ```
 
 Only changed files are uploaded, the command exits non-zero with a machine-readable error when
@@ -59,15 +61,15 @@ published, run `node packages/cli/bin/dropway.mjs` from a clone after `npm insta
 ### curl
 
 ```sh
-curl "$DROPWAY_API/api/v1/publish" \
-  -H "Authorization: Bearer $DROPWAY_API_KEY" \
+curl "$KOFRA_API/api/v1/publish" \
+  -H "Authorization: Bearer $KOFRA_API_KEY" \
   -F "index.html=@index.html" -F "assets/app.js=@dist/assets/app.js"
 # -> { "url": "https://<your-instance>/s/bright-otter-x7k2/", "version": { "number": 1, ... }, ... }
 
 # A build folder as a zip, into a named site:
 (cd dist && zip -qr ../site.zip .)
-curl "$DROPWAY_API/api/v1/publish?slug=my-site" \
-  -H "Authorization: Bearer $DROPWAY_API_KEY" \
+curl "$KOFRA_API/api/v1/publish?slug=my-site" \
+  -H "Authorization: Bearer $KOFRA_API_KEY" \
   -H "Content-Type: application/zip" --data-binary @site.zip
 ```
 
@@ -81,7 +83,7 @@ The MCP endpoint is `https://<your-instance>/mcp` (Streamable HTTP), authenticat
 Claude Code:
 
 ```sh
-claude mcp add --transport http dropway "$DROPWAY_API/mcp" --header "Authorization: Bearer $DROPWAY_API_KEY"
+claude mcp add --transport http kofra "$KOFRA_API/mcp" --header "Authorization: Bearer $KOFRA_API_KEY"
 ```
 
 Cursor (`~/.cursor/mcp.json` or `.cursor/mcp.json`):
@@ -89,9 +91,9 @@ Cursor (`~/.cursor/mcp.json` or `.cursor/mcp.json`):
 ```json
 {
   "mcpServers": {
-    "dropway": {
+    "kofra": {
       "url": "https://<your-instance>/mcp",
-      "headers": { "Authorization": "Bearer ${env:DROPWAY_API_KEY}" }
+      "headers": { "Authorization": "Bearer ${env:KOFRA_API_KEY}" }
     }
   }
 }
@@ -101,12 +103,12 @@ VS Code (`.vscode/mcp.json`):
 
 ```json
 {
-  "inputs": [{ "type": "promptString", "id": "dropway-key", "description": "Dropway API key", "password": true }],
+  "inputs": [{ "type": "promptString", "id": "kofra-key", "description": "Kofra API key", "password": true }],
   "servers": {
-    "dropway": {
+    "kofra": {
       "type": "http",
       "url": "https://<your-instance>/mcp",
-      "headers": { "Authorization": "Bearer ${input:dropway-key}" }
+      "headers": { "Authorization": "Bearer ${input:kofra-key}" }
     }
   }
 }
@@ -115,9 +117,9 @@ VS Code (`.vscode/mcp.json`):
 Codex (`~/.codex/config.toml`):
 
 ```toml
-[mcp_servers.dropway]
+[mcp_servers.kofra]
 url = "https://<your-instance>/mcp"
-bearer_token_env_var = "DROPWAY_API_KEY"
+bearer_token_env_var = "KOFRA_API_KEY"
 ```
 
 Claude Desktop and other clients that only start local servers, through
@@ -126,7 +128,7 @@ Claude Desktop and other clients that only start local servers, through
 ```json
 {
   "mcpServers": {
-    "dropway": {
+    "kofra": {
       "command": "npx",
       "args": ["-y", "mcp-remote", "https://<your-instance>/mcp", "--header", "Authorization:${AUTH_HEADER}"],
       "env": { "AUTH_HEADER": "Bearer dw_..." }
@@ -135,7 +137,7 @@ Claude Desktop and other clients that only start local servers, through
 }
 ```
 
-Agents that can run a shell should prefer `npx dropway publish <dir> --json`: no file bytes pass
+Agents that can run a shell should prefer `npx kofra publish <dir> --json`: no file bytes pass
 through the model.
 
 ## Self-host on your Cloudflare account
@@ -147,11 +149,11 @@ through the model.
 2. Create the owner and save their key:
 
    ```sh
-   DROPWAY_BOOTSTRAP_KEY=<your bootstrap key> npx dropway setup --api https://<your-worker>.workers.dev --email you@example.com
+   KOFRA_BOOTSTRAP_KEY=<your bootstrap key> npx kofra setup --api https://<your-worker>.workers.dev --email you@example.com
    ```
 
    or with curl: `curl -X POST https://<your-worker>.workers.dev/api/v1/setup -H "Authorization: Bearer <bootstrap key>" -H "Content-Type: application/json" -d '{"email":"you@example.com"}'`
-3. Publish: `npx dropway publish ./dist`.
+3. Publish: `npx kofra publish ./dist`.
 
 Sites are served at `https://<your-worker>.workers.dev/s/<name>/` out of the box. With a domain of
 your own, each site can get its own origin (`https://<name>.your-sites-domain.com`). Command-line

@@ -58,7 +58,7 @@ interface Ran {
 }
 
 /** Run the CLI in-process with a captured Io (non-TTY, like an agent's shell). */
-async function cli(args: string[], opts: { cwd?: string; env?: Record<string, string>; stdin?: string } = {}): Promise<Ran> {
+async function cli(args: string[], opts: { cwd?: string; env?: Record<string, string>; onlyEnv?: Record<string, string>; stdin?: string } = {}): Promise<Ran> {
   let stdout = "";
   let stderr = "";
   const io: Io = {
@@ -70,7 +70,7 @@ async function cli(args: string[], opts: { cwd?: string; env?: Record<string, st
     prompt: async () => {
       throw new Error("must not prompt when not a TTY");
     },
-    env: { DROPWAY_CONFIG_DIR: configDir, DROPWAY_API: api, ...opts.env },
+    env: opts.onlyEnv ?? { KOFRA_CONFIG_DIR: configDir, KOFRA_API: api, ...opts.env },
     cwd: opts.cwd ?? work,
   };
   const code = await run(args, io);
@@ -94,11 +94,11 @@ async function project(name: string, files: Record<string, string>): Promise<str
 
 const get = (url: string) => fetch(url, { headers: { Accept: "*/*" } });
 
-describe("dropway CLI against a local instance", () => {
+describe("kofra CLI against a local instance", () => {
   let slug = "";
 
   it("sets up the instance and saves the owner key without printing it", async () => {
-    const r = await cli(["setup", "--email", "owner@example.com", "--json"], { env: { DROPWAY_BOOTSTRAP_KEY: BOOTSTRAP } });
+    const r = await cli(["setup", "--email", "owner@example.com", "--json"], { env: { KOFRA_BOOTSTRAP_KEY: BOOTSTRAP } });
     expect(r.code).toBe(0);
     expect(r.json.ok).toBe(true);
     expect(r.json.apiKey).toBeUndefined();
@@ -108,7 +108,7 @@ describe("dropway CLI against a local instance", () => {
     const creds = JSON.parse(await readFile(credPath, "utf8"));
     expect(creds.instances[api].key).toMatch(/^dw_/);
 
-    const again = await cli(["setup", "--email", "x@example.com", "--json"], { env: { DROPWAY_BOOTSTRAP_KEY: BOOTSTRAP } });
+    const again = await cli(["setup", "--email", "x@example.com", "--json"], { env: { KOFRA_BOOTSTRAP_KEY: BOOTSTRAP } });
     expect(again.code).toBe(5);
     expect(again.json.ok).toBe(false);
   });
@@ -118,6 +118,18 @@ describe("dropway CLI against a local instance", () => {
     expect(r.code).toBe(0);
     expect(r.json).toMatchObject({ signedIn: true, principal: "member", api, keySource: "saved" });
     expect(r.json.member.email).toBe("owner@example.com");
+  });
+
+  it("accepts the former DROPWAY_* variables when no KOFRA_* variable is set", async () => {
+    const OLD = "DROPWAY_"; // rebrand:keep
+    const saved = await cli(["whoami", "--json"], { onlyEnv: { [`${OLD}CONFIG_DIR`]: configDir, [`${OLD}API`]: api } });
+    expect(saved.code, saved.stdout).toBe(0);
+    expect(saved.json).toMatchObject({ signedIn: true, api, keySource: "saved" });
+    const key = JSON.parse(await readFile(join(configDir, "credentials.json"), "utf8")).instances[api].key;
+    const fromEnv = await cli(["whoami", "--json"], { onlyEnv: { [`${OLD}CONFIG_DIR`]: join(work, "legacy-empty-config"), [`${OLD}API`]: api, [`${OLD}API_KEY`]: key } });
+    expect(fromEnv.code, fromEnv.stdout).toBe(0);
+    expect(fromEnv.json).toMatchObject({ signedIn: true, api, keySource: "env" });
+    expect(fromEnv.json.member.email).toBe("owner@example.com");
   });
 
   it("publishes a folder, skips credentials, and links it in dropway.json", async () => {
@@ -226,12 +238,12 @@ describe("dropway CLI against a local instance", () => {
 
   it("publishes anonymously (when the instance allows it) and updates with the claim token", async () => {
     const dir = await project("anon", { "index.html": "<p>anon</p>" });
-    const r = await cli(["publish", dir, "--anonymous", "--json"], { env: { DROPWAY_CONFIG_DIR: join(work, "empty-config") } });
+    const r = await cli(["publish", dir, "--anonymous", "--json"], { env: { KOFRA_CONFIG_DIR: join(work, "empty-config") } });
     expect(r.code, r.stdout).toBe(0);
     expect(r.json.claimToken).toMatch(/^dwc_/);
     expect(r.json.expiresAt).toBeTruthy();
     await writeFile(join(dir, "index.html"), "<p>anon 2</p>");
-    const upd = await cli(["publish", dir, "--key", r.json.claimToken, "--site", r.json.slug, "--json"], { env: { DROPWAY_CONFIG_DIR: join(work, "empty-config") } });
+    const upd = await cli(["publish", dir, "--key", r.json.claimToken, "--site", r.json.slug, "--json"], { env: { KOFRA_CONFIG_DIR: join(work, "empty-config") } });
     expect(upd.code, upd.stdout).toBe(0);
     expect(upd.json.version.number).toBe(2);
     // Anonymous publishes are never linked (the link file would point at an expiring site).
@@ -240,7 +252,7 @@ describe("dropway CLI against a local instance", () => {
 
   it("fails cleanly without a key, with a bad key, or when the instance is unreachable", async () => {
     const dir = join(work, "named");
-    const nokey = await cli(["publish", dir, "--json"], { env: { DROPWAY_CONFIG_DIR: join(work, "empty-config") } });
+    const nokey = await cli(["publish", dir, "--json"], { env: { KOFRA_CONFIG_DIR: join(work, "empty-config") } });
     expect(nokey.code).toBe(3);
     expect(nokey.json.error.code).toBe("not_logged_in");
     const bad = await cli(["whoami", "--json", "--key", `dw_${"x".repeat(43)}`]);
@@ -266,18 +278,18 @@ describe("dropway CLI against a local instance", () => {
     expect(JSON.parse(me.stdout).principal).toBe("member");
     const key = JSON.parse(await readFile(join(configDir, "credentials.json"), "utf8")).instances[api].key;
     const other = join(work, "other-config");
-    const login = await cli(["login", "--json"], { env: { DROPWAY_CONFIG_DIR: other }, stdin: `${key}\n` });
+    const login = await cli(["login", "--json"], { env: { KOFRA_CONFIG_DIR: other }, stdin: `${key}\n` });
     expect(login.code, login.stdout).toBe(0);
     expect(login.json.email).toBe("owner@example.com");
-    const out = await cli(["logout", "--json"], { env: { DROPWAY_CONFIG_DIR: other } });
+    const out = await cli(["logout", "--json"], { env: { KOFRA_CONFIG_DIR: other } });
     expect(out.json.removed).toBe(true);
-    const after = await cli(["whoami", "--json"], { env: { DROPWAY_CONFIG_DIR: other } });
+    const after = await cli(["whoami", "--json"], { env: { KOFRA_CONFIG_DIR: other } });
     expect(after.code).toBe(3);
     expect(after.json.signedIn).toBe(false);
   });
 
   it("runs as a real process: the launcher (source) and the bundled build", async () => {
-    const env = { ...process.env, DROPWAY_CONFIG_DIR: configDir, DROPWAY_API: api };
+    const env = { ...process.env, KOFRA_CONFIG_DIR: configDir, KOFRA_API: api };
     const runProc = (args: string[]) =>
       new Promise<{ code: number | null; stdout: string }>((resolve, reject) => {
         const child = spawn(process.execPath, args, { cwd: work, env });

@@ -116,7 +116,7 @@ describe("reserved labels on the sites domain (P2)", () => {
     for (const host of ["files", "fallback", "customers", "kofra", "api", "a.b", "my-site--v2", "x"]) {
       const res = await dw.call(`https://${host}.sites.test/`, { headers: NAV });
       expect(res.status, host).toBe(404);
-      expect(res.headers.get("x-dropway-site"), host).toBeNull();
+      expect(res.headers.get("x-kofra-site"), host).toBeNull();
     }
   });
 

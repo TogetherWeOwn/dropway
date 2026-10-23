@@ -47,14 +47,14 @@ describe("serving", () => {
   it("?raw=1 returns the HTML source as text/plain", async () => {
     const res = await dw.call(`/s/${slug}/about.html?raw=1`, { headers: BROWSER_NAV });
     expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
-    expect(res.headers.get("x-dropway-original-content-type")).toBe("text/html; charset=utf-8");
+    expect(res.headers.get("x-kofra-original-content-type")).toBe("text/html; charset=utf-8");
     expect(await res.text()).toBe("<p>about</p>");
   });
 
   it("renders Markdown for browsers with a Raw link; raw for fetch/curl and ?raw=1", async () => {
     const page = await dw.call(`/s/${slug}/docs/guide.md`, { headers: BROWSER_NAV });
     expect(page.headers.get("content-type")).toBe("text/html; charset=utf-8");
-    expect(page.headers.get("x-dropway-viewer")).toBe("markdown");
+    expect(page.headers.get("x-kofra-viewer")).toBe("markdown");
     // Scripts inside Markdown can never run on the rendered page.
     expect(page.headers.get("content-security-policy")).toMatch(/default-src 'none'/);
     const html = await page.text();
@@ -73,7 +73,7 @@ describe("serving", () => {
     expect(raw.headers.get("content-type")).toBe("text/plain; charset=utf-8");
     expect(await raw.text()).toContain("<script>alert(1)</script>");
     const forced = await dw.call(`/s/${slug}/docs/guide.md?view=1`);
-    expect(forced.headers.get("x-dropway-viewer")).toBe("markdown");
+    expect(forced.headers.get("x-kofra-viewer")).toBe("markdown");
   });
 
   it("resolves directory indexes, extensionless .html and serves .wasm correctly", async () => {
@@ -111,7 +111,7 @@ describe("serving", () => {
   it("lists folders without an index file", async () => {
     const res = await dw.json("/api/v1/publish", { method: "POST", key: dw.ownerKey, body: form({ "a.txt": "a", "b/c.txt": "c" }) });
     const listing = await dw.call(`/s/${res.body.slug}/`, { headers: BROWSER_NAV });
-    expect(listing.headers.get("x-dropway-viewer")).toBe("listing");
+    expect(listing.headers.get("x-kofra-viewer")).toBe("listing");
     const html = await listing.text();
     expect(html).toContain("a.txt");
     expect(html).toContain("b/");

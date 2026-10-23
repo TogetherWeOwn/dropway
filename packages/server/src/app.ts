@@ -8,6 +8,7 @@ import type { OperationDefinition } from "./operations";
 import { agentSkillsIndex, legacySkillsIndex, llmsFullTxt, llmsTxt, skillInstance, skillMarkdown, SKILL_NAME } from "./discovery";
 import { homePage, installUi } from "./ui";
 import { installEncrypted } from "./encrypted";
+import { LEGACY_SKILL_NAME } from "./legacy-brand";
 
 /**
  * App-origin pages: home, /openapi.json, /llms.txt, /health, /claim, /mcp,
@@ -52,7 +53,7 @@ export function createAppRouter(opts: { app: Hono<DropwayEnv>; uiSlots: UiSlots;
   });
   const skill = (c: Context<DropwayEnv>) => {
     const name = c.req.param("name");
-    if (name !== undefined && name !== SKILL_NAME) return c.notFound();
+    if (name !== undefined && name !== SKILL_NAME && name !== LEGACY_SKILL_NAME) return c.notFound();
     return c.body(skillMarkdown(skillInstance(c.get("dw"))), 200, { ...markdown, ...describedBy(appOrigin(c.get("dw"))) });
   };
   app.get("/skill.md", skill);
@@ -66,7 +67,7 @@ export function createAppRouter(opts: { app: Hono<DropwayEnv>; uiSlots: UiSlots;
     const body = `<main class="dw-system"><div class="dw-code">CLAIM</div><h1>Keep this site</h1>
 <p>Anonymous sites expire. To keep <code>${escapeHtml(slug)}</code>, call the API with an API key of this instance and the claim token (the part of this link after <code>#token=</code>):</p>
 <pre style="white-space:pre-wrap;word-break:break-all;background:var(--code);padding:1rem;border-radius:8px">curl -X POST ${escapeHtml(o)}/api/v1/sites/${escapeHtml(slug)}/claim \\
-  -H "Authorization: Bearer $DROPWAY_API_KEY" -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer $KOFRA_API_KEY" -H "Content-Type: application/json" \\
   -d '{"claimToken":"dwc_..."}'</pre></main>`;
     return c.html(htmlPage({ title: "Claim a site", body }), 200, pageHeaders());
   });

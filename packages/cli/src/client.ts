@@ -1,8 +1,9 @@
 /**
- * HTTP client for the Dropway REST API (v1). Runtime-neutral: it only uses
+ * HTTP client for the Kofra REST API (v1). Runtime-neutral: it only uses
  * fetch, so the same code runs in Node (the CLI) and inside the Workers runtime
  * (the integration tests call it against the real Worker).
  */
+import { LEGACY_HEADER_PREFIX } from "./legacy-brand.ts";
 import { VERSION } from "./version.ts";
 
 /** Process exit codes. Stable: agents branch on them. */
@@ -91,7 +92,7 @@ export interface ClientOptions {
   token: string | null;
   /** Injected for tests; defaults to the global fetch. */
   fetch?: FetchLike;
-  /** Sent as X-Dropway-Client (attribution shown per version). */
+  /** Sent as X-Kofra-Client (attribution shown per version). */
   client?: string;
   /** Attempts for retryable failures (429, 5xx, network). Default 4. */
   attempts?: number;
@@ -175,7 +176,7 @@ export class DropwayClient {
     this.api = normaliseApi(opts.api);
     this.token = opts.token;
     this.doFetch = opts.fetch ?? ((req) => fetch(req));
-    this.clientName = opts.client ?? `dropway-cli/${VERSION}`;
+    this.clientName = opts.client ?? `kofra-cli/${VERSION}`;
     this.attempts = Math.max(1, opts.attempts ?? 4);
     this.backoffMs = opts.backoffMs ?? 500;
     this.maxRetryAfter = opts.maxRetryAfterSeconds ?? 30;
@@ -199,7 +200,8 @@ export class DropwayClient {
     for (let attempt = 1; attempt <= this.attempts; attempt++) {
       const headers = new Headers(opts.headers);
       headers.set("Accept", "application/json");
-      headers.set("X-Dropway-Client", this.clientName);
+      headers.set("X-Kofra-Client", this.clientName);
+      headers.set(`${LEGACY_HEADER_PREFIX}Client`, this.clientName); // instances from before the rename
       if (token) headers.set("Authorization", `Bearer ${token}`);
       let body: Blob | Uint8Array | ArrayBuffer | string | null | undefined = opts.body;
       if (opts.json !== undefined) {
@@ -213,7 +215,7 @@ export class DropwayClient {
         lastError = new CliError({
           code: "network_error",
           message: `Could not reach ${new URL(url).origin}: ${(e as Error)?.message ?? String(e)}`,
-          hint: "Check the instance URL (--api or DROPWAY_API) and your network, then retry.",
+          hint: "Check the instance URL (--api or KOFRA_API) and your network, then retry.",
           exitCode: EXIT.unavailable,
         });
         if (retry === "safe" && attempt < this.attempts) {
@@ -292,7 +294,7 @@ export async function errorFromResponse(res: Response): Promise<CliError> {
   return new CliError({
     code: `http_${res.status}`,
     message: `The server answered HTTP ${res.status}${snippet ? `: ${snippet}` : ""}.`,
-    hint: res.status === 404 ? "Is this a Dropway instance? Check --api / DROPWAY_API (use the origin, without /api/v1)." : undefined,
+    hint: res.status === 404 ? "Is this a Kofra instance? Check --api / KOFRA_API (use the origin, without /api/v1)." : undefined,
     status: res.status,
     requestId,
     exitCode: exitCodeForStatus(res.status),

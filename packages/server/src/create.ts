@@ -26,6 +26,7 @@ import { bindUiSlots } from "./ui/shell";
 import { VIEWERS, type Viewer } from "./viewers";
 import { createMcpEndpoint } from "./mcp";
 import { CORE_MCP_TOOLS } from "./mcp/tools";
+import { acceptLegacyRequestHeaders, addLegacyResponseHeaders, legacyBrandHeaders } from "./legacy-brand";
 
 export interface Dropway {
   /** Worker fetch handler: export default { fetch: dropway.fetch, scheduled: dropway.scheduled }. */
@@ -51,7 +52,7 @@ export { CORE_MCP_TOOLS };
 const contexts = new WeakMap<Request, DropwayContext>();
 
 /**
- * Build a Dropway Worker. The open-source entry (apps/worker) calls this with no
+ * Build a Kofra Worker. The open-source entry (apps/worker) calls this with no
  * options; a hosted layer passes adapters, hooks, routes, MCP tools and UI slots.
  */
 export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
@@ -93,6 +94,8 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
   for (const extend of opts.routes ?? []) extend({ api, app: appRoutes });
   installOperationRoutes(api, operations);
   const app = new Hono<DropwayEnv>();
+  // Former-name headers (legacy-brand.ts) here too, so the exported app matches fetch.
+  app.use("*", legacyBrandHeaders);
   app.use("*", async (c, next) => {
     c.set("dw", contexts.get(c.req.raw) ?? context(c.env, c.executionCtx, new URL(c.req.url)));
     c.set("requestId", c.req.header("cf-ray") ?? crypto.randomUUID());
@@ -117,7 +120,12 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
     return c.text("Internal error", 500);
   });
 
+  // Clients from before the rename send and read the old header names (legacy-brand.ts).
   async function fetch(request: Request, env: ServerBindings, ctx: ExecutionContext): Promise<Response> {
+    return addLegacyResponseHeaders(await handle(acceptLegacyRequestHeaders(request), env, ctx));
+  }
+
+  async function handle(request: Request, env: ServerBindings, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const dw = context(env, ctx, url);
     try {

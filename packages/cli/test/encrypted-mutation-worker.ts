@@ -5,7 +5,7 @@ import { build } from "esbuild";
 
 export async function workerEntry(root: string, scratch: string): Promise<string> {
   const entry = join(root, "apps/worker/src/index.ts");
-  if (process.env.DROPWAY_ENCRYPTED_MUTANT !== "loader-cap") return entry;
+  if (process.env.KOFRA_ENCRYPTED_MUTANT !== "loader-cap") return entry;
   // Build the actual Worker with exactly one negative-control guard mutation.
   // Wrangler still serves the real loader and HTTP CSP from that Worker. Only
   // the generated bundle lives in scratch; repository source stays unchanged.

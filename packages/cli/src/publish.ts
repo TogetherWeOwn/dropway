@@ -11,6 +11,7 @@
  * Runtime-neutral (fetch only), so it is tested inside the Workers runtime.
  */
 import { CliError, EXIT, type DropwayClient } from "./client.ts";
+import { LEGACY_HEADER_PREFIX } from "./legacy-brand.ts";
 
 export interface SourceFile {
   /** Site path, POSIX separators, no leading slash (e.g. "assets/app.js"). */
@@ -282,7 +283,7 @@ export async function publishZip(client: DropwayClient, zip: Blob | Uint8Array, 
 }
 
 /**
- * Poll the live URL until it serves `versionId` (X-Dropway-Version), so an agent
+ * Poll the live URL until it serves `versionId` (X-Kofra-Version), so an agent
  * can open the URL the moment the command returns. Resolves false on timeout.
  */
 export async function waitForVersion(
@@ -297,7 +298,7 @@ export async function waitForVersion(
     try {
       const res = await doFetch(new Request(url, { method: "GET", headers: { Accept: "*/*", "Cache-Control": "no-cache" }, redirect: "follow" }));
       await res.body?.cancel().catch(() => {});
-      if (res.headers.get("x-dropway-version") === versionId) return true;
+      if ((res.headers.get("x-kofra-version") ?? res.headers.get(`${LEGACY_HEADER_PREFIX}Version`)) === versionId) return true;
     } catch {
       /* not reachable yet */
     }

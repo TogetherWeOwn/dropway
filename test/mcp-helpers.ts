@@ -18,7 +18,7 @@ export interface McpTestClient {
   tools(): Promise<any[]>;
 }
 
-/** fetch() that sends MCP traffic into the Dropway instance in-process, with a credential. */
+/** fetch() that sends MCP traffic into the Kofra instance in-process, with a credential. */
 export function mcpFetch(dw: Instance, key: string | null, extraHeaders: Record<string, string> = {}) {
   return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const req = new Request(input, init);

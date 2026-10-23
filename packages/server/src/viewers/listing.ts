@@ -81,7 +81,7 @@ export function renderListing(live: LiveSite, dir: string, mode: ServeMode, appV
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "public, max-age=0, must-revalidate",
       "Content-Security-Policy": "default-src 'none'; img-src * data: blob:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
-      "X-Dropway-Viewer": "listing",
+      "X-Kofra-Viewer": "listing",
     },
   });
 }
