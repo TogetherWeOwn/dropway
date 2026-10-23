@@ -20,7 +20,7 @@ export const SITE_OPERATIONS = [
       properties: {
         slug: {
           type: "string",
-          description: "3-63 chars: a-z, 0-9, single hyphens. Omit for a generated name.",
+          description: "3-56 chars: a-z, 0-9, single hyphens. Omit for a generated name.",
         },
         ...SETTINGS_INPUT,
       },
@@ -140,7 +140,7 @@ export const SITE_OPERATIONS = [
         site: SITE_REF,
         newSlug: {
           type: "string",
-          description: "3-63 chars: a-z, 0-9, single hyphens.",
+          description: "3-56 chars: a-z, 0-9, single hyphens.",
         },
       },
       required: ["site", "newSlug"],

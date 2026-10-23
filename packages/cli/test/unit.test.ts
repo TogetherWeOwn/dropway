@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { parseArgs, UsageError } from "../src/args.ts";
-import { CliError, EXIT, exitCodeForStatus, normaliseApi, errorFromResponse } from "../src/client.ts";
+import { CliError, DropwayClient, EXIT, exitCodeForStatus, movedTo, normaliseApi, errorFromResponse } from "../src/client.ts";
+import { run, type Io } from "../src/main.ts";
 import { configDir, linkKey, readCredentials, readLink, removeCredentials, saveCredentials, writeLink } from "../src/config.ts";
 import { collectFiles } from "../src/files.ts";
 import { IgnoreMatcher } from "../src/ignore.ts";
@@ -51,6 +52,48 @@ describe("client helpers", () => {
     const html = await errorFromResponse(new Response("<html>nope</html>", { status: 502 }));
     expect(html.code).toBe("http_502");
     expect(html.retryable).toBe(true);
+  });
+
+  it("notices an instance that moved (Link rel=successor-version, Deprecation optional) once, and keeps using it", async () => {
+    const moved = { Deprecation: "@1792713600", Link: '<https://kofra.test/api/v1/me>; rel="successor-version"', "Content-Type": "application/json" };
+    expect(movedTo(new Response("{}", { headers: moved }), "https://old.test")).toBe("https://kofra.test");
+    expect(movedTo(new Response("{}", { headers: moved }), "https://kofra.test")).toBeNull();
+    // Link alone is enough (an instance moved without LEGACY_DEPRECATED_AT sends no Deprecation header).
+    expect(movedTo(new Response("{}", { headers: { Link: moved.Link } }), "https://old.test")).toBe("https://kofra.test");
+    expect(movedTo(new Response("{}", { headers: { ...moved, Link: '<https://kofra.test/x>; rel="describedby"' } }), "https://old.test")).toBeNull();
+    expect(movedTo(new Response("{}", { headers: { ...moved, Link: '<javascript:alert(1)>; rel="successor-version"' } }), "https://old.test")).toBeNull();
+
+    const seen: string[] = [];
+    const urls: string[] = [];
+    const client = new DropwayClient({
+      api: "https://old.test",
+      token: "dw_x",
+      onMoved: (o) => seen.push(o),
+      fetch: async (req) => {
+        urls.push(req.url);
+        expect(req.headers.get("authorization")).toBe("Bearer dw_x");
+        return new Response(JSON.stringify({ principal: "member" }), { headers: moved });
+      },
+    });
+    await client.get("/me");
+    await client.get("/me");
+    expect(seen).toEqual(["https://kofra.test"]);
+    expect(urls).toEqual(["https://old.test/api/v1/me", "https://old.test/api/v1/me"]);
+
+    let stderr = "";
+    const io: Io = {
+      stdout: () => {},
+      stderr: (t) => void (stderr += t),
+      stdinIsTTY: false,
+      stderrIsTTY: false,
+      readStdin: async () => "",
+      prompt: async () => "",
+      env: { DROPWAY_CONFIG_DIR: await tmp() },
+      cwd: await tmp(),
+      fetch: async () => new Response(JSON.stringify({ principal: "member", member: { email: "a@b.c", role: "owner" }, scopes: [] }), { headers: moved }),
+    };
+    expect(await run(["whoami", "--api", "https://old.test", "--key", "dw_x", "--json"], io)).toBe(EXIT.ok);
+    expect(stderr).toBe("Note: https://old.test has moved to https://kofra.test. The old address still works for now; make the new one your default with: dropway login --api https://kofra.test\n");
   });
 
   it("keeps VERSION in sync with package.json", async () => {

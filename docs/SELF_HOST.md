@@ -93,9 +93,12 @@ Variables go in `vars` in `wrangler.jsonc`; secrets with `npx wrangler secret pu
 | `SIGNING_SECRET` (secret) | bootstrap key | HMAC secret for password cookies and IP hashing |
 | `INSTANCE_NAME` | `Dropway` | Shown in pages and API responses |
 | `APP_ORIGIN` | request origin | Public origin of the app and API |
+| `LEGACY_APP_ORIGINS` | empty | Former app origins (comma-separated), after a move to a new `APP_ORIGIN`. See [Moving the app](#moving-the-app-to-a-new-origin) |
+| `LEGACY_DEPRECATED_AT` | none | Date of that move (ISO 8601 or Unix seconds), sent as `Deprecation: @<seconds>`; unset = no `Deprecation` header (the successor `Link` is still sent) |
 | `SITES_MODE` | `path` | `path` or `subdomain` (see below) |
 | `SITES_DOMAIN` | empty | Subdomain mode: sites at `https://<name>.<SITES_DOMAIN>/` |
-| `SITES_ORIGIN` | empty | Path mode: origin of a second, sites-only deployment of the same Worker |
+| `SITES_ORIGIN` | empty | Path mode: origin of a second, sites-only deployment of the same Worker. Ignored in subdomain mode |
+| `LEGACY_SITES_ORIGINS` | empty | Former path-mode sites origins (comma-separated): `<origin>/<name>/<path>` answers `308` to the site's current URL, path and query kept (not cached) |
 | `SITES_SANDBOX` | `auto` | `auto`: on a separate sites origin, sandbox anonymous sites only. `true`: sandbox every site. `false`: none. Always on when sites share the app origin |
 | `ANONYMOUS_PUBLISH` | `false` | Allow publishing without a key (sites expire; a claim token is returned) |
 | `ANON_TTL_HOURS` | `24` | Lifetime of anonymous sites |
@@ -156,7 +159,7 @@ can never set or read the app's cookies.
      "APP_ORIGIN": "https://dropway.<you>.workers.dev",
      "SITES_MODE": "subdomain",
      "SITES_DOMAIN": "example-sites.com"
-     // ...keep the other vars
+     // ...keep the other vars; clear SITES_ORIGIN (subdomain mode ignores it)
    }
    ```
 
@@ -165,7 +168,17 @@ can never set or read the app's cookies.
 4. **Deploy**: `npm run deploy`, or push to your copy if you used the button.
 5. **Check**: `curl -sI https://anything.example-sites.com/` answers from Dropway (404, no such site),
    and a new publish returns `https://<name>.example-sites.com/`. Old `/s/<name>/` links on the app
-   redirect to the new URLs.
+   redirect to the new URLs. If sites were on a second Worker before (option B), set
+   `LEGACY_SITES_ORIGINS` to its old origin so `<old origin>/<name>/...` links redirect too, and
+   clear `SITES_ORIGIN`: subdomain mode ignores it (left set, it does not stop those redirects).
+
+In subdomain mode `www.<SITES_DOMAIN>` redirects to the app, and reserved names (`files`, `fallback`,
+`customers`, `api`, ...) are never served as sites. Site names are at most 56 characters, so a version
+preview host `<name>--v<N>` still fits one DNS label. Password-protected sites use a `__Host-` cookie,
+send no CORS headers and `Cross-Origin-Resource-Policy: same-origin`, and refuse (`403`) non-navigation
+requests from other sites (`Sec-Fetch-Site: same-site` or `cross-site`): sibling `<name>.<SITES_DOMAIN>`
+hosts are the same site until the domain is on the Public Suffix List. A password entered in the
+dashboard's file viewer (a cross-site frame) sets a partitioned cookie for that frame only.
 
 TLS: Universal SSL covers the apex and first-level subdomains only
 ([limitations](https://developers.cloudflare.com/ssl/edge-certificates/universal-ssl/limitations/)).
@@ -175,6 +188,22 @@ certificate.
 
 To put the app itself on your domain too, add a Custom Domain route such as
 `{ "pattern": "dropway.example.com", "custom_domain": true }` and set `APP_ORIGIN` to match.
+
+### Moving the app to a new origin
+
+Keep `"workers_dev": true`, set `APP_ORIGIN` to the new origin and list the old one in
+`LEGACY_APP_ORIGINS` (for example `"https://dropway.<you>.workers.dev"`). On the old origin:
+
+- `/api/*`, `/mcp`, `/health`, `/.well-known/*`, `/llms.txt`, `/llms-full.txt`, `/openapi.json` and
+  `/skill.md` keep answering, with `Deprecation` and `Link: <new URL>; rel="successor-version"`
+  headers. They are not redirected: HTTP clients drop the `Authorization` header on a cross-origin
+  redirect, so a redirected agent would get 401. The CLI prints a one-line note with the new address.
+- Other `GET`/`HEAD` requests (pages, the dashboard, sign-in links) answer `308` to the same path and
+  query on the new origin. The redirect is not cached, so moving back works at once. It carries
+  `Access-Control-Allow-Origin: *` (never credentials), so cross-origin reads of published files at
+  their old URLs (`/s/<site>/...`) follow it; the new origin decides whether the read is allowed.
+  Other methods (webhooks, form posts) are served in place.
+- Browser sessions are per host: people sign in again on the new origin.
 
 ## Upgrades, backups, removal
 

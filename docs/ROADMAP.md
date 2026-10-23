@@ -10,6 +10,8 @@ Milestones:
   keys; anonymous publish with claim (off by default); viewers with a rendered/raw toggle.
 - **M1 Parity (P1)**, R-17 to R-37: here.now feature parity for a single tenant.
 - **M2 Beyond (P2)**, R-38 to R-51.
+- **M3 Kofra ports (P1)**, R-52 to R-58: transfers to named people, delivery email and receipts, holds, very
+  large files, hardened webhooks, strict rate limits. Owner approved 2026-10-22; read the M3 rules first.
 
 ## Definition of done (every item)
 
@@ -498,3 +500,162 @@ Delivers: ORG-05, DOM-04. Depends: R-33.
 Delivers: VIEW-04. Depends: R-34.
 - Archives (entry list), Office previews (Workers AI conversion, labelled as previews), 3D models, GeoJSON
   maps, EPUB, each with caps and fallbacks per SPEC 10.2.
+
+---
+
+## M3: Kofra ports (P1)
+
+The owner approved merging Kofra into this codebase on 2026-10-22. These items rebuild old Kofra's best
+features on this codebase's model (sites, versions, content-addressed blobs). Do them in order: R-52 first.
+The hosted parts (plan limits, the mail provider, the DMCA process, payments) are in the private SaaS
+roadmap, not here.
+
+**Owner decision 2026-10-22: no virus or malware scanning, in core or SaaS.** No ClamAV, no scan job
+protocol, no `ScannerAdapter` and no scan-verdict gate are planned. No page, mail or doc may say that files
+are "scanned" or "virus-free". Abuse-report categories such as `malware` stay: they are reports, not
+scanning. TOTP is not ported either; passkeys (R-49) cover second factors.
+
+Rules for every M3 item, on top of the Definition of done:
+
+1. **Rules and tests, not code.** The spec is old Kofra's rules and tests (archived private repository at
+   `156468e`; each card names the files). Restate them as your own tests in `test/`. Copy no code,
+   fixtures, test data or literals.
+2. **Publication check.** That source is private and contains internal host names and markers. Before you
+   open a PR, check the diff for any internal host name, IP address, account, issue reference or marker,
+   and say in the PR that you did.
+3. **Live check.** An item is done when it works on a deployed instance (staging or a self-host test
+   deploy), with the evidence linked in the PR. A closed card is not the measure.
+
+### R-52 Transfers: expiring, password-protected deliveries to named people (3 days)
+Delivers: new (add the SPEC rows in the build PR). Depends: R-02.
+- `create_transfer` (REST, MCP and CLI through the operation registry) creates a site in `transfer` mode:
+  files, up to 50 recipient email addresses (normalised, deduplicated once), an optional message (at most
+  10,000 characters, shown as plain text, never HTML), an optional password, an expiry and an optional
+  download limit. It returns one link per recipient plus one general link.
+- Transfer files are always downloads (`Content-Disposition: attachment`, `nosniff`), never rendered, and
+  are served from the sites host, never the app origin. The transfer page (message, file list, sizes,
+  password form) is on the app origin.
+- Bounds, each with a refusal test: password 8 to 1,024 characters, no NUL, empty means "no password";
+  expiry from 1 hour to `TRANSFER_MAX_EXPIRY_DAYS` (default 30, at most 3,650), read through
+  `PolicyAdapter.limits` so a host can lower it; download limit 1 to 10,000.
+- Download order, in this exact order, with a test for each neighbouring pair: unknown slug, deleted
+  transfer or missing file -> 404; live takedown -> 451, decided from the slug alone, above expiry and
+  above the password, naming no ground; expired, revoked or download limit reached -> 410; password set
+  and not unlocked -> password form (403 for API clients); otherwise the file. A transfer expiring exactly
+  now still downloads; one millisecond later it is 410.
+- Counts: per file and per recipient link, visible to the owner in `get_transfer`. A download counts when
+  a GET without `Range`, or with a range starting at byte 0, is served; resumed ranges do not count again.
+- A transfer the caller may not see answers 404, never 403, so "no such transfer" and "not yours" look
+  the same.
+- Updates (message, expiry, recipients, download limit) are allowed only while the transfer is live and
+  no recipient has been notified yet; otherwise, or under a hold or takedown, they answer 409. A no-op
+  update answers 200 and records no event.
+- Revoke marks the transfer expired at once: the next request is 410 and is not counted, and the owner
+  can still read the transfer. `revoke_transfers` revokes several (by id, or all live ones) in one call
+  and returns the count. A revoke racing an update: exactly one wins, the other answers 409. Storage
+  quota is released once, when the bytes are purged, never at revoke.
+- Changing or clearing a set password requires the current password in the same call. The unlock cookie
+  is bound to the password digest, so every earlier unlock stops working after a change. Hashing uses the
+  same KDF as password sites; unlock attempts are rate limited per IP and per transfer.
+- Slug tombstones: a slug once used by a transfer is never given to a different owner after a rename or
+  deletion, so an old link never lands on someone else's files. The member who freed it may reuse it.
+  Tombstones outlive the transfer and the member.
+- The hourly cleanup claims live transfers past their expiry idempotently (a re-run claims nothing).
+  Expiry is never blocked by a hold; purging the bytes is (R-54).
+- No scanning (owner 2026-10-22): downloads are never gated on a scan, and the page never claims files
+  are scanned. It states plainly that Kofra does not scan files and shows each file's exact type, size
+  and SHA-256 checksum instead.
+
+### R-53 Delivery email, receipts and download notifications (2-3 days)
+Delivers: new. Depends: R-52, R-21.
+- Events with stable ids through `hooks` (and as webhook event types once R-40 is in): `transfer.created`,
+  `transfer.notified`, `transfer.opened`, `file.downloaded`, `transfer.expiring`, `transfer.expired`,
+  `transfer.revoked`. `list_transfer_activity` returns them for one transfer, also as CSV.
+- Mail goes through `EmailAdapter` (the `EMAIL` binding when present). Without it, transfers still work
+  and return their links; the mail options answer `feature_unavailable`. Templates: one link email per
+  recipient (the sender's message as plain text), a sender receipt, an immediate "downloaded" notice, a
+  daily digest, and an expiry reminder.
+- Outbox: every mail is an outbox row keyed by event and recipient, so a repeated event never mails twice.
+  Failures retry, then dead-letter after `maxAttempts` with the reason. One failing mail never holds up
+  the others in the same run.
+- "Downloaded" notices follow the owner's setting: `immediate` sends at most one mail per transfer, file
+  and download; `daily` sends one digest per transfer covering the previous 24 hours; `off` sends nothing.
+- Expiry reminder: exactly one per deadline, only while the deadline is in the future and at most 24 hours
+  away; changing the expiry re-arms it; never for expired, revoked or deleted transfers. Two sweeps racing
+  send one mail.
+- Every recipient mail has an unsubscribe link. Unsubscribed and suppressed addresses are skipped, with an
+  audit entry; the suppression list outlives the transfer.
+- Names and messages are inert in mail: a test uses a name with CR/LF, HTML and a URL. Mail never contains
+  a password or file bytes.
+
+### R-54 Takedown and legal-hold primitives (1 day)
+Delivers: new (extends R-37). Depends: R-37, R-52. Extension API change.
+- A hold can be put on a site, a transfer or a blob with a required reason and released with a required
+  reason. Reasons over 255 characters are cut on a code-point boundary. History is append-only
+  (`hold.applied`, `hold.released`) and goes to the audit log. Applying twice changes nothing; releasing
+  something not held is an answer, not an error.
+- **A hold blocks deletion, never expiry.** Expiry, revoke and takedown still deny access. Only purges are
+  fenced: the hourly cleanup, version retention, site and member deletion, and orphan-blob collection.
+- The fence is live: each purge checks holds immediately before each delete, never from a list read
+  earlier. A test lands a hold between the cleanup's select and its delete, and the delete is skipped.
+- Takedown on sites and transfers: missing 404 above takedown 451 above expired 410 above password. The
+  451 page names no ground. A taken-down transfer that expires still answers 451.
+- New extension point `hooks.beforePurge`, so a host (the SaaS DMCA process) can add holds. Bump
+  `EXTENSION_API_VERSION`, add the CHANGELOG line and a contract test.
+
+### R-55 Optional direct-to-R2 multipart uploads for very large files (3 days)
+Delivers: new (extends R-35). Depends: R-35. Off by default.
+- On only when the operator sets R2 S3 API credentials as secrets. The Deploy button cannot create
+  those, so the Worker-proxied path from R-35 stays the default and works without them. Without
+  credentials the direct operations answer `feature_unavailable`.
+- Start checks size, name, type and quota before handing out any URL. Parts are whole MiB, at least 8
+  MiB, at most 10,000 parts. A session lives 24 hours; each part URL lives 15 minutes and is refused after.
+- A quota refusal or a failed write aborts the R2 multipart upload just created (best effort), so no paid
+  parts are left behind. An abort racing a completion cannot orphan parts (whoever claims first wins).
+- Completion refuses a forged ETag, a missing part, a duplicated part number hiding a missing one, and a
+  part that was never uploaded. The Worker then checks the size and SHA-256 of the whole object itself
+  before it becomes `blobs/<sha256>`; ETags and client metadata never count as checksums. A mismatch is
+  final and the object is deleted. A repeated completion changes nothing; a crash midway resumes once.
+- The cleanup aborts sessions past their lifetime (holds respected, R-54).
+- **Measure before promising sizes.** Record CPU and wall time to hash 1, 10 and 100 GiB after upload on
+  `workers.dev` in the PR. The advertised maximum comes from that measurement.
+- No scanning (owner 2026-10-22): completion queues no scan job.
+
+### R-56 Optional signed short-lived direct downloads (1 day)
+Delivers: new. Depends: R-55, R-52.
+- With the same R2 credentials, and for files over `DIRECT_DOWNLOAD_MIN_BYTES` (default 1 GiB), a
+  transfer download may answer 302 to a presigned R2 GET that lives at most 5 minutes and forces
+  `attachment`. Worker streaming stays the default, and the only path for sites.
+- The full download order (R-52, R-54) runs before every URL is made; only "allowed" makes one. Revoked,
+  expired, taken-down, locked and missing files never get a URL (tests).
+- Each URL made counts as one download. A storage error counts the attempt but records no bytes. Analytics
+  record the file size as an upper bound and say so.
+- The redirect is `Cache-Control: no-store`. The docs say the URL exposes the R2 account host.
+
+### R-57 Hardened webhooks (1 day, extends R-40)
+Delivers: new. Depends: R-40.
+- The signature covers the exact bytes sent (HMAC-SHA256 with a timestamp). Retries send byte-identical
+  bodies under one delivery id, with a fresh timestamp and signature.
+- Up to 5 attempts, 10 s, 60 s, 300 s and 900 s apart; a bounded dead-letter list; an endpoint switches
+  off after 15 failed deliveries in a row, and the owner gets one alert.
+- Secret rotation: both secrets sign for 24 hours, then only the new one.
+- Budget of 300 events per endpoint per minute: above it, events are dropped (not queued), with one
+  warning per endpoint per minute. A repeat of the same event to the same endpoint creates no second
+  delivery.
+- SSRF: resolve and check DNS before every attempt. Any private, loopback, link-local or reserved address
+  in the answer fails closed. DNS errors and policy refusals report the same reason. Redirects are never
+  followed; response bodies are read only up to a cap. Workers `fetch` cannot pin the checked address, so
+  DNS rebinding remains a documented limit; test the `global_fetch_strictly_public` flag and record the
+  result.
+
+### R-58 Strict rate limits on Durable Objects (1-2 days, extends R-36)
+Delivers: new. Depends: R-36.
+- For security limits (sign-in codes, password unlocks, abuse reports, key creation), one SQLite Durable
+  Object per bucket is the source of truth, because the Rate Limiting binding only counts per location.
+  Bucket names are fixed, versioned SHA-256 names with no location in them; each environment has its own
+  namespace.
+- The per-client limit is checked before the global one; the global limit holds across buckets.
+- The client address comes only from `CF-Connecting-IP`; forged forwarding headers change nothing. IPv6
+  counts per /64; IPv4-mapped and IPv4-compatible IPv6 forms share the IPv4 bucket.
+- If the counter is unavailable, these limits refuse (fail closed). `OPTIONS` and unknown paths spend
+  nothing. 429 answers carry `RateLimit` and `Retry-After`.

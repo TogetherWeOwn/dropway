@@ -400,7 +400,8 @@ URL in the publish response is correct at once; `X-Dropway-Version` on every sit
 
 Producer: finalize enqueues `{ kind, siteId, versionId }` messages on `JOBS`. Consumer (same Worker,
 batch 10, retries 3, dead-letter queue `dropway-jobs-dlq`). Kinds: `metadata`, `screenshot`, `index`,
-`scan`, `webhook`, `rollup`. Each job writes a `jobs` row so agents can poll `get_version` for
+`webhook`, `rollup`. There is no `scan` kind: Dropway never scans file contents (owner decision
+2026-10-22). Each job writes a `jobs` row so agents can poll `get_version` for
 `jobs: { screenshot: "done", ... }`. Without a Queue binding the same handlers run in `waitUntil`.
 
 ---
@@ -778,7 +779,7 @@ CREATE TABLE usage_counters (
 -- 0003_jobs_audit_abuse.sql (R-19, R-37, R-38, R-42)
 CREATE TABLE jobs (
   id           TEXT PRIMARY KEY,
-  kind         TEXT NOT NULL,             -- metadata | screenshot | index | scan | webhook | rollup
+  kind         TEXT NOT NULL,             -- metadata | screenshot | index | webhook | rollup
   site_id      TEXT,
   version_id   TEXT,
   status       TEXT NOT NULL CHECK (status IN ('queued', 'running', 'done', 'failed', 'skipped')),

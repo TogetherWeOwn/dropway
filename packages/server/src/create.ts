@@ -19,6 +19,7 @@ import type { DropwayEnv, ServerBindings } from "./env";
 import type { CreateDropwayOptions, McpToolDefinition, UiSlots } from "./extensions";
 import { escapeHtml, htmlPage } from "./html";
 import { apiErrorResponse, installApiMiddleware } from "./routes/api";
+import { legacyAppRedirect, legacyAppSuccessor, withDeprecationHeaders } from "./legacy";
 import { redirectResponse, routeSiteRequest } from "./route-sites";
 import { SITE_SANDBOX, serveSite, systemResponse } from "./serve";
 import { bindUiSlots } from "./ui/shell";
@@ -117,8 +118,13 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
   });
 
   async function fetch(request: Request, env: ServerBindings, ctx: ExecutionContext): Promise<Response> {
-    const dw = context(env, ctx, new URL(request.url));
+    const url = new URL(request.url);
+    const dw = context(env, ctx, url);
     try {
+      // A former app origin (config.legacyAppOrigins): pages move, the API and MCP keep answering.
+      const successor = legacyAppSuccessor(dw, url);
+      const moved = successor ? legacyAppRedirect(request, url, successor) : null;
+      if (moved) return moved;
       const route = await routeSiteRequest(dw, request);
       switch (route.kind) {
         case "site":
@@ -129,9 +135,11 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
           return sitesHome(dw);
         case "sites_not_found":
           return systemResponse(dw, request, { kind: "path", base: "/", sandbox: true, rewrite: null }, null, 404, "404", "Nothing is published here", "There is no site at this address. See {app}.");
-        case "app":
+        case "app": {
           contexts.set(request, dw);
-          return await app.fetch(request, env, ctx);
+          const res = await app.fetch(request, env, ctx);
+          return successor ? withDeprecationHeaders(res, dw, successor) : res;
+        }
       }
     } catch (e) {
       console.error(JSON.stringify({ event: "serve_error", url: request.url, error: String(e), stack: (e as Error)?.stack }));

@@ -185,7 +185,7 @@ export const CORE_API_OPERATIONS = [
         },
         site: {
           type: "string",
-          description: "Optional. Slug, id or URL of your existing site to replace, or a new slug (3-63 chars: a-z, 0-9, single hyphens).",
+          description: "Optional. Slug, id or URL of your existing site to replace, or a new slug (3-56 chars: a-z, 0-9, single hyphens).",
         },
         ...SETTINGS_INPUT,
         password: {

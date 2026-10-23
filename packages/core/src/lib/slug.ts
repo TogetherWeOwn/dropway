@@ -34,6 +34,8 @@ export const RESERVED_SLUGS = new Set([
   "lib", "libs", "vendor", "scripts", "script", "styles", "style", "icons", "icon", "data", "files", "file",
   "_next", "_astro", "_app", "well-known", "node_modules", "favicon", "robots", "sitemap", "health", "openapi",
   "llms", "claim", "members", "keys", "sites", "blobs", "publish", "raw", "view", "download",
+  // Platform labels on a sites domain: product name, custom-hostname fallback origin and CNAME target.
+  "kofra", "fallback", "customers",
 ]);
 
 export function generateSlug(): string {
@@ -43,6 +45,13 @@ export function generateSlug(): string {
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/;
 
+/**
+ * Longest name for a new site. A DNS label holds 63 characters, and the version preview host
+ * <slug>--v<N> must still fit one label in subdomain mode: 56 + "--v9999" = 63. Existing longer
+ * names keep working (looksLikeSlug accepts 63).
+ */
+export const MAX_SLUG_LENGTH = 56;
+
 /** True for strings shaped like a site name (DNS label, 3-63 chars). Does not check reservations. */
 export function looksLikeSlug(s: string): boolean {
   return SLUG_RE.test(s) && !s.includes("--");
@@ -51,11 +60,11 @@ export function looksLikeSlug(s: string): boolean {
 /** Validate a caller-chosen slug. Slugs are DNS labels: they may become <slug>.<SITES_DOMAIN>. */
 export function validateSlug(input: string): string {
   const slug = String(input).trim().toLowerCase();
-  if (!looksLikeSlug(slug)) {
+  if (!looksLikeSlug(slug) || slug.length > MAX_SLUG_LENGTH) {
     throw badRequest(
       "invalid_slug",
       `"${input}" is not a valid site name.`,
-      "Use 3-63 characters: lowercase letters, digits and single hyphens, starting and ending with a letter or digit.",
+      `Use 3-${MAX_SLUG_LENGTH} characters: lowercase letters, digits and single hyphens, starting and ending with a letter or digit.`,
     );
   }
   if (RESERVED_SLUGS.has(slug)) {

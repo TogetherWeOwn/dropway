@@ -57,7 +57,7 @@ export function createAppRouter(opts: { app: Hono<DropwayEnv>; uiSlots: UiSlots;
   app.get("/.well-known/agent-skills/:name/SKILL.md", skill);
   app.get("/.well-known/skills/:name/SKILL.md", skill);
   app.get("/.well-known/agent-skills/index.json", async (c) => c.json(await agentSkillsIndex(c.get("dw")), 200, { "Cache-Control": "public, max-age=300", "Access-Control-Allow-Origin": "*" }));
-  app.get("/.well-known/skills/index.json", (c) => c.json(legacySkillsIndex(), 200, { "Cache-Control": "public, max-age=300", "Access-Control-Allow-Origin": "*" }));
+  app.get("/.well-known/skills/index.json", (c) => c.json(legacySkillsIndex(c.get("dw").config.instanceName), 200, { "Cache-Control": "public, max-age=300", "Access-Control-Allow-Origin": "*" }));
   app.get("/claim", (c) => {
     const slug = c.req.query("slug") ?? "";
     const o = appOrigin(c.get("dw"));
