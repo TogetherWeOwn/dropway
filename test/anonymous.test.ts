@@ -26,7 +26,19 @@ describe("anonymous publishing (opt-in)", () => {
     const upd = await dw.json("/api/v1/publish", { method: "POST", key: pub.body.claimToken, body: form({ "index.html": "anon v2" }) });
     expect(upd.status).toBe(200);
     expect(upd.body.slug).toBe(pub.body.slug);
-    expect(await (await dw.call(`/s/${pub.body.slug}/`)).text()).toBe("anon v2");
+    const updatedPage = await dw.call(`/s/${pub.body.slug}/`);
+    expect(updatedPage.status).toBe(200);
+    const html = await updatedPage.text();
+    expect(html).toContain("anon v2");
+    expect(html.match(/<a\b[^>]*>Report abuse<\/a>/g)).toHaveLength(1);
+    expect(html).toMatch(/position\s*:\s*fixed\b/i);
+    // Served anonymous HTML is decorated; raw and authenticated read-back keep the updated bytes.
+    const raw = await dw.call(`/s/${pub.body.slug}/?raw=1`);
+    expect(raw.status).toBe(200);
+    expect(await raw.text()).toBe("anon v2");
+    const stored = await dw.call(`/api/v1/sites/${pub.body.slug}/files/index.html`, { key: pub.body.claimToken });
+    expect(stored.status).toBe(200);
+    expect(await stored.text()).toBe("anon v2");
 
     // Claim into the tenant: no more expiry, token stops working.
     const claim = await dw.json(`/api/v1/sites/${pub.body.slug}/claim`, { key: dw.ownerKey, ...jsonBody({ claimToken: pub.body.claimToken }) });

@@ -32,8 +32,9 @@ packages/server           @dropway/server: createDropway() Hono app factory
   src/path-rewrite.ts     Path mode: prefixes root-relative URLs in HTML/CSS
   src/viewers/            File viewers, one per kind (code, markdown, json, csv, media, notebook, binary...)
   src/ui/                 App-origin UI: home, sign-in, dashboard, file viewer, the dashboard script
-  src/routes/api.ts       REST API v1 (thin)
-  src/routes/api-agent.ts REST twins of the agent tools (PATCH files, PUT access, rename, GET version)
+  src/routes/api.ts       API middleware, JSON parsing and error responses
+  src/operations/         Operation families and compatibility adapters; core.ts fixes stable order
+  src/operations.ts       Operation types, validation and REST/MCP generation
   src/mcp/                Remote MCP server (/mcp): endpoint (index.ts), core tools (tools.ts), schemas
   src/app.ts              App-origin routes: home (./ui), /openapi.json, discovery routes, /claim, /mcp
   src/openapi.ts          OpenAPI 3.1 document for every route (operationId = MCP tool name)
@@ -67,8 +68,8 @@ throws `ApiError` with a stable `code` and a `hint` for the caller.
 | `cleanup.ts` | Hourly cron: expire anonymous sites, purge deleted sites, drop stale uploads, delete orphan blobs |
 | `events.ts` | Runs hooks and metering after the response (never throws) |
 
-The REST routes (`packages/server/src/routes/api.ts`) only parse input, call
-one service and shape JSON. **The MCP server and the CLI's server side must call
+The registry operations (`packages/server/src/operations/`) only parse input,
+call a service and shape JSON. **The MCP server and the CLI's server side must call
 the same services**, never the REST API over HTTP, so permissions, limits and
 errors are identical everywhere.
 
@@ -197,7 +198,7 @@ tables in their own migrations or their own D1 database.
 
 ## Extension points: `createDropway(options)`
 
-`@dropway/server` exports `EXTENSION_API_VERSION = 1` for this public embedding
+`@dropway/server` exports `EXTENSION_API_VERSION = 2` for this public embedding
 contract. Update it and the Extension API section in `CHANGELOG.md` when changing
 the contract. `test/extension-contract.test.ts` exercises every existing extension
 point with fake adapters and real emulated D1/R2/KV bindings; it runs in public CI.
@@ -215,7 +216,8 @@ export default createDropway({
   hooks: [{ onPublish, onDelete, onRequest }], // after the response; errors are logged only
   apiMiddleware: [/* Hono middleware on /api/*, after the principal is resolved */],
   routes: [({ api, app }) => { api.get("/extra", handler); }], // registered BEFORE core routes (can override)
-  mcpTools: [/* McpToolDefinition: name, description, JSON Schema in/out, scopes, toolset, handler(args, { dw, principal, client }) */],
+  operations: [/* defineOperation: zod input/output, service handler, REST path, MCP and CLI metadata */],
+  mcpTools: [/* compatibility escape hatch: MCP-only tools, or replacement by name */],
   mcp: createMcpEndpoint({ name, instructions }), // optional: the default endpoint is mounted at /mcp already
   uiSlots: { navItems: [], pages: [{ path, title, nav, handler }], landing, headHtml, banner, settingsSections, session },
   viewers: [/* extra viewers, tried before core ones */],
@@ -227,22 +229,157 @@ export default createDropway({
 consumers, scripts, tests). Inside routes, use `c.get("dw")` and
 `c.get("principal")`.
 
+### Atomic mutation extensions (version 2)
+
+`@dropway/core` exports `AtomicWriteExtension` (`statements: readonly
+D1PreparedStatement[]`, optional `mapError(error): ApiError | undefined`) and
+`SiteNameMutation` (`operation: "create" | "rename"`, `siteId`, `tenantId`,
+`slug`, `previousSlug`). The optional
+`PolicyAdapter.siteNameMutation(principal, input, dc)` prepares an extension,
+synchronously or asynchronously, for each concrete name acquisition:
+
+- Create runs existing authorization, validation, legacy `beforeCreateSite` and
+  `CreateSiteOptions.beforeInsert` first. The legacy preflight runs once, with
+  the requested canonical slug or null; it is **not an atomic allocation guard**.
+  The new callback receives each actual generated or explicit slug, the new
+  site id/tenant and `previousSlug: null`, never claim/password secrets.
+- Rename runs existing member/scope/isolation checks and canonical validation
+  first. A canonical no-op skips preparation. Otherwise the callback receives
+  the loaded identity, new slug and `previousSlug`. REST and MCP share this
+  service. A concurrent rename, ownership change or deletion during preparation
+  fails with 409 `site_changed`, before extension writes can commit. Core uses a
+  schema-free SQL assertion (lazy CASE with a tagged invalid JSON path on the
+  stale branch) and fenced UPDATE in the same batch, not an after-commit check.
+- Core SQL runs first, then extension SQL, sequentially in **one**
+  `dc.env.DB.batch` per attempt. D1 rolls back the whole batch on SQL failure,
+  including earlier extension statements. Metering and rename cache changes
+  happen only after success. Refused renames leave the old live URL/cache intact;
+  accepted renames invalidate the old name and refresh the new one, no redirects.
+
+Preparation is **outside** the transaction. It may build statements or throw,
+but must not independently write or perform irreversible effects expecting core
+rollback. Statements must be prepared on the **same `dc.env.DB`**. This is a
+trusted embedding API, not a sandbox for untrusted SQL. It makes no atomicity
+claim across databases, KV, R2, network calls, or a later deployment.
+
+Refusal must be a **SQL failure/constraint inside the batch**. A SELECT returning
+false, INSERT selecting zero rows, or JavaScript inspecting batch results after
+commit cannot refuse/undo the mutation. `mapError` translates only recognized
+SQL failures; undefined preserves the original error. Preparation-thrown
+`ApiError`s preserve status/code/hint directly and through REST; MCP retains its
+existing `isError`/code/message/hint format (no numeric status field).
+
+Core's precise `sites.slug` UNIQUE constraint keeps 409 `slug_taken` and its
+existing explicit-name hint. Extension mappers can deliberately return 409
+`slug_taken` for their competing allocation. Only that exact status/code is a
+generated-name retry, including when thrown by the new callback: six attempts,
+then 503 `slug_generation_failed`. Unrelated UNIQUE errors are not collisions;
+other errors propagate without retry. Explicit names never retry. Rolled-back
+candidates leave no site/extension rows or creation events; only the winner emits
+`site_created`.
+
+For example, an embedding app can own a constraint-backed allocation table in
+its **own** same-D1 migration (these are not core tables):
+
+```sql
+CREATE TABLE extension_names (
+  slug TEXT PRIMARY KEY,
+  site_id TEXT UNIQUE REFERENCES sites(id)
+);
+-- External writers reserve a name with site_id NULL. They must also refuse
+-- names already owned by a site, inside their transaction, in this direction.
+CREATE TRIGGER extension_external_name BEFORE INSERT ON extension_names
+WHEN NEW.site_id IS NULL BEGIN
+  SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM sites WHERE slug = NEW.slug AND deleted_at IS NULL
+  ) THEN RAISE(ABORT, 'extension_name_conflict') END;
+END;
+```
+
+```ts
+import { ApiError, defaultPolicy, type PolicyAdapter } from "@dropway/core";
+
+const policy: PolicyAdapter = {
+  ...defaultPolicy,
+  siteNameMutation(_principal, input, dc) {
+    return {
+      statements: [
+        // Release this site's previous allocation on rename, atomically.
+        dc.env.DB.prepare("DELETE FROM extension_names WHERE site_id = ?")
+          .bind(input.siteId),
+        dc.env.DB.prepare("INSERT INTO extension_names (slug, site_id) VALUES (?, ?)")
+          .bind(input.slug, input.siteId),
+      ],
+      mapError(error) {
+        if (/\bUNIQUE constraint failed: extension_names\.slug(?=:|$)/.test(String(error))) {
+          return new ApiError(409, "slug_taken", "The name is allocated.", "Choose another name.");
+        }
+        return undefined;
+      },
+    };
+  },
+};
+```
+
+The UNIQUE constraint refuses site acquisition if an external allocation won
+first; the trigger refuses an external acquisition if the site won first. All
+writers must obey the same SQL constraints, not a SELECT-only preflight. The
+embedding app also owns allocation release on site deletion; core does not
+manage extension-table lifecycle or retention. Real disposable D1 fixtures in
+`test/atomic-extensions.acceptance.test.ts` pin both writer orders, rollback,
+generated retries, REST/MCP refusals, cache behavior and stale preparation.
+
+`createTenantWithOwner(dc, input, options?)` is a separate low-level exported
+service. `CreateTenantWithOwnerInput` accepts optional `tenant: { name? }` and
+required `owner: { email?, name?, externalRef? }`; the caller owns admission and
+authorization. Core generates fresh ids, fixes the member's role to owner and
+its tenant to the new tenant. It reuses `createTenant`/`insertMember` field rules:
+120-character names (falsy names become null), unchanged email/externalRef
+values (nullish values become null), no new email validation.
+
+`CreateTenantWithOwnerOptions.extend(rows, dc)` optionally prepares an
+`AtomicWriteExtension` with readonly tenant/owner rows before any insert. Core
+inserts tenant, then owner, then extension SQL in one batch, returning full rows
+only after success. Extension SQL can reference the inserted rows, for example:
+
+```ts
+const { tenant, owner } = await createTenantWithOwner(dc, {
+  tenant: { name: "Example" }, owner: { externalRef: "external-user" },
+}, {
+  extend({ tenant, owner }, dc) {
+    return { statements: [dc.env.DB.prepare(
+      "INSERT INTO extension_profiles (tenant_id, owner_id) VALUES (?, ?)",
+    ).bind(tenant.id, owner.id)] };
+  },
+});
+```
+
+Here `extension_profiles` belongs to the embedding app's same-D1 schema.
+Preparation refusal, owner INSERT failure or extension SQL failure leaves
+neither new core row nor earlier extension writes. Existing low-level helpers
+remain compatible. `setupInstance` uses this helper without extensions, keeping
+its authorization, validation and response; **API key minting remains separate**,
+and the single-tenant setup admission race is **not** included in this contract.
+No public registration route or core migration is added.
+
 ### Where to add things
 
-- **A REST endpoint (core):** service function in `packages/core/src/services`,
-  thin route in `packages/server/src/routes/api.ts`, path in `openapi.ts` with the
-  operationId equal to the MCP tool name, a test in `test/`. `llms.txt` and
-  `llms-full.txt` are generated from `openapi.ts`; a test fails when a route is
-  missing from the OpenAPI document.
-- **An MCP tool (core):** add an `McpToolDefinition` to `CORE_MCP_TOOLS` in
-  `packages/server/src/mcp/tools.ts` (name = operationId, toolset, scopes,
-  annotations, flat JSON Schema input, small output schema, `summarize`). The
-  handler calls a service with `ctx.dw` and `ctx.principal`. The endpoint
-  (`mcp/index.ts`) resolves the principal with the identity adapter, applies
-  `idempotencyKey`, scope checks and `?toolsets=` / `?read_only=1`, and turns
-  `ApiError`s into `isError` results. See `docs/MCP.md`.
-- **An MCP tool (extension):** pass it in `createDropway({ mcpTools })`; a tool with
-  a core tool's name replaces it.
+- **An API operation (core):** service function in `packages/core/src/services`,
+  then one `defineOperation()` in the relevant `packages/server/src/operations/`
+  family (listed in `core.ts`) with
+  Zod input/output schemas, a thin service handler, method/path, scopes,
+  description, examples, annotations and optional CLI metadata. REST, OpenAPI,
+  MCP and the command table are generated; do not add a second route or tool.
+  Raw-byte/bootstrap endpoints have an explicit `mcp.exclude` reason.
+  Tests in `test/` enforce registration, metadata and stable tool ordering.
+  `npm run openapi:lint` independently validates the generated document in CI.
+- **An API operation (extension):** pass `defineOperation()` results through
+  `createDropway({ operations })`. Definitions replace by id without reordering;
+  each app gets its own registry and generated discovery. See `docs/OPERATIONS.md`.
+- **An MCP-only tool (compatibility):** `createDropway({ mcpTools })` remains an
+  escape hatch; tools replace by name. Prefer operations for new capabilities.
+  The MCP endpoint still resolves identity, enforces scope checks and applies
+  idempotency, toolset/read-only filtering and ApiError shaping. See `docs/MCP.md`.
 - **Dashboard pages:** register through `uiSlots.pages` (with `nav: true` for a
   navigation link) and render them with `renderAppPage(c, { title, page, body })`
   from `@dropway/server`, which adds the dashboard frame, navigation, banner and
@@ -250,8 +387,15 @@ consumers, scripts, tests). Inside routes, use `c.get("dw")` and
   `uiSlots.settingsSections` adds sections to `/dashboard/settings`.
   `uiSlots.session = { signInPath, signOutPath }` tells the dashboard that the
   embedding app signs people in with cookie sessions (its identity adapter must
-  resolve them for `/api/v1` and refuse cross-origin writes); API-key sign-in at
-  `/login` keeps working. Never render user content on the app origin.
+  resolve them for `/api/v1` and refuse cross-origin writes). App cookies must use
+  `__Host-` names; cookie-authenticated state-changing requests require both exact
+  app `Origin` and `Sec-Fetch-Site: same-origin`, not just `SameSite` cookies.
+  API-key sign-in at `/login` keeps working and issues no app cookie. The R-15
+  tests pin the current bearer-only and site-cookie surfaces; real app-cookie
+  issuance and authenticated-write integration tests remain deferred / not run
+  until R-21, before session activation. Embedding-cookie activation likewise
+  requires those real integration tests; the current tests are not approval.
+  Never render user content on the app origin.
 - **CLI:** `packages/cli` talks to the REST API (it runs on users' machines). The upload protocol
   (`src/publish.ts`, `src/client.ts`) uses only `fetch`, so `test/cli-publish.test.ts` runs it against
   the real Worker inside workerd; `packages/cli/test` covers the rest, end to end against a local Worker.

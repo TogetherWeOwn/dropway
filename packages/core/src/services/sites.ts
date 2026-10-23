@@ -7,6 +7,7 @@ import { hasScope, type Principal, type Scope } from "../principal";
 import { CLAIM_TOKEN_PREFIX } from "./identity";
 import { dropLive, refreshLive } from "./live";
 import { emit, meter } from "./events";
+import { atomicWrite, siteSlugError } from "./atomic-write";
 
 export interface SiteRow {
   id: string;
@@ -244,23 +245,24 @@ export async function createSite(
       deleted_at: null,
     };
     try {
-      await dc.env.DB.prepare(
+      const extension = await dc.adapters.policy.siteNameMutation?.(p, {
+        operation: "create", siteId: site.id, tenantId, slug: site.slug, previousSlug: null,
+      }, dc);
+      await atomicWrite(dc, [dc.env.DB.prepare(
         `INSERT INTO sites (id, slug, tenant_id, created_by, title, description, spa, render_markdown, cross_origin_isolation,
            password_hash, claim_token_hash, creator_ip_hash, expires_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-        .bind(
-          site.id, site.slug, site.tenant_id, site.created_by, site.title, site.description, site.spa, site.render_markdown,
-          site.cross_origin_isolation, site.password_hash, site.claim_token_hash, site.creator_ip_hash, site.expires_at,
-          site.created_at, site.updated_at,
-        )
-        .run();
-      meter(dc, { type: "site_created", tenantId, siteId: site.id, anonymous, at: now });
-      return { site, claimToken };
+      ).bind(
+        site.id, site.slug, site.tenant_id, site.created_by, site.title, site.description, site.spa, site.render_markdown,
+        site.cross_origin_isolation, site.password_hash, site.claim_token_hash, site.creator_ip_hash, site.expires_at,
+        site.created_at, site.updated_at,
+      )], extension, (error) => siteSlugError(error, site.slug, "Pick another slug, or omit it to get a generated one."));
     } catch (e) {
-      if (!String(e).includes("UNIQUE")) throw e;
-      if (wanted) throw conflict("slug_taken", `The site name "${wanted}" is taken.`, "Pick another slug, or omit it to get a generated one.");
+      if (wanted || !(e instanceof ApiError) || e.status !== 409 || e.code !== "slug_taken") throw e;
+      continue;
     }
+    meter(dc, { type: "site_created", tenantId, siteId: site.id, anonymous, at: now });
+    return { site, claimToken };
   }
   throw new ApiError(503, "slug_generation_failed", "Could not generate a free site name.", "Retry the request.");
 }

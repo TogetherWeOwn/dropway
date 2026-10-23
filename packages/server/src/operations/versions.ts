@@ -1,0 +1,140 @@
+import { HTTP_VERSION } from "./http-schemas";
+import { deleteVersion, getDeployStatus, getSiteByRef, requireConfirm, resolveVersionRef, getSiteFor } from "@dropway/core";
+import { CONFIRM_SLUG, SITE_REF, VERSION_OUT, VERSION_REF, obj } from "../mcp/schemas";
+import { defineOperation } from "../operations";
+import { fromSchema, RO, DESTROY, P, D } from "./shared";
+
+export const VERSION_OPERATIONS = [
+  defineOperation({
+    id: "get_version",
+    method: "GET",
+    path: "/api/v1/sites/{slug}/versions/{id}",
+    summary: "Get a version",
+    toolset: "versions",
+    scopes: ["sites:read"],
+    description:
+      'Show one version ("live", "v3", "3" or an id): status, number, file count, size, source, client, message. For a pending version, `missing` lists the sha256 of files still to upload.',
+    input: fromSchema({
+      type: "object",
+      properties: { site: SITE_REF, version: VERSION_REF },
+      required: ["site", "version"],
+      additionalProperties: false,
+    }),
+    output: fromSchema(
+      obj(
+        {
+          site: { type: "string" },
+          version: VERSION_OUT,
+          missing: { type: "array", items: { type: "string" } },
+        },
+        ["version"],
+      ),
+    ),
+    annotations: RO,
+    async handler(a, { dw, principal }) {
+      const site = await getSiteByRef(dw, principal, a.site);
+      const v = await resolveVersionRef(dw, site, a.version);
+      const status = await getDeployStatus(dw, site, v.id);
+      return {
+        site: site.slug,
+        version: status.deploy,
+        missing: status.missing,
+      };
+    },
+    http: {
+      input: fromSchema({
+        type: "object",
+        properties: { slug: { type: "string" }, id: { type: "string" } },
+        required: ["slug", "id"],
+      }),
+      output: fromSchema({
+        type: "object",
+        properties: {
+          site: { type: "string" },
+          version: HTTP_VERSION,
+          missing: { type: "array", items: { type: "string" } },
+        },
+      }),
+      handler: async (c) => {
+        const site = await getSiteByRef(D(c), P(c), c.req.param("slug")!);
+        const v = await resolveVersionRef(D(c), site, c.req.param("id")!);
+        const status = await getDeployStatus(D(c), site, v.id);
+        return c.json({
+          site: site.slug,
+          version: status.deploy,
+          missing: status.missing,
+        });
+      },
+    },
+    tool: {
+      summarize: (r) =>
+        `${r.site} v${r.version.number}: ${r.version.status}${r.version.live ? ", live" : ""}, ${r.version.fileCount} files${r.missing.length ? `, ${r.missing.length} missing` : ""}.`,
+    },
+    examples: [
+      {
+        input: { site: "bright-otter-x7k2", version: "ver_example" },
+        output: {
+          site: "bright-otter-x7k2",
+          version: {
+            id: "ver_example",
+            number: 1,
+            status: "ready",
+            live: true,
+          },
+          missing: [],
+        },
+      },
+    ],
+  }),
+  defineOperation({
+    id: "delete_version",
+    method: "DELETE",
+    path: "/api/v1/sites/{slug}/versions/{id}",
+    summary: "Delete a version",
+    toolset: "versions",
+    scopes: ["sites:write"],
+    description:
+      "Permanently delete one version that is not live (for example one that leaked a secret). The live version cannot be deleted: restore or publish another first. Set confirm to the site's slug.",
+    input: fromSchema({
+      type: "object",
+      properties: {
+        site: SITE_REF,
+        version: VERSION_REF,
+        confirm: CONFIRM_SLUG,
+      },
+      required: ["site", "version", "confirm"],
+      additionalProperties: false,
+    }),
+    output: fromSchema(obj({ deleted: { type: "boolean" }, id: { type: "string" } }, ["deleted", "id"])),
+    annotations: DESTROY,
+    async handler(a, { dw, principal }) {
+      const site = await getSiteByRef(dw, principal, a.site, "sites:write");
+      requireConfirm(a.confirm, site.slug);
+      const v = await resolveVersionRef(dw, site, a.version);
+      return deleteVersion(dw, site, v.id);
+    },
+    http: {
+      input: fromSchema({
+        type: "object",
+        properties: { slug: { type: "string" }, id: { type: "string" } },
+        required: ["slug", "id"],
+      }),
+      output: fromSchema({ type: "object" }),
+      handler: async (c) => {
+        const site = await getSiteFor(D(c), P(c), c.req.param("slug")!, "sites:write");
+        return c.json(await deleteVersion(D(c), site, c.req.param("id")!));
+      },
+    },
+    tool: { summarize: (r) => `Deleted version ${r.id}.` },
+    examples: [
+      {
+        input: {
+          site: "bright-otter-x7k2",
+          version: "ver_old",
+          confirm: "bright-otter-x7k2",
+        },
+        output: { deleted: true, id: "ver_old" },
+      },
+    ],
+  }),
+];
