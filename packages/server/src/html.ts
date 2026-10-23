@@ -7,6 +7,13 @@ import { themeOf, type ThemePref } from "./ui/theme";
 export { escapeHtml } from "./escape";
 
 /**
+ * @deprecated The design CSS now comes from packages/server/design (ui/design.generated.ts): use
+ * renderDocument() or htmlPage(), which add it. Kept so embedding apps that imported it still compile;
+ * it is the site bundle (tokens, base and the components site pages use).
+ */
+export { SITE_CSS as BASE_CSS } from "./ui/design.generated";
+
+/**
  * A complete HTML page in the Security Print design (ui/document.ts). `delivery` picks how the design
  * CSS arrives: "site" (default) inlines the site bundle, so the page is self-contained on any origin;
  * "app" links the cached app stylesheet (app origin only). `css` is page-only CSS.

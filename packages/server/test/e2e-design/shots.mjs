@@ -311,6 +311,7 @@ function screens(fx) {
     app("J10", "A07 API-key sign-in", "/login", { auth: false }),
     app("J12", "A07 Owner key shown once after recovery", "/login", {
       auth: false,
+      mutates: true,
       act: async (page) => {
         await page.click("summary");
         await page.fill("#dw-recover-secret", BOOT);
@@ -349,6 +350,7 @@ function screens(fx) {
     }),
     app("J23", "A10 Publish, success", "/dashboard/publish", {
       wait: ".k-dropzone",
+      mutates: true,
       act: async (page) => {
         const input = page.locator("#dw-publish input[type=file]:not([webkitdirectory])");
         await input.setInputFiles([{ name: "index.html", mimeType: "text/html", buffer: Buffer.from("<h1>new</h1>") }]);
@@ -360,6 +362,7 @@ function screens(fx) {
     app("J24", "A11 API keys", "/dashboard/keys", { wait: "#dw-keys tbody tr" }),
     app("J25", "A11 Key created", "/dashboard/keys", {
       wait: "#dw-keys tbody tr",
+      mutates: true,
       act: async (page) => {
         await page.fill("#dw-k-name", "harness key");
         await page.click("text=Create key");
@@ -449,8 +452,9 @@ async function main() {
     };
     const failCell = (sc, mode, width) => (e) => ({ screen: sc.id, title: sc.title, mode, width, file: null, gates: { harness: { pass: false, detail: String(e).slice(0, 300) } } });
     // Seeded-instance cells run CONCURRENCY at a time (each in its own browser context).
+    // Screens that change the data (a new owner key, a new site, a new key) run after the rest, so lists stay as seeded.
     const jobs = [];
-    for (const sc of main) for (const mode of MODES) for (const width of WIDTHS) jobs.push([sc, mode, width]);
+    for (const sc of [...main.filter((x) => !x.mutates), ...main.filter((x) => x.mutates)]) for (const mode of MODES) for (const width of WIDTHS) jobs.push([sc, mode, width]);
     let next = 0;
     await Promise.all(
       Array.from({ length: CONCURRENCY }, async () => {

@@ -117,6 +117,12 @@ export interface AppPageOptions {
   trust?: boolean;
 }
 
+/**
+ * @deprecated App pages link the cached stylesheet (/__dropway/ui/kofra-<hash>.css) through renderAppPage();
+ * this is the same CSS as text, kept so embedding apps that imported it still compile.
+ */
+export { APP_CSS } from "./design.generated";
+
 /** Footer links on core app pages. */
 export const CORE_FOOTER_LINKS: ChromeNavItem[] = [
   { label: "API", href: "/openapi.json" },

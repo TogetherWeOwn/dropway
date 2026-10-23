@@ -29,11 +29,11 @@ export { renderMarkdown } from "./viewers/markdown";
 export { sanitizeHtml } from "./viewers/sanitize";
 export { highlight, hljsLanguage } from "./viewers/highlight";
 export { cachedRender } from "./viewers/cache";
-export { escapeHtml, htmlPage, systemPage, APP_PAGE_CSP, siteSystemCsp, domainsLine, formatBytes } from "./html";
+export { escapeHtml, htmlPage, systemPage, APP_PAGE_CSP, siteSystemCsp, domainsLine, formatBytes, BASE_CSS } from "./html";
 export { buildOpenApi } from "./openapi";
 export { llmsTxt, llmsFullTxt, skillMarkdown, skillInstance, agentSkillsIndex, SKILL_NAME, SKILL_DESCRIPTION, type SkillInstance } from "./discovery";
 export { createMcpEndpoint, mcpInstructions, selectTools, MCP_SERVER_VERSION, type McpEndpointOptions } from "./mcp";
-export { renderAppPage, appScriptCsp, CORE_NAV, CORE_FOOTER_LINKS, clientScriptUrl, type AppPageOptions } from "./ui";
+export { renderAppPage, appScriptCsp, CORE_NAV, CORE_FOOTER_LINKS, APP_CSS, clientScriptUrl, type AppPageOptions } from "./ui";
 export {
   renderDocument,
   appStylesheetUrl,

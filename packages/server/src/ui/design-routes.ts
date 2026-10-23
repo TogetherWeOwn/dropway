@@ -31,7 +31,8 @@ const artCache = new Map<string, string>();
 
 export function artResponse(file: string): Response | null {
   const m = /^([a-z0-9-]+)\.([0-9a-f]{8})\.svg$/.exec(file);
-  const art = m ? ART[m[1]!] : undefined;
+  // Own keys only: a name like "constructor" must not reach Object.prototype.
+  const art = m && Object.hasOwn(ART, m[1]!) ? ART[m[1]!] : undefined;
   if (!m || !art) return null;
   let svg = artCache.get(m[1]!);
   if (svg === undefined) {
@@ -52,8 +53,8 @@ export function artResponse(file: string): Response | null {
 const fontCache = new Map<string, Uint8Array>();
 
 function fontBytes(name: string): Uint8Array | null {
-  const f = FONT_FILES[name];
-  if (!f) return null;
+  if (!Object.hasOwn(FONT_FILES, name)) return null;
+  const f = FONT_FILES[name]!;
   let b = fontCache.get(name);
   if (!b) {
     const bin = atob(f.b64);

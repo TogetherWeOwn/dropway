@@ -207,6 +207,9 @@ describe("design assets", () => {
     // The cached bytes serve every response in full.
     expect(new Uint8Array(await again.arrayBuffer()).byteLength).toBe(bytes.byteLength);
     expect((await dw.call("/__dropway/fonts/nope.00000000.woff2")).status).toBe(404);
+    // Names are looked up as own keys only.
+    expect((await dw.call("/__dropway/fonts/constructor.00000000.woff2")).status).toBe(404);
+    expect((await dw.call("/__dropway/ui/art/constructor.00000000.svg")).status).toBe(404);
     const ofl = await dw.call("/__dropway/fonts/OFL.txt");
     expect(ofl.headers.get("content-type")).toBe("text/plain; charset=utf-8");
     const licences = await ofl.text();
