@@ -11,6 +11,10 @@ export * from "./config";
 export * from "./context";
 export * from "./principal";
 export * from "./adapters";
+export * from "./policy";
+export * from "./services/policy";
+export * from "./services/usage";
+export * from "./services/folders";
 
 export * from "./lib/crypto";
 export * from "./lib/mime";

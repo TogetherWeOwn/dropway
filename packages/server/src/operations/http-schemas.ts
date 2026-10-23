@@ -1,4 +1,5 @@
 /** Schemas for pre-registry HTTP wire shapes, shared by their compatibility adapters. */
+import { ALL_SCOPES } from "@dropway/core";
 export const HTTP_VERSION: Record<string, any> = {
   type: "object",
   properties: {
@@ -77,7 +78,7 @@ export const HTTP_SCOPES: Record<string, any> = {
     {
       type: "array",
       items: {
-        enum: ["sites:read", "sites:write", "keys:write", "members:write"],
+        enum: [...ALL_SCOPES],
       },
     },
     { type: "string", description: '"*" or space-separated scopes' },
@@ -116,6 +117,9 @@ export const HTTP_WHOAMI: Record<string, any> = {
     keyId: { type: "string" },
     scopes: { type: "array", items: { type: "string" } },
     siteRestriction: { type: ["string", "null"] },
+    capabilities: { type: "object" },
+    limits: { type: "object" },
+    usage: { type: "object" },
   },
 };
 export const HTTP_JSON_PUBLISH: Record<string, any> = {

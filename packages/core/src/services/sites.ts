@@ -7,6 +7,8 @@ import { hasScope, type Principal, type Scope } from "../principal";
 import { CLAIM_TOKEN_PREFIX } from "./identity";
 import { dropLive, refreshLive } from "./live";
 import { emit, meter } from "./events";
+import { requireCapability, requireQuota, quotaExceeded } from "./policy";
+import { getUsage, incrementalBytes, PROJECTED_STORAGE_SQL, usageStatements } from "./usage";
 import { atomicWrite, siteSlugError } from "./atomic-write";
 
 export interface SiteRow {
@@ -205,6 +207,7 @@ export async function createSite(
 
   if (anonymous) {
     if (!dc.config.anonymous.enabled) throw anonymousDisabled();
+    await requireCapability(dc, p, "anonymous_publish");
     if (input.slug) throw forbidden("Choosing a site name needs an API key.", "Omit slug to get a generated name.");
     if (input.password) throw forbidden("Password protection needs an API key.");
     creatorIp = await ipHash(dc, p.ip);
@@ -218,6 +221,9 @@ export async function createSite(
   }
   const tenantId = p.kind === "member" ? p.tenantId : null;
   const wanted = input.slug ? validateSlug(input.slug) : null;
+  const owner = { siteId: null, tenantId };
+  if (input.password) await requireCapability(dc, p, "site_password", owner);
+  const siteQuota = tenantId === null ? null : await requireQuota(dc, p, "sites", owner, (await getUsage(dc, tenantId)).sites, 1);
   await dc.adapters.policy.beforeCreateSite?.(p, { slug: wanted, tenantId }, dc);
   await opts.beforeInsert?.({ tenantId });
 
@@ -251,15 +257,27 @@ export async function createSite(
       const extension = await dc.adapters.policy.siteNameMutation?.(p, {
         operation: "create", siteId: site.id, tenantId, slug: site.slug, previousSlug: null,
       }, dc);
-      await atomicWrite(dc, [dc.env.DB.prepare(
-        `INSERT INTO sites (id, slug, tenant_id, created_by, title, description, spa, render_markdown, cross_origin_isolation,
-           password_hash, claim_token_hash, creator_ip_hash, expires_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(
-        site.id, site.slug, site.tenant_id, site.created_by, site.title, site.description, site.spa, site.render_markdown,
-        site.cross_origin_isolation, site.password_hash, site.claim_token_hash, site.creator_ip_hash, site.expires_at,
-        site.created_at, site.updated_at,
-      )], extension, (error) => siteSlugError(error, site.slug, "Pick another slug, or omit it to get a generated one."));
+      await atomicWrite(dc, [
+        // Refuse inside the batch so neither core nor extension writes can commit
+        // when another create consumed the last slot during preparation.
+        dc.env.DB.prepare(`SELECT CASE WHEN ? IS NULL OR
+          (SELECT COUNT(*) FROM sites WHERE tenant_id = ? AND deleted_at IS NULL) < ?
+          THEN 1 ELSE json_extract('{}', 'dropway_sites_quota') END`).bind(siteQuota, tenantId, siteQuota),
+        dc.env.DB.prepare(
+          `INSERT INTO sites (id, slug, tenant_id, created_by, title, description, spa, render_markdown, cross_origin_isolation,
+             password_hash, claim_token_hash, creator_ip_hash, expires_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(
+          site.id, site.slug, site.tenant_id, site.created_by, site.title, site.description, site.spa, site.render_markdown,
+          site.cross_origin_isolation, site.password_hash, site.claim_token_hash, site.creator_ip_hash, site.expires_at,
+          site.created_at, site.updated_at,
+        ), ...usageStatements(dc, tenantId),
+      ], extension, (error) => {
+        if (String(error).includes("JSON path") && String(error).includes("dropway_sites_quota")) {
+          return quotaExceeded("sites", siteQuota!);
+        }
+        return siteSlugError(error, site.slug, "Pick another slug, or omit it to get a generated one.");
+      });
     } catch (e) {
       if (wanted || !(e instanceof ApiError) || e.status !== 409 || e.code !== "slug_taken") throw e;
       continue;
@@ -331,6 +349,7 @@ export async function updateSite(dc: DropwayContext, p: Principal, slug: string,
   const site = await getSiteFor(dc, p, slug, "sites:write");
   if (site.mode === "transfer") throw conflict("transfer_immutable", "Use update_transfer to change delivery settings.", "Transfer passwords need current-password proof in the same call.");
   if (input.password && site.tenant_id === null) throw forbidden("Password protection needs an account. Claim the site first.");
+  if (input.password) await requireCapability(dc, p, "site_password", { siteId: site.id, tenantId: site.tenant_id });
   const sets: string[] = [];
   const binds: unknown[] = [];
   const set = (col: string, val: unknown) => {
@@ -352,13 +371,16 @@ export async function updateSite(dc: DropwayContext, p: Principal, slug: string,
 
 /** Soft-delete: the slug is freed at once; rows and unreferenced files are removed by the hourly cleanup. */
 export async function deleteSite(dc: DropwayContext, p: Principal, slug: string): Promise<{ deleted: true; slug: string }> {
-  const site = await getSiteFor(dc, p, slug, "sites:write");
+  const site = await getSiteFor(dc, p, slug, "sites:delete");
   const now = Date.now();
-  const deleted = await dc.env.DB.prepare(`UPDATE sites SET deleted_at = ?, deleted_slug = slug, slug = ?, claim_token_hash = NULL
-    WHERE id = ? AND NOT EXISTS (SELECT 1 FROM transfers WHERE site_id = sites.id AND legal_hold <> 0)`)
-    .bind(now, `~deleted~${site.id}`, site.id)
-    .run();
-  if (!deleted.meta.changes) throw conflict("transfer_conflict", "This delivery is held.", "Release the hold before deleting it; revocation remains available.");
+  const [deleted] = await dc.env.DB.batch([
+    dc.env.DB.prepare(`UPDATE sites SET deleted_at = ?, deleted_slug = slug, slug = ?, claim_token_hash = NULL
+      WHERE id = ? AND deleted_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM transfers WHERE site_id = sites.id AND legal_hold <> 0)`)
+      .bind(now, `~deleted~${site.id}`, site.id),
+    ...usageStatements(dc, site.tenant_id),
+  ]);
+  if (!deleted?.meta.changes) throw conflict("transfer_conflict", "This delivery is held or no longer available.", "Release the hold before deleting it; revocation remains available.");
   await dropLive(dc, site.slug);
   emit(dc, "onDelete", { site: { id: site.id, slug: site.slug, tenantId: site.tenant_id, url: siteUrl(dc, site.slug) }, principal: p, reason: "api", at: now });
   meter(dc, { type: "site_deleted", tenantId: site.tenant_id, siteId: site.id, at: now });
@@ -382,6 +404,7 @@ export async function discardNewSite(dc: DropwayContext, site: Pick<SiteRow, "id
       db.prepare(`DELETE FROM versions WHERE site_id = ? AND ${neverLive}`).bind(site.id, site.id),
       db.prepare(`DELETE FROM blob_scopes WHERE scope = ? AND ${neverLive}`).bind(`s:${site.id}`, site.id),
       db.prepare(`DELETE FROM sites WHERE id = ? AND ${neverLive}`).bind(site.id, site.id),
+      ...usageStatements(dc, site.tenant_id),
     ]);
     const removed = (results[3]?.meta.changes ?? 0) > 0;
     if (removed) {
@@ -409,21 +432,40 @@ export async function claimSite(dc: DropwayContext, p: Principal, slug: string, 
     throw notFound("site_not_found", `No anonymous site "${slug}" matches this claim token.`);
   }
   if (site.tenant_id) throw conflict("already_claimed", "This site already belongs to an account.");
+  const owner = { siteId: site.id, tenantId: p.tenantId };
+  const usage = await getUsage(dc, p.tenantId);
+  const siteQuota = await requireQuota(dc, p, "sites", owner, usage.sites, 1);
+  const { results: files } = await dc.env.DB.prepare(`SELECT vf.sha256, MAX(vf.size) AS size FROM version_files vf
+    JOIN versions v ON v.id = vf.version_id WHERE v.site_id = ? AND v.status = 'ready' GROUP BY vf.sha256`).bind(site.id).all<{ sha256: string; size: number }>();
+  const newBytes = await incrementalBytes(dc, p.tenantId, null, files);
+  const storageQuota = await requireQuota(dc, p, "storage_bytes", owner, usage.storage_bytes, newBytes);
+  await dc.adapters.policy.beforeCreateSite?.(p, { slug: site.slug, tenantId: p.tenantId }, dc);
   const now = Date.now();
-  await dc.env.DB.batch([
-    dc.env.DB.prepare("UPDATE sites SET tenant_id = ?, created_by = ?, claim_token_hash = NULL, expires_at = NULL, creator_ip_hash = NULL, updated_at = ? WHERE id = ?").bind(
-      p.tenantId,
-      p.memberId,
-      now,
-      site.id,
+  const [claimed] = await dc.env.DB.batch([
+    dc.env.DB.prepare(`UPDATE sites SET tenant_id = ?, created_by = ?, claim_token_hash = NULL, expires_at = NULL, creator_ip_hash = NULL, updated_at = ?
+      WHERE id = ? AND tenant_id IS NULL AND deleted_at IS NULL AND claim_token_hash = ?
+        AND (? IS NULL OR (SELECT COUNT(*) FROM sites WHERE tenant_id = ? AND deleted_at IS NULL) < ?)
+        AND (? IS NULL OR (${PROJECTED_STORAGE_SQL}) <= ?)`).bind(
+      p.tenantId, p.memberId, now, site.id, site.claim_token_hash,
+      siteQuota, p.tenantId, siteQuota,
+      storageQuota, p.tenantId, site.id, null, storageQuota,
     ),
     // The tenant now owns the files the anonymous uploader proved it had.
-    dc.env.DB.prepare("INSERT OR IGNORE INTO blob_scopes (scope, sha256, created_at) SELECT ?, sha256, ? FROM blob_scopes WHERE scope = ?").bind(
-      `t:${p.tenantId}`,
-      now,
-      `s:${site.id}`,
+    dc.env.DB.prepare(`INSERT OR IGNORE INTO blob_scopes (scope, sha256, created_at)
+      SELECT ?, sha256, ? FROM blob_scopes WHERE scope = ?
+       AND EXISTS (SELECT 1 FROM sites WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL)`).bind(
+      `t:${p.tenantId}`, now, `s:${site.id}`, site.id, p.tenantId,
     ),
+    ...usageStatements(dc, p.tenantId),
   ]);
+  if (!claimed?.meta.changes) {
+    const fresh = await findSite(dc, slug);
+    if (fresh?.tenant_id === p.tenantId) return fresh;
+    if (fresh?.tenant_id) throw conflict("already_claimed", "This site already belongs to an account.");
+    if (siteQuota !== null && (await getUsage(dc, p.tenantId)).sites >= siteQuota) throw quotaExceeded("sites", siteQuota);
+    if (storageQuota !== null) throw quotaExceeded("storage_bytes", storageQuota);
+    throw notFound("site_not_found", "The anonymous site is no longer available.");
+  }
   await refreshLive(dc, site.id);
   return { ...site, tenant_id: p.tenantId, created_by: p.memberId, claim_token_hash: null, expires_at: null, creator_ip_hash: null, updated_at: now };
 }

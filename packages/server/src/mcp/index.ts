@@ -155,6 +155,7 @@ function buildServer(compiled: CompiledTool[], ctx: { dw: DropwayContext; princi
             { scope: idempotencyScope(principal), operation: `mcp:${def.name}`, key: idempotencyKey, input: args, redactForReplay: def.redactForReplay as ((r: unknown) => unknown) | undefined },
             () => def.handler(args, toolCtx),
           );
+          if (replayed) await def.beforeReplay?.(args, toolCtx);
           const data: Record<string, unknown> = result && typeof result === "object" && !Array.isArray(result) ? { ...(result as Record<string, unknown>) } : { result };
           if (replayed) data.replayed = true;
           let line: string;

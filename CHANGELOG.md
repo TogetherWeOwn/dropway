@@ -43,13 +43,40 @@
 - MCP discovery uses operation summaries to preserve the tool inventory budget;
   full descriptions remain in OpenAPI and the full agent reference.
 
+### Scopes, policy and usage
+
+- Add `sites:delete`, `data:write`, `secrets:write` and `admin`. Owners/admins may hold
+  every scope; members may hold read/write/delete, key management and data write.
+  Migration `0003_scopes_usage.sql` gives existing write keys deletion permission;
+  newly minted write-only keys cannot delete sites, versions or folders.
+- Export `CAPABILITIES`, `QUOTA_KEYS` and optional policy `capability`, `quota` and
+  `beforeOperation` hooks. Missing bindings remain unavailable even when an adapter
+  allows a capability. Password create/update preserves an adapter's exact error.
+- Add admin `QUOTA_*` configuration (`null`/unset = unlimited, `0` = no new resource).
+  Sites and unique finalized storage are enforced on create/deploy/claim, with
+  transaction-local quota checks at creation, claim and finalize.
+- Reject inconsistent per-hash manifest sizes and reuse sizes that disagree with
+  the caller's verified bytes, before recording a version. Accounting uses verified
+  blob sizes when available, without exposing another tenant's storage.
+- Add retry-safe `usage_counters`, `recomputeUsage()` and nightly attributed
+  `storage_snapshot` metering. Pending uploads do not count; retained ready versions
+  do, with a shared hash charged once per tenant until its last active reference is removed.
+- REST and MCP `whoami` include capability decisions, size/resource limits and usage.
+  Add `delete_folder` to the registry; deleting an organizer keeps its sites.
+
 ### Extension API
 
-- Bump `EXTENSION_API_VERSION` to 3: add optional `Limits.transferMaxExpiryDays`,
-  `DropwayHooks.onEvent` for transfer lifecycle events, public transfer services
-  and transfer expiry/purge counts in `CleanupReport`. Existing adapters keep
-  working; omitted delivery limits use the instance ceiling.
-
+- Bump `EXTENSION_API_VERSION` to 3. `beforeDeploy` now receives `newBytes`, and
+  `deleteVersion(dc, principal, site, versionId)` now enforces deletion permission.
+  Config gains `quotas`; REST compatibility adapters validate input before policy
+  and may supply `http.parseInput` and a logical `http.policyId`. Raw publishing
+  uses `publish_site` for policy on both transports, after parsing and before writes.
+  Generated MCP tools also recheck authorization/capability/policy before exposing
+  cached results via the optional `beforeReplay` tool guard; no handler is rerun.
+- Add optional `Limits.transferMaxExpiryDays`, `DropwayHooks.onEvent` for transfer
+  lifecycle events, public transfer services and transfer expiry/purge counts in
+  `CleanupReport`. Existing adapters keep working; omitted delivery limits use
+  the instance ceiling.
 - Extend the version 2 contract with public core
   `AtomicWriteExtension`, `SiteNameMutation` and optional
   `PolicyAdapter.siteNameMutation`: every concrete site create/rename candidate

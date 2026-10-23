@@ -3,11 +3,15 @@ import { badRequest, forbidden, unauthorized } from "./errors";
 /**
  * Permission scopes carried by API keys.
  * - sites:read     list and read sites, versions and files
- * - sites:write    create, publish, update, restore and delete sites
+ * - sites:write    create, publish, update and restore sites
+ * - sites:delete   delete sites, versions and folders
  * - keys:write     create and revoke API keys (never wider than the caller's own)
  * - members:write  add, change and remove members of the tenant
+ * - data:write     change site data
+ * - secrets:write  change site secrets
+ * - admin          administer the instance
  */
-export const ALL_SCOPES = ["sites:read", "sites:write", "keys:write", "members:write"] as const;
+export const ALL_SCOPES = ["sites:read", "sites:write", "sites:delete", "keys:write", "members:write", "data:write", "secrets:write", "admin"] as const;
 export type Scope = (typeof ALL_SCOPES)[number];
 
 export type Role = "owner" | "admin" | "member";
@@ -17,7 +21,7 @@ export const ROLES: readonly Role[] = ["owner", "admin", "member"];
 export const ROLE_SCOPES: Record<Role, readonly Scope[]> = {
   owner: ALL_SCOPES,
   admin: ALL_SCOPES,
-  member: ["sites:read", "sites:write", "keys:write"],
+  member: ["sites:read", "sites:write", "sites:delete", "keys:write", "data:write"],
 };
 
 /** A member of a tenant, authenticated by an API key or (in extensions) by a session. */
