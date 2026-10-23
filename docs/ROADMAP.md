@@ -481,6 +481,9 @@ Delivers: ACC-07. Depends: R-09.
 - `dropway publish --encrypt` encrypts files in the CLI (AES-256-GCM, key in the URL fragment); a
   first-party loader decrypts in the browser; the server never sees the key; wording says exactly what it
   protects.
+- Implemented for CLI files/folders up to 16 MiB, with an authenticated container and an opaque
+  static-content viewer. No ZIP/SPA/external application hosting. Threat model and compatibility:
+  [CLI guide](../packages/cli/README.md#encrypted-publishing). Browser-side publishing is not included.
 
 ### R-48 Per-site functions (3 days)
 Delivers: SRV-14, APP-04. Depends: R-31.

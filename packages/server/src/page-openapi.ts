@@ -51,6 +51,31 @@ export const PAGE_PATHS: Json = {
       responses: { "200": { description: "HTML", content: { "text/html": { schema: { type: "string" } } } } },
     }),
   },
+  "/__dropway/encrypted/{slug}": {
+    get: page("encrypted_page", "Decrypt a CLI-encrypted site locally (key only in URL fragment)", {
+      tags: ["pages"],
+      parameters: [{ name: "slug", in: "path", required: true, schema: { type: "string" }, description: "Site slug." }],
+      security: [],
+      "x-mcp-exclude": "browser-only WebCrypto; never send the share key to an API or MCP tool",
+      responses: { "200": { description: "First-party decryptor HTML", content: { "text/html": { schema: { type: "string" } } } } },
+    }),
+  },
+  "/__dropway/encrypted-loader.js": {
+    get: page("encrypted_script", "First-party encrypted-site decryptor", {
+      tags: ["pages"],
+      security: [],
+      "x-mcp-exclude": "static browser asset",
+      responses: { "200": { description: "JavaScript", content: { "text/javascript": { schema: { type: "string" } } } } },
+    }),
+  },
+  "/__dropway/encrypted-frame": {
+    get: page("encrypted_frame", "Opaque sandbox for authenticated decrypted content", {
+      tags: ["pages"],
+      security: [],
+      "x-mcp-exclude": "browser-only sandbox bootstrap",
+      responses: { "200": { description: "Isolated content runtime", content: { "text/html": { schema: { type: "string" } } } } },
+    }),
+  },
   "/login": {
     get: page("login_page", "Sign-in page (API key; first-run setup)", {
       tags: ["pages"],
