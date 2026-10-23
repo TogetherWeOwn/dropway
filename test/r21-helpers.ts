@@ -60,7 +60,7 @@ export function sessionCookie(response: Response) {
 
 export async function signedIn(dw: Instance, memberId?: string, origin = ORIGIN) {
   const link = await loginLink(dw, memberId, dw.ownerKey, origin);
-  const exchange = await dw.call(link.url, { headers: { Accept: "text/html" } });
+  const exchange = await dw.call(link.url, { headers: { Accept: "application/json" } });
   expect([302, 303]).toContain(exchange.status);
   const cookie = sessionCookie(exchange);
   const sessions = await dw.json("/api/v1/auth/sessions", { headers: { Cookie: cookie } });

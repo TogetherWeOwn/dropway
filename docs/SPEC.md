@@ -190,7 +190,7 @@ Full matrix in section 10.
 | ACC-04 | Share links: signed, expiring, optionally pinned to a version, revocable, with a use count | P1 | R-23 |
 | ACC-05 | Access invites by email (needs an email binding) | P1 | R-23 |
 | ACC-06 | Embed allowlist per site | P1 | R-23 |
-| ACC-07 | End-to-end encrypted sites (encrypted in the browser before upload, key in the URL fragment) | P2 | R-47 |
+| ACC-07 | End-to-end encrypted sites (CLI-side AES-256-GCM before upload, fragment-only key, first-party browser decryption) | P2 | Implemented: CLI static viewer; browser publishing not included. See packages/cli/README.md for threat model and limits |
 
 ### 4.8 Organisation and search (ORG)
 

@@ -7,6 +7,7 @@ import type { OperationDefinition } from "./operations";
 import { agentSkillsIndex, legacySkillsIndex, llmsFullTxt, llmsTxt, skillInstance, skillMarkdown, SKILL_NAME } from "./discovery";
 import { homePage, installUi } from "./ui";
 import { claimPage, claimSubmission } from "./ui/signin";
+import { installEncrypted } from "./encrypted";
 
 /**
  * App-origin pages: home, /openapi.json, /llms.txt, /health, /claim, /mcp,
@@ -25,6 +26,7 @@ export function createAppRouter(opts: { app: Hono<DropwayEnv>; uiSlots: UiSlots;
 
   for (const page of opts.uiSlots.pages) app.get(page.path, (c) => page.handler(c));
   installUi(app, opts.uiSlots);
+  installEncrypted(app);
 
   app.get("/", (c) => (opts.uiSlots.landing ? opts.uiSlots.landing(c) : homePage(c)));
   app.get("/health", (c) => c.json({ ok: true, service: "dropway" }));

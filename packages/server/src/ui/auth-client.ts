@@ -37,6 +37,29 @@ export function browserSignin() {
     var saved = readPending();
     if (saved && saved.slug && saved.token) location.replace("/claim?slug=" + encodeURIComponent(saved.slug));
   }
+  document.querySelectorAll('form[action="/login/confirm"], form[action="/api/v1/auth/logout"]').forEach(function (form) {
+    // Native no-referrer submits send Origin: null, which the browser-write
+    // guard refuses. A deliberate submit goes out as a first-party fetch so
+    // the browser supplies Origin and Fetch Metadata itself; the guarded
+    // native POST stays as the no-script fallback. Mirrors the /claim form.
+    form.addEventListener("submit", async function (event) {
+      event.preventDefault();
+      var button = form.querySelector("button");
+      if (button) button.disabled = true;
+      try {
+        var response = await fetch(form.action, { method: "POST", credentials: "same-origin", body: new URLSearchParams(new FormData(form)) });
+        if (response.ok && response.redirected) { location.assign(response.url); return; }
+        if (response.ok && (response.headers.get("Content-Type") || "").indexOf("application/json") !== -1) {
+          var done = null;
+          try { done = await response.json(); } catch { done = null; }
+          if (done && done.signedOut) { location.assign("/login"); return; }
+        }
+        if (response.ok) notice("The server answered without a destination. Reload and retry if your session looks wrong.");
+        else notice(await response.text());
+      } catch { notice("Network error. Retry signing in or out."); }
+      if (button) button.disabled = false;
+    });
+  });
   document.querySelectorAll("[data-revoke]").forEach(function (button) {
     button.addEventListener("click", async function () {
       button.disabled = true;

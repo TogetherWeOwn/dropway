@@ -38,7 +38,7 @@ export async function requestEmailCode(dc: DropwayContext, input: { email?: unkn
   const accepted = { accepted: true, message: "If this email belongs to an existing member, a code will be sent. Check your inbox." };
   if (!member) return accepted;
   const now = Date.now();
-  const previous = await dc.env.DB.prepare("SELECT id FROM email_codes WHERE email = ? AND purpose = 'sign_in' AND expires_at > ? ORDER BY created_at DESC LIMIT 1")
+  const previous = await dc.env.DB.prepare("SELECT id FROM email_codes WHERE email = ? AND purpose = 'sign_in' AND used_at IS NULL AND expires_at > ? ORDER BY created_at DESC LIMIT 1")
     .bind(email, now).first<{ id: string }>();
   const id = previous?.id ?? newId("emc");
   // Rejection sampling gives an unbiased six-digit code.
@@ -51,8 +51,8 @@ export async function requestEmailCode(dc: DropwayContext, input: { email?: unkn
   const inserted = previous
     ? await dc.env.DB.prepare("UPDATE email_codes SET code_hash = ?, created_at = ? WHERE id = ? AND used_at IS NULL AND attempts < 5 AND expires_at > ? AND created_at <= ? RETURNING id")
       .bind(hash, now, id, now, now - 60_000).first()
-    : await dc.env.DB.prepare("INSERT INTO email_codes (id, purpose, email, code_hash, created_at, expires_at) SELECT ?, 'sign_in', ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM email_codes WHERE email = ? AND purpose = 'sign_in' AND expires_at > ?) RETURNING id")
-      .bind(id, email, hash, now, now + SIGN_IN_TTL, email, now).first();
+    : await dc.env.DB.prepare("INSERT INTO email_codes (id, purpose, email, code_hash, created_at, expires_at) SELECT ?, 'sign_in', ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM email_codes WHERE email = ? AND purpose = 'sign_in' AND ((used_at IS NULL AND expires_at > ?) OR created_at > ?)) RETURNING id")
+      .bind(id, email, hash, now, now + SIGN_IN_TTL, email, now, now - 60_000).first();
   if (!inserted) return accepted;
   try {
     await adapter.send({ to: [email], subject: "Your Dropway sign-in code", text: `Your sign-in code is ${code}. It expires in 15 minutes. If you did not request it, ignore this email.`, kind: "sign_in" }, dc);
