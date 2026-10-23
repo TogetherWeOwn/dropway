@@ -3,6 +3,8 @@ import { ApiError, badRequest, conflict, forbidden, notFound } from "../errors";
 import { newId } from "../lib/crypto";
 import { ALL_SCOPES, ROLES, ROLE_SCOPES, parseScopes, requireMember, type Principal, type Role } from "../principal";
 import { mintApiKey } from "./keys";
+import type { AtomicWriteExtension } from "../adapters";
+import { atomicWrite } from "./atomic-write";
 
 export interface TenantRow {
   id: string;
@@ -45,19 +47,14 @@ function cleanRole(v: unknown, fallback: Role): Role {
   return String(v) as Role;
 }
 
-/** Low-level: create a tenant. No checks; for setup and for extensions that onboard tenants. */
-export async function createTenant(dc: DropwayContext, input: { name?: string | null } = {}): Promise<TenantRow> {
-  const t: TenantRow = { id: newId("ten"), name: input.name ? String(input.name).slice(0, 120) : null, created_at: Date.now(), disabled_at: null };
-  await dc.env.DB.prepare("INSERT INTO tenants (id, name, created_at) VALUES (?, ?, ?)").bind(t.id, t.name, t.created_at).run();
-  return t;
+function tenantRow(input: { name?: string | null }): TenantRow {
+  return { id: newId("ten"), name: input.name ? String(input.name).slice(0, 120) : null, created_at: Date.now(), disabled_at: null };
 }
 
-/** Low-level: add a member to a tenant. No permission checks. */
-export async function insertMember(
-  dc: DropwayContext,
-  input: { tenantId: string; email?: string | null; name?: string | null; role: Role; externalRef?: string | null },
-): Promise<MemberRow> {
-  const m: MemberRow = {
+type MemberInput = { tenantId: string; email?: string | null; name?: string | null; role: Role; externalRef?: string | null };
+
+function memberRow(input: MemberInput): MemberRow {
+  return {
     id: newId("mem"),
     tenant_id: input.tenantId,
     email: input.email ?? null,
@@ -67,15 +64,62 @@ export async function insertMember(
     created_at: Date.now(),
     disabled_at: null,
   };
+}
+
+function tenantInsert(dc: DropwayContext, t: TenantRow): D1PreparedStatement {
+  return dc.env.DB.prepare("INSERT INTO tenants (id, name, created_at) VALUES (?, ?, ?)").bind(t.id, t.name, t.created_at);
+}
+
+function memberInsert(dc: DropwayContext, m: MemberRow): D1PreparedStatement {
+  return dc.env.DB.prepare("INSERT INTO members (id, tenant_id, email, name, role, external_ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .bind(m.id, m.tenant_id, m.email, m.name, m.role, m.external_ref, m.created_at);
+}
+
+/** Low-level: create a tenant. No checks; for setup and for extensions that onboard tenants. */
+export async function createTenant(dc: DropwayContext, input: { name?: string | null } = {}): Promise<TenantRow> {
+  const t = tenantRow(input);
+  await tenantInsert(dc, t).run();
+  return t;
+}
+
+/** Low-level: add a member to a tenant. No permission checks. */
+export async function insertMember(dc: DropwayContext, input: MemberInput): Promise<MemberRow> {
+  const m = memberRow(input);
   try {
-    await dc.env.DB.prepare("INSERT INTO members (id, tenant_id, email, name, role, external_ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .bind(m.id, m.tenant_id, m.email, m.name, m.role, m.external_ref, m.created_at)
-      .run();
+    await memberInsert(dc, m).run();
   } catch (e) {
     if (String(e).includes("UNIQUE")) throw conflict("member_exists", `A member with email ${m.email} already exists.`, "List members with GET /api/v1/members.");
     throw e;
   }
   return m;
+}
+
+export interface CreateTenantWithOwnerInput {
+  tenant?: { name?: string | null };
+  owner: { email?: string | null; name?: string | null; externalRef?: string | null };
+}
+
+export interface CreateTenantWithOwnerOptions {
+  /** Prepare same-DB SQL before any insert; no independent writes or irreversible effects. */
+  extend?(
+    rows: { tenant: Readonly<TenantRow>; owner: Readonly<MemberRow> },
+    dc: DropwayContext,
+  ): AtomicWriteExtension | Promise<AtomicWriteExtension>;
+}
+
+/** Low-level: caller owns admission. Key issuance is NOT part of this transaction. */
+export async function createTenantWithOwner(
+  dc: DropwayContext,
+  input: CreateTenantWithOwnerInput,
+  options: CreateTenantWithOwnerOptions = {},
+): Promise<{ tenant: TenantRow; owner: MemberRow }> {
+  const tenant = tenantRow(input.tenant ?? {});
+  const owner = memberRow({
+    tenantId: tenant.id, role: "owner", email: input.owner.email, name: input.owner.name, externalRef: input.owner.externalRef,
+  });
+  const extension = await options.extend?.({ tenant: { ...tenant }, owner: { ...owner } }, dc);
+  await atomicWrite(dc, [tenantInsert(dc, tenant), memberInsert(dc, owner)], extension);
+  return { tenant, owner };
 }
 
 export async function getTenant(dc: DropwayContext, id: string): Promise<TenantRow> {
@@ -114,8 +158,10 @@ export async function setupInstance(dc: DropwayContext, p: Principal, input: { e
     );
   }
   const email = cleanEmail(input.email);
-  const tenant = await createTenant(dc, { name: input.tenantName == null ? null : String(input.tenantName) });
-  const owner = await insertMember(dc, { tenantId: tenant.id, email, name: input.name == null ? null : String(input.name), role: "owner" });
+  const { tenant, owner } = await createTenantWithOwner(dc, {
+    tenant: { name: input.tenantName == null ? null : String(input.tenantName) },
+    owner: { email, name: input.name == null ? null : String(input.name) },
+  });
   const apiKey = await mintApiKey(dc, { tenantId: tenant.id, memberId: owner.id, name: input.keyName == null ? "owner" : String(input.keyName), scopes: ALL_SCOPES });
   return { tenant: serializeTenant(tenant), member: serializeMember(owner), apiKey };
 }
