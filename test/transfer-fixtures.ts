@@ -145,6 +145,11 @@ export async function follow(dw: Instance, url: string, init: RequestInit = {}):
   throw new Error("transfer redirect loop");
 }
 
+/** HTMLRewriter returns source spelling, unlike DOM getAttribute(). Decode once. */
+export function attributeUrl(href: string, base: string) {
+  return new URL(href.replace(/&amp;/g, "&"), base).href;
+}
+
 /** Recipient attribution must survive the actual page -> download link flow. */
 export async function recipientFile(dw: Instance, t: Transfer, index: number, path = "notes.txt") {
   const link = t.recipients[index]!.url;
@@ -152,7 +157,7 @@ export async function recipientFile(dw: Instance, t: Transfer, index: number, pa
   expect(page.status).toBe(200);
   const links: string[] = [];
   await new HTMLRewriter().on("a[href]", {
-    element(element) { links.push(new URL(element.getAttribute("href")!, link).href); },
+    element(element) { links.push(attributeUrl(element.getAttribute("href")!, link)); },
   }).transform(page).text();
   const file = links.find((url) => new URL(url).origin === SITES && decodeURIComponent(new URL(url).pathname).endsWith(`/${path}`));
   expect(file, "the app page must link files on the sites host").toBeDefined();
@@ -188,8 +193,8 @@ export async function state(t: Transfer, fields: Record<string, number | string 
 }
 
 export async function storedFileCount(t: Transfer) {
-  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM version_files WHERE version_id IN (SELECT id FROM versions WHERE site_id IN (SELECT id FROM sites WHERE slug = ?))")
-    .bind(t.slug).first<{ n: number }>();
+  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM version_files WHERE version_id IN (SELECT id FROM versions WHERE site_id IN (SELECT site_id FROM transfers WHERE id = ?))")
+    .bind(t.id).first<{ n: number }>();
   return row!.n;
 }
 

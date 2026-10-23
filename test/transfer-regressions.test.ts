@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { verifyPassword } from "@dropway/core";
 import { form, ORIGIN, type Instance } from "./helpers";
 import {
-  cookies, create, DAY, FILES, get, instance, op, PASSWORD, passwordDigest,
+  attributeUrl, cookies, create, DAY, FILES, get, instance, op, PASSWORD, passwordDigest,
   recipientFile, refusal, SITES, siteFile, state, storageUsage, storedFileCount,
   sweep, unlock, update, type Transfer,
 } from "./transfer-fixtures";
@@ -36,7 +36,7 @@ describe("password unlock across app and sites origins", () => {
     expect(page!.status).toBe(200);
     const links: string[] = [];
     await new HTMLRewriter().on("a[href]", {
-      element(e) { links.push(new URL(e.getAttribute("href")!, url).href); },
+      element(e) { links.push(attributeUrl(e.getAttribute("href")!, url)); },
     }).transform(page!).text();
     const file = links.find((link) => new URL(link).origin === SITES && new URL(link).pathname.endsWith("/notes.txt"));
     expect(file, "the unlocked page must render an authorized sites-host download").toBeDefined();
