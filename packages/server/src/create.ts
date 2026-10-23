@@ -53,10 +53,13 @@ const contexts = new WeakMap<Request, DropwayContext>();
 /** Download grants and recipient links are credentials, including in upstream errors. */
 function requestErrorDetails(request: Request, error: unknown) {
   const url = new URL(request.url);
-  const secrets = ["grant", "recipient"].flatMap((key) => url.searchParams.getAll(key)).filter(Boolean);
-  const redact = (text: string | undefined) => secrets.reduce((value, secret) =>
-    value?.replaceAll(secret, "[redacted]").replaceAll(encodeURIComponent(secret), "[redacted]"), text);
-  return { url: `${url.origin}${url.pathname}`, error: redact(String(error)), stack: redact((error as Error)?.stack) };
+  const safeUrl = `${url.origin}${url.pathname}`;
+  // Exceptions can echo credentials using any equivalent URL encoding, not just
+  // the spelling on this request. Do not serialize their message or stack here.
+  if (url.searchParams.has("grant") || url.searchParams.has("recipient")) {
+    return { url: safeUrl, error: "[redacted]" };
+  }
+  return { url: safeUrl, error: String(error), stack: (error as Error)?.stack };
 }
 
 /**

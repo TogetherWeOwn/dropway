@@ -60,17 +60,21 @@ export async function runCleanup(dc: DropwayContext, now = Date.now()): Promise<
     report.purgedSites++;
   }
 
-  // 3. Abandoned uploads.
+  // 3. Abandoned uploads. Transfer references belong to cleanupTransfers, even
+  // before publication: its live retention fence and purge accounting must win.
+  const abandoned = `status = 'pending' AND created_at < ?
+    AND NOT EXISTS (SELECT 1 FROM transfers t WHERE t.site_id = versions.site_id)`;
   const { results: stale } = await db
-    .prepare("SELECT id FROM versions WHERE status = 'pending' AND created_at < ? LIMIT 200")
+    .prepare(`SELECT id FROM versions WHERE ${abandoned} LIMIT 200`)
     .bind(now - DAY)
     .all<{ id: string }>();
   for (const v of stale) {
-    await db.batch([
-      db.prepare("DELETE FROM version_files WHERE version_id = ?").bind(v.id),
-      db.prepare("DELETE FROM versions WHERE id = ? AND status = 'pending'").bind(v.id),
+    const result = await db.batch([
+      db.prepare(`DELETE FROM version_files WHERE version_id = ?
+        AND EXISTS (SELECT 1 FROM versions WHERE id = ? AND ${abandoned})`).bind(v.id, v.id, now - DAY),
+      db.prepare(`DELETE FROM versions WHERE id = ? AND ${abandoned}`).bind(v.id, now - DAY),
     ]);
-    report.abandonedDeploys++;
+    if (result[1]?.meta.changes) report.abandonedDeploys++;
   }
 
   // 4. Unreferenced blobs. The row is deleted only if still unreferenced at that instant;
