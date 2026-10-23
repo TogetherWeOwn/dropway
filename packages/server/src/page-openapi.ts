@@ -13,7 +13,7 @@ export const PAGE_PATHS: Json = {
     post: page("mcp", "Remote MCP server (Streamable HTTP, stateless)", {
       tags: ["agents"],
       description:
-        'JSON-RPC over Streamable HTTP (MCP 2026-07-28, and 2025-era clients through the stateless lane). Same API keys as REST. Narrow the tool list with ?toolsets=core,sites,versions,keys,members and ?read_only=1. Example: claude mcp add --transport http dropway <origin>/mcp --header "Authorization: Bearer dw_..."',
+        'JSON-RPC over Streamable HTTP (MCP 2026-07-28, and 2025-era clients through the stateless lane). Same API keys as REST. Narrow the tool list with ?toolsets=core,sites,versions,keys,members and ?read_only=1. Example: claude mcp add --transport http kofra <origin>/mcp --header "Authorization: Bearer dw_..."',
       requestBody: { required: true, content: { "application/json": { schema: { type: "object", description: "A JSON-RPC 2.0 request." } } } },
       "x-mcp-exclude": "this is the MCP endpoint itself",
       responses: {
@@ -256,7 +256,7 @@ export const PAGE_PATHS: Json = {
   "/.well-known/agent-skills/{name}/SKILL.md": {
     get: page("agent_skill_file", "A skill listed in the discovery index", {
       tags: ["agents"],
-      parameters: [{ name: "name", in: "path", required: true, schema: { type: "string" }, description: "Skill name (dropway)" }],
+      parameters: [{ name: "name", in: "path", required: true, schema: { type: "string" }, description: "Skill name (kofra)" }],
       security: [],
       "x-mcp-exclude": "discovery document",
       responses: { "200": { description: "Markdown", content: { "text/markdown": { schema: { type: "string" } } } } },
@@ -274,7 +274,7 @@ export const PAGE_PATHS: Json = {
   "/.well-known/skills/{name}/SKILL.md": {
     get: page("agent_skill_file_legacy", "A skill listed in the legacy index", {
       tags: ["agents"],
-      parameters: [{ name: "name", in: "path", required: true, schema: { type: "string" }, description: "Skill name (dropway)" }],
+      parameters: [{ name: "name", in: "path", required: true, schema: { type: "string" }, description: "Skill name (kofra)" }],
       security: [],
       deprecated: true,
       "x-mcp-exclude": "discovery document",

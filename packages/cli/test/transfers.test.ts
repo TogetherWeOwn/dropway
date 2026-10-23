@@ -51,7 +51,7 @@ async function cli(operation: string | string[], data?: Record<string, unknown>)
     stdout: (text) => void (stdout += text), stderr: (text) => void (stderr += text),
     stdinIsTTY: false, stderrIsTTY: false, readStdin: async () => "",
     prompt: async () => { throw new Error("transfer commands must not prompt in non-TTY mode"); },
-    env: { DROPWAY_CONFIG_DIR: join(work, "credentials"), DROPWAY_API: api }, cwd: work,
+    env: { KOFRA_CONFIG_DIR: join(work, "credentials"), KOFRA_API: api }, cwd: work,
   };
   const command = typeof operation === "string" ? [operation] : operation;
   const payload = data === undefined ? [] : ["--data", JSON.stringify(data)];

@@ -115,7 +115,7 @@ describe("anonymous XHTML byte representation", () => {
     expect(await reportAnchors(new TextDecoder().decode(bytes))).toEqual([]);
     if (query === "raw=1") {
       expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
-      expect(response.headers.get("x-dropway-original-content-type")).toBe(contentType);
+      expect(response.headers.get("x-kofra-original-content-type")).toBe(contentType);
     } else {
       expect(response.headers.get("content-type")).toBe(contentType);
       expect(response.headers.get("content-disposition")).toMatch(/^attachment;/);

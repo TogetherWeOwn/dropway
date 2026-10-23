@@ -44,7 +44,7 @@ export const CORE_API_OPERATIONS = [
     toolset: "core",
     mcp: { alwaysLoad: true },
     description:
-      "Describe this Dropway instance and your credential: who you are (member, role, scopes, single-site restriction), the instance URLs (app, API, MCP, how site URLs look), whether anonymous publishing is on, and the size limits that apply to you. Call it first when unsure what you may do.",
+      "Describe this Kofra instance and your credential: who you are (member, role, scopes, single-site restriction), the instance URLs (app, API, MCP, how site URLs look), whether anonymous publishing is on, and the size limits that apply to you. Call it first when unsure what you may do.",
     input: fromSchema({
       type: "object",
       properties: {},
@@ -343,7 +343,7 @@ export const CORE_API_OPERATIONS = [
               move: body.move,
               baseVersionId: body.baseVersionId,
               message: body.message,
-              client: c.req.header("x-dropway-client") ?? null,
+              client: c.req.header("x-kofra-client") ?? null,
               source: "api",
             }),
         );

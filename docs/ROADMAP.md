@@ -1,4 +1,4 @@
-# Dropway roadmap (open-source edition)
+# Kofra roadmap (open-source edition)
 
 Status: draft 1, 2026-10-22. Ordered work for this repository. Each item is 1-3 days of agent work, has
 acceptance criteria, and names the `docs/SPEC.md` features it delivers. Work top to bottom; items marked
@@ -34,8 +34,8 @@ The first three feature branches are merged into `main` on top of the baseline b
 | R-05 | Partial | Partial updates (`PATCH /api/v1/sites/:slug/files`), `GET` version status, rename. |
 | R-06 | Done | Remote MCP server at `/mcp` (Streamable HTTP) with a tool for every core capability, toolsets and read-only mode. |
 | R-07, R-08 | Done | Viewer bar with Rendered / Source / Raw, HTML frame, code highlighting, Markdown, JSON, CSV, images, SVG, PDF, video, audio, fonts, notebooks, binary info, cached renders. |
-| R-09, R-10 | Done | `dropway` CLI: publish (hash locally, upload only missing files), list, versions, restore, delete, login, whoami, setup, `api`. Not yet published to npm. |
-| R-11 | Done | `/llms.txt`, `/llms-full.txt`, `/skill.md`, `/.well-known/agent-skills`, repo skill in `skills/dropway`. |
+| R-09, R-10 | Done | `kofra` CLI: publish (hash locally, upload only missing files), list, versions, restore, delete, login, whoami, setup, `api`. Not yet published to npm. |
+| R-11 | Done | `/llms.txt`, `/llms-full.txt`, `/skill.md`, `/.well-known/agent-skills`, repo skill in `skills/kofra`. |
 | R-22 | Partial | Dashboard (sign-in with an API key, sites, versions, publish, keys, members, settings) and the app-origin file browser `/v/:slug/`. Sessions and login links are R-21. |
 
 Next: R-02 (operation registry), R-12 (path-mode hardening), R-13 (version preview URLs), R-14, R-15, R-16.
@@ -159,18 +159,18 @@ Delivers: VIEW-02 (images, SVG, PDF, video, audio, JSON, CSV, listing). Depends:
 
 ### R-09 CLI: publish (3 days)
 Delivers: AX-04 (part). Depends: R-04, R-05.
-- `npx dropway publish <dir|file|zip> --json [--site] [--new] [--message] [--spa] [--anonymous] [--base]
+- `npx kofra publish <dir|file|zip> --json [--site] [--new] [--message] [--spa] [--anonymous] [--base]
   [--wait]` hashes files (streaming SHA-256), sends the manifest, uploads only missing blobs 6 at a time
   with retries on 429/5xx, finalizes, and prints one JSON object on stdout (SPEC agent contract);
   progress on stderr.
-- `--wait` polls the returned `url` until `X-Dropway-Version` equals the new version (default 90 s; exit 8 on timeout).
-- Credentials: `--api-key` > `DROPWAY_API_KEY` > `~/.dropway/credentials.json` (0600, keyed by instance
-  origin); instance: `--url` > `DROPWAY_URL` > `dropway.json` > error with a hint.
+- `--wait` polls the returned `url` until `X-Kofra-Version` equals the new version (default 90 s; exit 8 on timeout).
+- Credentials: `--api-key` > `KOFRA_API_KEY` > `~/.dropway/credentials.json` (0600, keyed by instance
+  origin); instance: `--url` > `KOFRA_URL` > `dropway.json` > error with a hint.
 - Ignores `.git/`, `node_modules/`, `.env*`, `*.pem`, `*.key`, `.dropway/` (except data/proxy manifests),
   `.dropwayignore`; refuses files that match secret patterns unless `--allow-secrets` (exit 2).
 - Writes `dropway.json` after the first publish so re-running updates the same site.
 - Exit codes 0-8 per the agent-experience contract; zero runtime dependencies, one bundled file.
-- Published to npm as `dropway` (name verified free on 2026-10-22) and served by each instance at
+- Published to npm as `kofra` (name verified free on 2026-10-23) and served by each instance at
   `<app>/cli/dropway.tgz`. If npm credentials are not available yet, the tarball path ships first and the
   npm publish is recorded as an operator to-do.
 
@@ -178,7 +178,7 @@ Delivers: AX-04 (part). Depends: R-04, R-05.
 Delivers: AX-04, PUB-19. Depends: R-09. Parallel with R-11.
 - `sites ls`, `site`, `files ls|cat`, `pull`, `versions ls`, `rollback [version]` (default: previous),
   `rm --yes`, `claim`, `whoami`, `keys ls|create|revoke`, `settings`, `access --password` (stdin), `watch`.
-- `dropway api <operationId|METHOD path> --data '<json>'` calls any operation the instance lists in
+- `kofra api <operationId|METHOD path> --data '<json>'` calls any operation the instance lists in
   `/api/v1/operations`.
 - Non-TTY never prompts; destructive commands without `--yes` refuse in non-TTY (exit 2).
 - Golden tests of `--json` output for each command against a local `wrangler dev` instance.
@@ -322,7 +322,7 @@ Delivers: ID-07, AX-03 (auth). Depends: R-21, R-06.
 - Consent page signs the person in through the identity adapter (session, or paste an API key); granted
   scopes never exceed the member's role.
 - API keys still work on `/mcp` via `resolveExternalToken` (test).
-- `dropway login` (loopback PKCE with a pre-registered public client) and `dropway login --device`
+- `kofra login` (loopback PKCE with a pre-registered public client) and `kofra login --device`
   (device code, approved from the dashboard) store tokens per instance.
 - Manual checks recorded: Claude.ai custom connector and ChatGPT developer mode connect and publish.
 
@@ -337,7 +337,7 @@ Delivers: AX-03, AX-10, ID-02 (tools). Depends: R-24.
 
 ### R-26 Local stdio MCP in the CLI (1-2 days)
 Delivers: AX-05. Depends: R-25, R-10.
-- `npx -y dropway mcp` serves the same tools over stdio using `/api/v1/operations`; `localPath` and
+- `npx -y kofra mcp` serves the same tools over stdio using `/api/v1/operations`; `localPath` and
   `localDir` sources hash and upload from disk.
 - Tested with the MCP inspector and one coding agent.
 
@@ -383,7 +383,7 @@ Delivers: APP-02, APP-03. Depends: R-17. Migration `0008`.
 Delivers: DRV-01, DRV-02, DRV-03, ID-03 (path prefix). Depends: R-05, R-17.
 - `create_site kind:"drive"`; drive sites are never served (404 on the sites origin).
 - Per-file conditional writes (`ifMatch` sha256, `ifNoneMatch: "*"`) and atomic batches via `update_site_files`.
-- API keys with `site_id` + `path_prefix` + read or write act as share tokens; `dropway drive share` prints a
+- API keys with `site_id` + `path_prefix` + read or write act as share tokens; `kofra drive share` prints a
   hand-off block.
 - `duplicate_site` from a drive to a site.
 
@@ -478,7 +478,7 @@ Delivers: PUB-20. Depends: R-09.
 
 ### R-47 End-to-end encrypted sites (2-3 days)
 Delivers: ACC-07. Depends: R-09.
-- `dropway publish --encrypt` encrypts files in the CLI (AES-256-GCM, key in the URL fragment); a
+- `kofra publish --encrypt` encrypts files in the CLI (AES-256-GCM, key in the URL fragment); a
   first-party loader decrypts in the browser; the server never sees the key; wording says exactly what it
   protects.
 - Implemented for CLI files/folders up to 16 MiB, with an authenticated container and an opaque

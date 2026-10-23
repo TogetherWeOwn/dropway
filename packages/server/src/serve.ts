@@ -115,8 +115,8 @@ export function securityHeaders(h: Headers, live: LiveSite | null, mode: ServeMo
   else h.set("Access-Control-Allow-Origin", "*");
   h.set("X-Robots-Tag", live?.expiresAt ? "noindex" : "all");
   if (live) {
-    h.set("X-Dropway-Site", live.slug);
-    if (live.versionId) h.set("X-Dropway-Version", live.versionId);
+    h.set("X-Kofra-Site", live.slug);
+    if (live.versionId) h.set("X-Kofra-Version", live.versionId);
     if (live.crossOriginIsolation) {
       h.set("Cross-Origin-Opener-Policy", "same-origin");
       h.set("Cross-Origin-Embedder-Policy", "require-corp");
@@ -405,7 +405,7 @@ async function serveFile(
     out.set("ETag", etag);
     out.set("Cache-Control", live.passwordHash ? "private, no-store" : "public, max-age=0, must-revalidate");
     out.set("Vary", "Accept, Sec-Fetch-Dest");
-    out.set("X-Dropway-Viewer", viewer.id);
+    out.set("X-Kofra-Viewer", viewer.id);
     out.delete("Content-Length");
     securityHeaders(out, live, mode);
     let page = new Response(head ? null : rendered.body, { status, headers: out });
@@ -420,7 +420,7 @@ async function serveFile(
     const shim = rewriteKind === "html" && mode.sandbox;
     const etag = `W/"${rewriteKind ? "pm-" : ""}${sha256}${shim ? `-js${PATH_SHIM_VERSION}` : ""}${reportVariant}"`;
     const h = new Headers({ "Content-Type": contentType, ETag: etag, "Cache-Control": cacheControlFor(path, live) });
-    if (rewriteKind) h.set("X-Dropway-Rewritten", "path-prefix");
+    if (rewriteKind) h.set("X-Kofra-Rewritten", "path-prefix");
     securityHeaders(h, live, mode);
     if (etagMatches(req, etag)) return new Response(null, { status: 304, headers: h });
     if (head) return new Response(null, { status, headers: h });
@@ -445,7 +445,7 @@ async function serveFile(
   if (raw && (isTextual(contentType) || isHtml(contentType))) {
     // ?raw=1 shows the source: never let the browser render it.
     h.set("Content-Type", "text/plain; charset=utf-8");
-    h.set("X-Dropway-Original-Content-Type", contentType);
+    h.set("X-Kofra-Original-Content-Type", contentType);
   } else if (pre) {
     h.set("Content-Type", pre.contentType);
     h.set("Content-Encoding", pre.encoding);

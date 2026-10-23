@@ -152,7 +152,7 @@ describe("operation extension contract (SPEC 6.5)", () => {
     })]);
     const result = await dw.json("/api/v1/acceptance/echo", {
       key: dw.ownerKey, ...jsonBody({ message: "context" }),
-      headers: { "Content-Type": "application/json", "X-Dropway-Client": "acceptance/1.0", "Idempotency-Key": "operation-context-1" },
+      headers: { "Content-Type": "application/json", "X-Kofra-Client": "acceptance/1.0", "Idempotency-Key": "operation-context-1" },
     });
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({ principal: "member", appOrigin: "https://dropway.test", path: "/api/v1/acceptance/echo", client: "acceptance/1.0", idempotencyKey: "operation-context-1" });
