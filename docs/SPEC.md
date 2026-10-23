@@ -111,7 +111,7 @@ What Kofra is not:
 | PUB-17 | Dry run: `dryRun: true` returns added, changed, removed and skipped files and the resulting size without creating a version | P1 | R-20 |
 | PUB-18 | Drag-and-drop publish in the dashboard (folder, zip or file) | P1 | R-22 |
 | PUB-19 | `kofra watch` republishes on change | P1 | R-10 |
-| PUB-20 | GitHub Action and per-pull-request preview sites with cleanup | P2 | R-46 |
+| PUB-20 | GitHub Action and per-pull-request preview sites with cleanup | P2 | Done: [composite action](PR_PREVIEWS.md), trusted same-repository PRs |
 
 ### 4.2 Serving and URLs (SRV)
 
