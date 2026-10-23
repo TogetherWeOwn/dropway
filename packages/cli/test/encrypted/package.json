@@ -1,0 +1,10 @@
+{
+  "name": "dropway-encrypted-acceptance",
+  "private": true,
+  "type": "module",
+  "description": "Test-only Chromium driver and ZIP fixtures; never packaged with the CLI.",
+  "devDependencies": {
+    "fflate": "0.8.3",
+    "playwright": "1.64.1"
+  }
+}

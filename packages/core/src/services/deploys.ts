@@ -38,7 +38,7 @@ export interface DeployOptions {
   message?: unknown;
   /** How the version was made: "api", "publish", "zip", "restore"... */
   source?: string;
-  /** Client attribution, from the X-Dropway-Client header (e.g. "claude-code/1.0"). */
+  /** Client attribution, from the X-Kofra-Client header (e.g. "claude-code/1.0"). */
   client?: string | null;
   /** Optimistic concurrency: fail with 409 version_conflict if the live version is no longer this one. */
   baseVersionId?: unknown;

@@ -10,6 +10,7 @@ import { readBlob, readBlobRange } from "./blobs";
 import { getFile } from "./deploys";
 import { dropLive, refreshLive } from "./live";
 import { getSiteFor, parseSettings, updateSite, type SiteRow, type VersionRow } from "./sites";
+import { atomicWrite, siteSlugError } from "./atomic-write";
 
 /**
  * Site and version lookups that accept what agents naturally have in hand
@@ -98,12 +99,23 @@ export async function renameSite(dc: DropwayContext, p: Principal, ref: unknown,
   if (typeof newSlug !== "string") throw badRequest("invalid_slug", "newSlug must be a string.");
   const wanted = validateSlug(newSlug);
   if (wanted === site.slug) return { renamed: false, site, oldSlug: site.slug };
-  try {
-    await dc.env.DB.prepare("UPDATE sites SET slug = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").bind(wanted, Date.now(), site.id).run();
-  } catch (e) {
-    if (String(e).includes("UNIQUE")) throw conflict("slug_taken", `The site name "${wanted}" is taken.`, "Pick another name.");
-    throw e;
-  }
+  const extension = await dc.adapters.policy.siteNameMutation?.(p, {
+    operation: "rename", siteId: site.id, tenantId: site.tenant_id, slug: wanted, previousSlug: site.slug,
+  }, dc);
+  const fence = "id = ? AND tenant_id IS ? AND slug = ? AND deleted_at IS NULL";
+  await atomicWrite(dc, [
+    // CASE is lazy: the deliberately invalid, tagged JSON path aborts a stale
+    // attempt INSIDE the transaction, including when the row was hard-deleted.
+    dc.env.DB.prepare(`SELECT CASE WHEN EXISTS (SELECT 1 FROM sites WHERE ${fence})
+      THEN 1 ELSE json_extract('{}', 'dropway_site_changed') END`).bind(site.id, site.tenant_id, site.slug),
+    dc.env.DB.prepare(`UPDATE sites SET slug = ?, updated_at = ? WHERE ${fence}`)
+      .bind(wanted, Date.now(), site.id, site.tenant_id, site.slug),
+  ], extension, (error) => {
+    if (String(error).includes("JSON path") && String(error).includes("dropway_site_changed")) {
+      return conflict("site_changed", "The site changed while preparing its rename.", "Reload the site and retry.");
+    }
+    return siteSlugError(error, wanted, "Pick another name.");
+  });
   await dropLive(dc, site.slug);
   await refreshLive(dc, site.id);
   const fresh = (await dc.env.DB.prepare("SELECT * FROM sites WHERE id = ?").bind(site.id).first<SiteRow>())!;

@@ -283,7 +283,7 @@ export function installOperationRoutes(api: Hono<DropwayEnv>, operations: readon
           dw: c.get("dw"),
           principal: c.get("principal"),
           request: c.req.raw,
-          client: c.req.header("x-dropway-client") ?? null,
+          client: c.req.header("x-kofra-client") ?? null,
           idempotencyKey: validateIdempotencyKey(c.req.header("idempotency-key")),
           transport: "rest",
         };

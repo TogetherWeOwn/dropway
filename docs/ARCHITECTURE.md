@@ -1,6 +1,6 @@
-# Dropway architecture
+# Kofra architecture
 
-Dropway publishes files, folders and sites to live URLs. It runs entirely on
+Kofra publishes files, folders and sites to live URLs. It runs entirely on
 Cloudflare: one Worker, D1 for metadata, R2 for file bytes, KV for the hot
 "what is live" cache, Analytics Engine for hits.
 
@@ -40,8 +40,8 @@ packages/server           @dropway/server: createDropway() Hono app factory
   src/openapi.ts          OpenAPI 3.1 document for every route (operationId = MCP tool name)
   src/discovery.ts        /llms.txt, /llms-full.txt, /skill.md, /.well-known/agent-skills (generated)
   src/extensions.ts       Types for routes, MCP tools, UI slots, createDropway options
-packages/cli              `dropway` CLI (npm package "dropway", Node 20+, zero runtime dependencies)
-skills/dropway/SKILL.md   Agent Skill (`npx skills add TogetherWeOwn/dropway`); generated, `npm run skill:sync`
+packages/cli              `kofra` CLI (npm package "kofra", Node 20+, zero runtime dependencies)
+skills/kofra/SKILL.md   Agent Skill (`npx skills add TogetherWeOwn/dropway`); generated, `npm run skill:sync`
 scripts/guard-open-core.mjs  CI guard: no billing, pricing, payment or hosted-service code in this repo
 test/                     vitest + @cloudflare/vitest-plugin (runs inside workerd)
 ```
@@ -230,6 +230,139 @@ export default createDropway({
 consumers, scripts, tests). Inside routes, use `c.get("dw")` and
 `c.get("principal")`.
 
+### Atomic mutation extensions (version 2)
+
+`@dropway/core` exports `AtomicWriteExtension` (`statements: readonly
+D1PreparedStatement[]`, optional `mapError(error): ApiError | undefined`) and
+`SiteNameMutation` (`operation: "create" | "rename"`, `siteId`, `tenantId`,
+`slug`, `previousSlug`). The optional
+`PolicyAdapter.siteNameMutation(principal, input, dc)` prepares an extension,
+synchronously or asynchronously, for each concrete name acquisition:
+
+- Create runs existing authorization, validation, legacy `beforeCreateSite` and
+  `CreateSiteOptions.beforeInsert` first. The legacy preflight runs once, with
+  the requested canonical slug or null; it is **not an atomic allocation guard**.
+  The new callback receives each actual generated or explicit slug, the new
+  site id/tenant and `previousSlug: null`, never claim/password secrets.
+- Rename runs existing member/scope/isolation checks and canonical validation
+  first. A canonical no-op skips preparation. Otherwise the callback receives
+  the loaded identity, new slug and `previousSlug`. REST and MCP share this
+  service. A concurrent rename, ownership change or deletion during preparation
+  fails with 409 `site_changed`, before extension writes can commit. Core uses a
+  schema-free SQL assertion (lazy CASE with a tagged invalid JSON path on the
+  stale branch) and fenced UPDATE in the same batch, not an after-commit check.
+- Core SQL runs first, then extension SQL, sequentially in **one**
+  `dc.env.DB.batch` per attempt. D1 rolls back the whole batch on SQL failure,
+  including earlier extension statements. Metering and rename cache changes
+  happen only after success. Refused renames leave the old live URL/cache intact;
+  accepted renames invalidate the old name and refresh the new one, no redirects.
+
+Preparation is **outside** the transaction. It may build statements or throw,
+but must not independently write or perform irreversible effects expecting core
+rollback. Statements must be prepared on the **same `dc.env.DB`**. This is a
+trusted embedding API, not a sandbox for untrusted SQL. It makes no atomicity
+claim across databases, KV, R2, network calls, or a later deployment.
+
+Refusal must be a **SQL failure/constraint inside the batch**. A SELECT returning
+false, INSERT selecting zero rows, or JavaScript inspecting batch results after
+commit cannot refuse/undo the mutation. `mapError` translates only recognized
+SQL failures; undefined preserves the original error. Preparation-thrown
+`ApiError`s preserve status/code/hint directly and through REST; MCP retains its
+existing `isError`/code/message/hint format (no numeric status field).
+
+Core's precise `sites.slug` UNIQUE constraint keeps 409 `slug_taken` and its
+existing explicit-name hint. Extension mappers can deliberately return 409
+`slug_taken` for their competing allocation. Only that exact status/code is a
+generated-name retry, including when thrown by the new callback: six attempts,
+then 503 `slug_generation_failed`. Unrelated UNIQUE errors are not collisions;
+other errors propagate without retry. Explicit names never retry. Rolled-back
+candidates leave no site/extension rows or creation events; only the winner emits
+`site_created`.
+
+For example, an embedding app can own a constraint-backed allocation table in
+its **own** same-D1 migration (these are not core tables):
+
+```sql
+CREATE TABLE extension_names (
+  slug TEXT PRIMARY KEY,
+  site_id TEXT UNIQUE REFERENCES sites(id)
+);
+-- External writers reserve a name with site_id NULL. They must also refuse
+-- names already owned by a site, inside their transaction, in this direction.
+CREATE TRIGGER extension_external_name BEFORE INSERT ON extension_names
+WHEN NEW.site_id IS NULL BEGIN
+  SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM sites WHERE slug = NEW.slug AND deleted_at IS NULL
+  ) THEN RAISE(ABORT, 'extension_name_conflict') END;
+END;
+```
+
+```ts
+import { ApiError, defaultPolicy, type PolicyAdapter } from "@dropway/core";
+
+const policy: PolicyAdapter = {
+  ...defaultPolicy,
+  siteNameMutation(_principal, input, dc) {
+    return {
+      statements: [
+        // Release this site's previous allocation on rename, atomically.
+        dc.env.DB.prepare("DELETE FROM extension_names WHERE site_id = ?")
+          .bind(input.siteId),
+        dc.env.DB.prepare("INSERT INTO extension_names (slug, site_id) VALUES (?, ?)")
+          .bind(input.slug, input.siteId),
+      ],
+      mapError(error) {
+        if (/\bUNIQUE constraint failed: extension_names\.slug(?=:|$)/.test(String(error))) {
+          return new ApiError(409, "slug_taken", "The name is allocated.", "Choose another name.");
+        }
+        return undefined;
+      },
+    };
+  },
+};
+```
+
+The UNIQUE constraint refuses site acquisition if an external allocation won
+first; the trigger refuses an external acquisition if the site won first. All
+writers must obey the same SQL constraints, not a SELECT-only preflight. The
+embedding app also owns allocation release on site deletion; core does not
+manage extension-table lifecycle or retention. Real disposable D1 fixtures in
+`test/atomic-extensions.acceptance.test.ts` pin both writer orders, rollback,
+generated retries, REST/MCP refusals, cache behavior and stale preparation.
+
+`createTenantWithOwner(dc, input, options?)` is a separate low-level exported
+service. `CreateTenantWithOwnerInput` accepts optional `tenant: { name? }` and
+required `owner: { email?, name?, externalRef? }`; the caller owns admission and
+authorization. Core generates fresh ids, fixes the member's role to owner and
+its tenant to the new tenant. It reuses `createTenant`/`insertMember` field rules:
+120-character names (falsy names become null), unchanged email/externalRef
+values (nullish values become null), no new email validation.
+
+`CreateTenantWithOwnerOptions.extend(rows, dc)` optionally prepares an
+`AtomicWriteExtension` with readonly tenant/owner rows before any insert. Core
+inserts tenant, then owner, then extension SQL in one batch, returning full rows
+only after success. Extension SQL can reference the inserted rows, for example:
+
+```ts
+const { tenant, owner } = await createTenantWithOwner(dc, {
+  tenant: { name: "Example" }, owner: { externalRef: "external-user" },
+}, {
+  extend({ tenant, owner }, dc) {
+    return { statements: [dc.env.DB.prepare(
+      "INSERT INTO extension_profiles (tenant_id, owner_id) VALUES (?, ?)",
+    ).bind(tenant.id, owner.id)] };
+  },
+});
+```
+
+Here `extension_profiles` belongs to the embedding app's same-D1 schema.
+Preparation refusal, owner INSERT failure or extension SQL failure leaves
+neither new core row nor earlier extension writes. Existing low-level helpers
+remain compatible. `setupInstance` uses this helper without extensions, keeping
+its authorization, validation and response; **API key minting remains separate**,
+and the single-tenant setup admission race is **not** included in this contract.
+No public registration route or core migration is added.
+
 ### Where to add things
 
 - **An API operation (core):** service function in `packages/core/src/services`,
@@ -267,7 +400,7 @@ consumers, scripts, tests). Inside routes, use `c.get("dw")` and
 - **CLI:** `packages/cli` talks to the REST API (it runs on users' machines). The upload protocol
   (`src/publish.ts`, `src/client.ts`) uses only `fetch`, so `test/cli-publish.test.ts` runs it against
   the real Worker inside workerd; `packages/cli/test` covers the rest, end to end against a local Worker.
-  A new REST endpoint usually needs no CLI change: `dropway api <METHOD> <path>` reaches it.
+  A new REST endpoint usually needs no CLI change: `kofra api <METHOD> <path>` reaches it.
 
 ## Conventions
 
@@ -284,5 +417,5 @@ consumers, scripts, tests). Inside routes, use `c.get("dw")` and
 
 - Self-host: Deploy to Cloudflare button, or `npm run deploy` (see `docs/SELF_HOST.md`).
 - Maintainers: the root `wrangler.jsonc` is the self-host template. Do not deploy
-  it to an account that runs a hosted Dropway: its worker and resource names
+  it to an account that runs a hosted Kofra: its worker and resource names
   (`dropway`, `dropway-files`) may collide. Use a separate config for test instances.

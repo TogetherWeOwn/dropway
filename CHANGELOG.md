@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Renamed: Dropway is now Kofra
+
+- User-visible names: product name, docs, UI copy, the default `INSTANCE_NAME` (`Kofra`), the CLI
+  command `kofra` (the `dropway` command stays as an alias), environment variables `KOFRA_*`,
+  response and request headers `X-Kofra-*`, the Agent Skill and MCP server name `kofra`.
+- Still accepted: `DROPWAY_*` variables (a `KOFRA_*` variable wins), `X-Dropway-*` request headers,
+  and the skill URLs under `dropway`. Responses send every `X-Kofra-*` header as `X-Dropway-*` too.
+- Unchanged on purpose: Worker, D1, R2, KV and Analytics names, database tables, cookie and storage
+  names, reserved paths (`/__dropway/`), CLI files (`dropway.json`, `.dropwayignore`,
+  `~/.config/dropway`), the `@dropway/*` workspace packages and `createDropway()`.
+- `scripts/rebrand.mjs` applies the rename and can be re-run after a rebase.
+
 ### Moving the app to a new origin
 
 - `LEGACY_APP_ORIGINS` (and `LEGACY_DEPRECATED_AT`): former app origins keep serving the REST API,
@@ -12,7 +24,8 @@
   New config fields `legacyAppOrigins` and `legacyDeprecatedAt`.
 - The CLI notes once per run when an instance answers with those headers, naming the new address.
 - The product name comes from `INSTANCE_NAME` in the served skill (heading, description, homepage),
-  both skills indexes and the MCP server instructions. The skill's `name` stays `dropway`.
+  both skills indexes and the MCP server instructions. The skill's `name` does not follow
+  `INSTANCE_NAME` (it is `kofra` after the rename above).
 
 ### Scopes, policy and usage
 
@@ -44,6 +57,21 @@
   uses `publish_site` for policy on both transports, after parsing and before writes.
   Generated MCP tools also recheck authorization/capability/policy before exposing
   cached results via the optional `beforeReplay` tool guard; no handler is rerun.
+- Extend the version 2 contract with public core
+  `AtomicWriteExtension`, `SiteNameMutation` and optional
+  `PolicyAdapter.siteNameMutation`: every concrete site create/rename candidate
+  composes core and extension SQL in one same-D1 batch. SQL refusal rolls back
+  all statements; only precise 409 `slug_taken` conflicts retry generated names.
+  Legacy `beforeCreateSite` remains a non-atomic, once-per-create preflight.
+- Fence rename identity/previous name inside its batch; stale preparation fails
+  with 409 `site_changed`, without extension residue or cache changes.
+- Export `createTenantWithOwner`, `CreateTenantWithOwnerInput` and
+  `CreateTenantWithOwnerOptions` for low-level atomic tenant/owner/extension SQL.
+  Existing helpers retain field rules; setup uses the new helper. Key minting,
+  setup admission races and cross-database/storage/network effects are excluded.
+- Pin the additive types, deterministic competing-writer/rollback/cache behavior
+  and version in independent disposable workerd/D1 acceptance tests. No core
+  schema changes or additional public routes.
 - Bump `EXTENSION_API_VERSION` to 2: add `defineOperation()`, typed operation
   definitions/contexts, `createDropway({ operations })` and `dropway.operations`.
   Operation input/output schemas drive REST validation, OpenAPI 3.1, MCP tools,
@@ -65,9 +93,8 @@
   including tenant/site restrictions, role and scopes. Older member records
   expire unused; retries spanning the upgrade may execute again.
 
-- Export `EXTENSION_API_VERSION = 1` from `@dropway/server`, identifying the
-  current public embedding contract. Extension API changes must update this
-  version and this section.
+- Introduced `EXTENSION_API_VERSION` in `@dropway/server` at version 1.
+  Extension API changes must update this version and this section.
 - Cover existing identity, policy limits and refusals, all five metering events,
   all three hooks, API middleware, route overrides and app routes, contexts,
   MCP tools and endpoint replacement, UI slots, viewers and scheduled work in

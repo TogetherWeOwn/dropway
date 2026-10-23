@@ -18,7 +18,7 @@ export interface McpToolContext {
   dw: DropwayContext;
   principal: Principal;
   request: Request;
-  /** Who is calling, for attribution: MCP clientInfo ("claude-code/2.1"), X-Dropway-Client or User-Agent. */
+  /** Who is calling, for attribution: MCP clientInfo ("claude-code/2.1"), X-Kofra-Client or User-Agent. */
   client: string | null;
   /** The idempotencyKey argument, when the tool takes one (already applied by the server). */
   idempotencyKey: string | null;
@@ -110,7 +110,7 @@ export interface UiSlots {
   pages: UiPage[];
   /** Replace the app-origin home page (GET /). */
   landing?: (c: Context<DropwayEnv>) => Response | Promise<Response>;
-  /** Extra HTML injected into <head> of Dropway-rendered app pages. */
+  /** Extra HTML injected into <head> of Kofra-rendered app pages. */
   headHtml?: string;
   /** Extra sections at the end of /dashboard/settings. */
   settingsSections?: UiSection[];

@@ -45,7 +45,7 @@ export const CORE_API_OPERATIONS = [
     toolset: "core",
     mcp: { alwaysLoad: true },
     description:
-      "Describe your credential, instance URLs, capabilities (including missing bindings), size limits, resource quotas and current usage. Call first when unsure what you may do.",
+      "Describe this Kofra instance, your credential and permissions, URLs, capabilities (including missing bindings), size/resource limits and usage. Call first when unsure what you may do.",
     input: fromSchema({
       type: "object",
       properties: {},
@@ -341,7 +341,7 @@ export const CORE_API_OPERATIONS = [
               move: body.move,
               baseVersionId: body.baseVersionId,
               message: body.message,
-              client: c.req.header("x-dropway-client") ?? null,
+              client: c.req.header("x-kofra-client") ?? null,
               source: "api",
             }),
         );

@@ -96,12 +96,12 @@ describe("MCP endpoint: transport and auth", () => {
     const roTools = await ro.tools();
     expect(roTools.length).toBeGreaterThan(5);
     expect(roTools.every((t) => t.annotations.readOnlyHint)).toBe(true);
-    const header = await connectMcp(dw, dw.ownerKey, { headers: { "X-Dropway-Toolsets": "keys" } });
+    const header = await connectMcp(dw, dw.ownerKey, { headers: { "X-Kofra-Toolsets": "keys" } });
     expect((await header.tools()).map((t) => t.name)).toEqual(["list_api_keys", "create_api_key", "revoke_api_key"]);
   });
 
   it("works with a 2025-era (SDK v1) client through the stateless legacy lane", async () => {
-    const legacy = await connectLegacyMcp(dw, dw.ownerKey, { headers: { "X-Dropway-Client": "codex/1.2" } });
+    const legacy = await connectLegacyMcp(dw, dw.ownerKey, { headers: { "X-Kofra-Client": "codex/1.2" } });
     expect((await legacy.tools()).length).toBeGreaterThan(20);
     const r = await legacy.call("publish_site", { files: [{ path: "index.html", content: "<h1>legacy</h1>" }] });
     expect(r.isError).toBe(false);

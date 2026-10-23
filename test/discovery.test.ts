@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { sha256Hex } from "@dropway/core";
 import { CORE_MCP_TOOLS, skillMarkdown } from "@dropway/server";
-import repoSkill from "../skills/dropway/SKILL.md?raw";
+import repoSkill from "../skills/kofra/SKILL.md?raw";
 import { freshInstance, jsonBody, type Instance } from "./helpers";
 import { connectMcp } from "./mcp-helpers";
 
@@ -107,7 +107,7 @@ describe("llms.txt, llms-full.txt and the Agent Skill", () => {
     const res = await dw.call("/llms.txt");
     expect(res.headers.get("content-type")).toContain("text/markdown");
     const text = await res.text();
-    expect(text).toMatch(/^# Dropway\n\n> /);
+    expect(text).toMatch(/^# Kofra\n\n> /);
     expect(text).toContain("https://dropway.test/mcp");
     expect(text).toContain("https://dropway.test/llms-full.txt");
     expect(text).toContain("npx skills add https://dropway.test");
@@ -122,7 +122,7 @@ describe("llms.txt, llms-full.txt and the Agent Skill", () => {
     expect(text).toContain("accepts idempotencyKey");
     expect(text).toContain("### POST /api/v1/publish");
     expect(text).toContain("version_conflict");
-    expect(text).toContain("name: dropway");
+    expect(text).toContain("name: kofra");
     const doc = (await dw.json("/openapi.json")).body;
     for (const item of Object.values<Record<string, any>>(doc.paths)) for (const op of Object.values<any>(item)) expect(text).toContain(`operationId \`${op.operationId}\``);
   });
@@ -133,12 +133,12 @@ describe("llms.txt, llms-full.txt and the Agent Skill", () => {
     const md = await res.text();
     const fm = /^---\n([\s\S]*?)\n---\n/.exec(md);
     expect(fm).toBeTruthy();
-    expect(fm![1]).toMatch(/^name: dropway$/m);
+    expect(fm![1]).toMatch(/^name: kofra$/m);
     const description = /^description: (.+)$/m.exec(fm![1]!)![1]!;
     expect(description.length).toBeLessThanOrEqual(1024);
     expect(md).toContain("https://dropway.test/mcp");
     expect(md).toContain("requires an API key");
-    expect(md).not.toContain("$DROPWAY_URL");
+    expect(md).not.toContain("$KOFRA_URL");
     expect(md.length).toBeLessThan(8000); // about 2,000 tokens
   });
 
@@ -146,15 +146,15 @@ describe("llms.txt, llms-full.txt and the Agent Skill", () => {
     const index = (await dw.json("/.well-known/agent-skills/index.json")).body;
     expect(index.$schema).toBe("https://schemas.agentskills.io/discovery/0.2.0/schema.json");
     const entry = index.skills[0];
-    expect(entry).toMatchObject({ name: "dropway", type: "skill-md", url: "https://dropway.test/.well-known/agent-skills/dropway/SKILL.md" });
+    expect(entry).toMatchObject({ name: "kofra", type: "skill-md", url: "https://dropway.test/.well-known/agent-skills/kofra/SKILL.md" });
     const body = await (await dw.call(entry.url)).text();
     expect(entry.digest).toBe(`sha256:${await sha256Hex(body)}`);
     const legacy = (await dw.json("/.well-known/skills/index.json")).body;
-    expect(legacy.skills[0]).toMatchObject({ name: "dropway", files: ["SKILL.md"] });
-    expect((await dw.call("/.well-known/skills/dropway/SKILL.md")).status).toBe(200);
+    expect(legacy.skills[0]).toMatchObject({ name: "kofra", files: ["SKILL.md"] });
+    expect((await dw.call("/.well-known/skills/kofra/SKILL.md")).status).toBe(200);
   });
 
-  it("skills/dropway/SKILL.md in the repository is up to date (npm run skill:sync)", () => {
+  it("skills/kofra/SKILL.md in the repository is up to date (npm run skill:sync)", () => {
     expect(repoSkill).toBe(skillMarkdown(null));
   });
 });

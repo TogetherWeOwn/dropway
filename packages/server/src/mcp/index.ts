@@ -14,6 +14,7 @@ import type { DropwayEnv } from "../env";
 import type { McpHandlerFactory, McpToolDefinition } from "../extensions";
 import { IDEMPOTENCY_KEY } from "./schemas";
 import { requireOperationScopes } from "../operations";
+import { withLegacyHeaderNames } from "../legacy-brand";
 
 /**
  * Remote MCP server at /mcp: Streamable HTTP, stateless, built with createMcpHandler
@@ -24,13 +25,13 @@ import { requireOperationScopes } from "../operations";
  * - Auth: `Authorization: Bearer dw_...` (or a dwc_ claim token), resolved by the same
  *   identity adapter as the REST API. Missing or bad credentials get 401 + WWW-Authenticate.
  * - Tools come from dropway.mcpTools (core + extensions). Narrow them with
- *   ?toolsets=core,keys (or X-Dropway-Toolsets) and ?read_only=1 (or X-Dropway-Read-Only).
+ *   ?toolsets=core,keys (or X-Kofra-Toolsets) and ?read_only=1 (or X-Kofra-Read-Only).
  */
 
 export const MCP_SERVER_VERSION = "0.1.0";
 
 export interface McpEndpointOptions {
-  /** Server name sent in initialize/discover. Default "dropway". */
+  /** Server name sent in initialize/discover. Default "kofra". */
   name?: string;
   /** Replace the server instructions. */
   instructions?: (dw: DropwayContext) => string;
@@ -86,12 +87,12 @@ function truthy(v: string | null | undefined): boolean {
 /** Which tools this request sees: enabled for the instance, in the requested toolsets, read-only if asked. */
 export function selectTools<T extends { def: McpToolDefinition } | McpToolDefinition>(tools: readonly T[], dw: DropwayContext, request: Request): T[] {
   const url = new URL(request.url);
-  const wanted = (url.searchParams.get("toolsets") ?? request.headers.get("x-dropway-toolsets") ?? "all")
+  const wanted = (url.searchParams.get("toolsets") ?? request.headers.get("x-kofra-toolsets") ?? "all")
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
   const all = wanted.length === 0 || wanted.includes("all");
-  const readOnly = truthy(url.searchParams.get("read_only") ?? request.headers.get("x-dropway-read-only"));
+  const readOnly = truthy(url.searchParams.get("read_only") ?? request.headers.get("x-kofra-read-only"));
   return tools.filter((t) => {
     const def: McpToolDefinition = "def" in t ? t.def : t;
     if (def.enabled && !def.enabled(dw)) return false;
@@ -104,7 +105,7 @@ export function selectTools<T extends { def: McpToolDefinition } | McpToolDefini
 function clientName(server: McpServer, request: Request): string | null {
   const info = server.server.getClientVersion?.();
   if (info?.name) return `${info.name}${info.version ? `/${info.version}` : ""}`.slice(0, 120);
-  const header = request.headers.get("x-dropway-client");
+  const header = request.headers.get("x-kofra-client");
   if (header) return header.slice(0, 120);
   const ua = request.headers.get("user-agent");
   return ua ? ua.split(/\s+/)[0]!.slice(0, 120) : null;
@@ -128,7 +129,7 @@ function scopeCheck(principal: Principal, def: McpToolDefinition): void {
 function buildServer(compiled: CompiledTool[], ctx: { dw: DropwayContext; principal: Principal; request: Request; requestId: string }, options: McpEndpointOptions): McpServer {
   const { dw, principal, request, requestId } = ctx;
   const server = new McpServer(
-    { name: options.name ?? "dropway", title: dw.config.instanceName, version: MCP_SERVER_VERSION, websiteUrl: appOrigin(dw) },
+    { name: options.name ?? "kofra", title: dw.config.instanceName, version: MCP_SERVER_VERSION, websiteUrl: appOrigin(dw) },
     { instructions: (options.instructions ?? mcpInstructions)(dw) },
   );
   for (const { def, input, output } of compiled) {
@@ -181,7 +182,7 @@ function buildServer(compiled: CompiledTool[], ctx: { dw: DropwayContext; princi
 
 const CORS = {
   origin: "*",
-  headers: "Content-Type, Accept, Authorization, mcp-session-id, MCP-Protocol-Version, Mcp-Method, Mcp-Name, Last-Event-ID, X-Dropway-Client, X-Dropway-Toolsets, X-Dropway-Read-Only",
+  headers: withLegacyHeaderNames(["Content-Type", "Accept", "Authorization", "mcp-session-id", "MCP-Protocol-Version", "Mcp-Method", "Mcp-Name", "Last-Event-ID", "X-Kofra-Client", "X-Kofra-Toolsets", "X-Kofra-Read-Only"]).join(", "),
   methods: "GET, POST, DELETE, OPTIONS",
   exposeHeaders: "mcp-session-id, WWW-Authenticate, X-Request-Id",
   maxAge: 86400,
@@ -200,7 +201,7 @@ function authError(dw: DropwayContext, err: ApiError, requestId: string): Respon
     headers.set("WWW-Authenticate", `Bearer realm="${dw.config.instanceName}", error="invalid_token", error_description="${err.message.replace(/"/g, "'")}"`);
   }
   const body = err.toJSON(requestId);
-  body.error.hint ??= `Connect with an API key: claude mcp add --transport http dropway ${o}/mcp --header "Authorization: Bearer dw_..."`;
+  body.error.hint ??= `Connect with an API key: claude mcp add --transport http kofra ${o}/mcp --header "Authorization: Bearer dw_..."`;
   return new Response(JSON.stringify(body), { status: err.status, headers });
 }
 
@@ -223,7 +224,7 @@ export function createMcpEndpoint(options: McpEndpointOptions = {}): McpHandlerF
         onerror: (e: Error) => console.error(JSON.stringify({ event: "mcp_transport_error", requestId, error: String(e) })),
       };
       if (request.method === "OPTIONS") {
-        return createMcpHandler(() => new McpServer({ name: "dropway", version: MCP_SERVER_VERSION }), handlerOptions).fetch(request);
+        return createMcpHandler(() => new McpServer({ name: "kofra", version: MCP_SERVER_VERSION }), handlerOptions).fetch(request);
       }
       let principal: Principal;
       try {

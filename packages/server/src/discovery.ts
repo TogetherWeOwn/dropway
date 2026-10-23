@@ -13,15 +13,15 @@ import type { OperationDefinition } from "./operations";
  *   /.well-known/agent-skills/index.json  discovery index v0.2.0 (npx skills add <origin>)
  *   /.well-known/skills/index.json        legacy index v0.1.0
  *
- * The repository copy at skills/dropway/SKILL.md is skillMarkdown(null): a test keeps it in sync.
+ * The repository copy at skills/kofra/SKILL.md is skillMarkdown(null): a test keeps it in sync.
  */
 
-export const SKILL_NAME = "dropway";
-/** Skill description naming the product (the instance name; "Dropway" for the repository copy). */
+export const SKILL_NAME = "kofra";
+/** Skill description naming the product (the instance name; "Kofra" for the repository copy). */
 export function skillDescription(product: string): string {
   return `Publish files, folders and static sites to a live URL with ${product}, then update, version, roll back and share them. Use when the user wants to publish, host, share, deploy or preview HTML pages, Markdown docs, reports, images, PDFs, demos or a built web app, or to change, check or roll back something already on ${product}.`;
 }
-export const SKILL_DESCRIPTION = skillDescription("Dropway");
+export const SKILL_DESCRIPTION = skillDescription("Kofra");
 
 export interface SkillInstance {
   origin: string;
@@ -30,17 +30,18 @@ export interface SkillInstance {
   exampleSiteUrl: string;
 }
 
-/** The Dropway Agent Skill. `instance` null renders the generic copy kept in the repository. */
+/** The Kofra Agent Skill. `instance` null renders the generic copy kept in the repository. */
 export function skillMarkdown(instance: SkillInstance | null): string {
-  const app = instance ? instance.origin : "$DROPWAY_URL";
+  const app = instance ? instance.origin : "$KOFRA_URL";
   const where = instance
-    ? `- Instance: \`${app}\` (${instance.instanceName}). API key: \`$DROPWAY_API_KEY\` (starts with \`dw_\`; the instance owner creates keys). If the key is missing, ask the user.
+    ? `- Instance: \`${app}\` (${instance.instanceName}). API key: \`$KOFRA_API_KEY\` (starts with \`dw_\`; the instance owner creates keys). If the key is missing, ask the user.
 - ${instance.anonymousPublish ? "This instance also accepts publishing without a key: such sites expire after 24 hours and return a claim token." : "This instance requires an API key for every publish."}`
-    : `- Instance: \`$DROPWAY_URL\` (the app origin, for example \`https://dropway.<account>.workers.dev\`). API key: \`$DROPWAY_API_KEY\` (starts with \`dw_\`; the instance owner creates keys). If either is missing, ask the user.
-- \`$DROPWAY_URL/skill.md\` serves this skill with the instance's own URLs and settings filled in.`;
-  // The product name people see is the instance's; the skill's name stays "dropway" so installs keep working.
+    : `- Instance: \`$KOFRA_URL\` (the app origin, for example \`https://dropway.<account>.workers.dev\`). API key: \`$KOFRA_API_KEY\` (starts with \`dw_\`; the instance owner creates keys). If either is missing, ask the user.
+- \`$KOFRA_URL/skill.md\` serves this skill with the instance's own URLs and settings filled in.`;
+  // The product name people see is the instance's; the skill's name is fixed (SKILL_NAME), and the
+  // former name still serves at its old URLs (legacy-brand.ts) so existing installs keep working.
   // Kept to one plain YAML-safe line, since it also goes into the front matter.
-  const product = (instance ? instance.instanceName.replace(/[\r\n:#"']+/g, " ").trim() : "") || "Dropway";
+  const product = (instance ? instance.instanceName.replace(/[\r\n:#"']+/g, " ").trim() : "") || "Kofra";
   return `---
 name: ${SKILL_NAME}
 description: ${skillDescription(product)}
@@ -56,8 +57,8 @@ ${product} turns files into a live URL. Every publish is an immutable version yo
 ## Connect
 
 ${where}
-- MCP (preferred when your client supports remote MCP): \`${app}/mcp\` with header \`Authorization: Bearer $DROPWAY_API_KEY\`.
-  Claude Code: \`claude mcp add --transport http dropway ${app}/mcp --header "Authorization: Bearer $DROPWAY_API_KEY"\`
+- MCP (preferred when your client supports remote MCP): \`${app}/mcp\` with header \`Authorization: Bearer $KOFRA_API_KEY\`.
+  Claude Code: \`claude mcp add --transport http kofra ${app}/mcp --header "Authorization: Bearer $KOFRA_API_KEY"\`
 - REST with curl works everywhere: \`${app}/api/v1\`, same header. Full reference: \`${app}/llms-full.txt\`, OpenAPI: \`${app}/openapi.json\`.
 
 ## Publish
@@ -67,11 +68,11 @@ MCP: \`publish_site\` with \`files\`, each \`{ path, content }\` (text; base64 o
 REST, one call (form field name = file path):
 
 \`\`\`sh
-curl -fsS ${app}/api/v1/publish -H "Authorization: Bearer $DROPWAY_API_KEY" \\
+curl -fsS ${app}/api/v1/publish -H "Authorization: Bearer $KOFRA_API_KEY" \\
   -F "index.html=@index.html" -F "assets/app.js=@assets/app.js"
 \`\`\`
 
-A built folder: \`(cd dist && zip -qr ../site.zip .) && curl -fsS ${app}/api/v1/publish -H "Authorization: Bearer $DROPWAY_API_KEY" -H "Content-Type: application/zip" --data-binary @site.zip\`
+A built folder: \`(cd dist && zip -qr ../site.zip .) && curl -fsS ${app}/api/v1/publish -H "Authorization: Bearer $KOFRA_API_KEY" -H "Content-Type: application/zip" --data-binary @site.zip\`
 
 Publish to the same site again with \`-F slug=<slug>\` (REST) or \`site: "<slug>"\` (MCP). Identical content returns \`unchanged\` and creates no version.
 
@@ -116,7 +117,7 @@ export async function agentSkillsIndex(dw: DropwayContext) {
 }
 
 /** /.well-known/skills/index.json (legacy v0.1.0 layout: <base>/<name>/SKILL.md). */
-export function legacySkillsIndex(product = "Dropway") {
+export function legacySkillsIndex(product = "Kofra") {
   return { skills: [{ name: SKILL_NAME, description: skillDescription(product), files: ["SKILL.md"] }] };
 }
 
@@ -150,10 +151,10 @@ const firstSentence = (s: string) => {
 
 function mcpLines(origin: string): string {
   return `- Endpoint: \`${origin}/mcp\` (Streamable HTTP; header \`Authorization: Bearer dw_...\`). Narrow the tool list with \`?toolsets=core\` (or sites, versions, keys, members) and \`?read_only=1\`.
-- Claude Code: \`claude mcp add --transport http dropway ${origin}/mcp --header "Authorization: Bearer $DROPWAY_API_KEY"\`
-- Codex (~/.codex/config.toml): \`[mcp_servers.dropway]\` with \`url = "${origin}/mcp"\` and \`bearer_token_env_var = "DROPWAY_API_KEY"\`
+- Claude Code: \`claude mcp add --transport http kofra ${origin}/mcp --header "Authorization: Bearer $KOFRA_API_KEY"\`
+- Codex (~/.codex/config.toml): \`[mcp_servers.kofra]\` with \`url = "${origin}/mcp"\` and \`bearer_token_env_var = "KOFRA_API_KEY"\`
 - Cursor, VS Code and other clients: add a remote (HTTP) MCP server with that URL and header.
-- Inspector: \`npx @modelcontextprotocol/inspector --cli ${origin}/mcp --transport http --header "Authorization: Bearer $DROPWAY_API_KEY" --method tools/list\``;
+- Inspector: \`npx @modelcontextprotocol/inspector --cli ${origin}/mcp --transport http --header "Authorization: Bearer $KOFRA_API_KEY" --method tools/list\``;
 }
 
 /** /llms.txt: what this is, how to connect, every endpoint and tool in one line each. */
@@ -163,7 +164,7 @@ export function llmsTxt(origin: string, config: DropwayConfig, tools: readonly M
   const ops = operations(origin, config, registry, available).filter((o) => o.path.startsWith("/api/") && !o.op.deprecated);
   return `# ${config.instanceName}
 
-> Instant web hosting for AI agents (Dropway, open source, on Cloudflare). Publish a file, folder or site to a live URL with one call; every publish is an immutable version you can roll back. Use the REST API, the remote MCP server or the Agent Skill.
+> Instant web hosting for AI agents (Kofra, open source, on Cloudflare). Publish a file, folder or site to a live URL with one call; every publish is an immutable version you can roll back. Use the REST API, the remote MCP server or the Agent Skill.
 
 Base URL: ${origin}
 Auth: \`Authorization: Bearer dw_...\` (API key from the instance owner; scopes sites:read, sites:write, sites:delete, keys:write, members:write, data:write, secrets:write, admin).${
