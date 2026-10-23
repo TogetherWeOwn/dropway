@@ -44,7 +44,7 @@ afterAll(async () => {
   if (work) await rm(work, { recursive: true, force: true });
 });
 
-async function cli(operation: string, data: Record<string, unknown>) {
+async function cli(operation: string | string[], data?: Record<string, unknown>) {
   let stdout = "";
   let stderr = "";
   const io: Io = {
@@ -53,7 +53,9 @@ async function cli(operation: string, data: Record<string, unknown>) {
     prompt: async () => { throw new Error("transfer commands must not prompt in non-TTY mode"); },
     env: { DROPWAY_CONFIG_DIR: join(work, "credentials"), DROPWAY_API: api }, cwd: work,
   };
-  const code = await run(["api", operation, "--data", JSON.stringify(data), "--key", key, "--json"], io);
+  const command = typeof operation === "string" ? [operation] : operation;
+  const payload = data === undefined ? [] : ["--data", JSON.stringify(data)];
+  const code = await run(["api", ...command, ...payload, "--key", key, "--json"], io);
   return { code, stdout, stderr, body: stdout ? JSON.parse(stdout) : null };
 }
 
@@ -64,6 +66,16 @@ const delivery = (slug: string, extra: Record<string, unknown> = {}) => ({
 });
 
 describe("transfer CLI through the real registry and local Worker", () => {
+  it("keeps slashless raw paths working alongside operation-ID dispatch", async () => {
+    const created = await cli("create_transfer", delivery("cli-raw-path-parcel"));
+    expect(created.code, created.stdout + created.stderr).toBe(0);
+    for (const path of ["sites", "/sites"]) {
+      const listed = await cli(["GET", path]);
+      expect(listed.code, listed.stdout + listed.stderr).toBe(0);
+      expect(listed.body.sites.map((s: { slug: string }) => s.slug)).toContain("cli-raw-path-parcel");
+    }
+  });
+
   it("creates by operation ID, reads the transfer and revokes it with machine-readable results", async () => {
     const created = await cli("create_transfer", delivery("cli-parcel"));
     expect(created.code, created.stdout + created.stderr).toBe(0);
