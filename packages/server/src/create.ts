@@ -25,6 +25,7 @@ import { VIEWERS, type Viewer } from "./viewers";
 import { createMcpEndpoint } from "./mcp";
 import { CORE_MCP_TOOLS } from "./mcp/tools";
 import { installAgentApiRoutes } from "./routes/api-agent";
+import { installAuthRoutes } from "./routes/auth";
 
 export interface Dropway {
   /** Worker fetch handler: export default { fetch: dropway.fetch, scheduled: dropway.scheduled }. */
@@ -57,6 +58,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
     identity: opts.adapters?.identity ?? defaultIdentity,
     policy: opts.adapters?.policy ?? defaultPolicy,
     metering: opts.adapters?.metering ?? noopMetering,
+    ...(opts.adapters?.email ? { email: opts.adapters.email } : {}),
   };
   const uiSlots: UiSlots = { navItems: [], pages: [], ...opts.uiSlots };
   // Extension tools come after core tools; one with a core tool's name replaces it.
@@ -88,6 +90,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
   installApiMiddleware(api, opts.apiMiddleware ?? []);
   const appRoutes = new Hono<DropwayEnv>();
   for (const extend of opts.routes ?? []) extend({ api, app: appRoutes });
+  installAuthRoutes(api);
   installApiRoutes(api);
   installAgentApiRoutes(api);
   const app = new Hono<DropwayEnv>();

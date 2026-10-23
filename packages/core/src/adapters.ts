@@ -50,7 +50,12 @@ export interface MeteringAdapter {
   record(event: UsageEvent, dc: DropwayContext): void | Promise<void>;
 }
 
+export interface EmailAdapter {
+  send(message: { to: string[]; subject: string; text: string; html?: string; kind: "sign_in" | "site_access" | "invite" | "notice" }, dc: DropwayContext): Promise<{ id: string }>;
+}
+
 export interface DropwayAdapters {
+  email?: EmailAdapter;
   identity: IdentityAdapter;
   policy: PolicyAdapter;
   metering: MeteringAdapter;

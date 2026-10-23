@@ -4,6 +4,7 @@ import {
   claimSite,
   createApiKey,
   createMember,
+  createLoginLink,
   createSite,
   deleteSite,
   deleteVersion,
@@ -562,6 +563,17 @@ export const CORE_MCP_TOOLS: McpToolDefinition[] = [
   },
 
   // ------------------------------------------------------------------ members
+  {
+    name: "create_login_link",
+    title: "Create a login link",
+    toolset: "members",
+    description: "Create a one-use browser sign-in link for an existing member (15 minutes). Members may mint only for themselves; administrators need member authority for others. Restricted API keys cannot mint member sessions. Treat the returned URL as a secret.",
+    inputSchema: obj({ memberId: { type: "string" } }),
+    outputSchema: obj({ url: { type: "string" }, expiresAt: { type: "number" } }, ["url", "expiresAt"]),
+    annotations: CREATE,
+    handler: (args, { dw, principal }) => createLoginLink(dw, principal, args),
+    summarize: () => "Created a one-use login link; it expires in 15 minutes.",
+  },
   {
     name: "list_members",
     title: "List members",

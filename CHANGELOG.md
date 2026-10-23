@@ -14,7 +14,23 @@
 - The product name comes from `INSTANCE_NAME` in the served skill (heading, description, homepage),
   both skills indexes and the MCP server instructions. The skill's `name` stays `dropway`.
 
+### Member browser sign-in
+
+- Add one-use 15-minute member login links, revocable 30-day sliding
+  `__Host-dw_session` cookies, optional email codes through `EmailAdapter`/`EMAIL`
+  (five tries, 15 minutes), RS256 Cloudflare Access identity for existing members,
+  and signed-in anonymous-site claiming. Ordinary REST resources remain bearer-only;
+  explicit browser auth and claim writes require exact app `Origin` **and**
+  `Sec-Fetch-Site: same-origin`. API-key sign-in stays cookie-free.
+- Add migration `0004_sessions.sql`; apply it before upgrading the Worker.
+  Numbers 0002 and 0003 remain reserved for their separate roadmap features.
+
 ### Extension API
+
+- Version 2 adds optional `EmailAdapter`, the optional Cloudflare Email Service
+  binding, and `emailFrom`, `accessTeamDomain`, `accessAud` configuration. Existing
+  identity overrides and embedding-session slots remain independent of built-in
+  browser auth; their deployments need their own cookie security verification.
 
 - Export `EXTENSION_API_VERSION = 1` from `@dropway/server`, identifying the
   current public embedding contract. Extension API changes must update this

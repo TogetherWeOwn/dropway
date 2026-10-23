@@ -8,6 +8,8 @@ export interface CoreBindings {
   FILES: R2Bucket;
   CACHE: KVNamespace;
   ANALYTICS?: AnalyticsEngineDataset;
+  /** Optional Cloudflare Email Service binding (not required for login links). */
+  EMAIL?: { send(message: { to: string[]; from: string; subject: string; text: string; html?: string }): Promise<{ messageId: string }> };
 }
 
 /**

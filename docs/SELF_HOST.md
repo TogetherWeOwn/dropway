@@ -59,6 +59,48 @@ Name clashes: Wrangler connects to an existing D1 database or R2 bucket with the
 of creating one. If your account already has a `dropway` database or a `dropway-files` bucket that
 belongs to something else, change `name`, `database_name` and `bucket_name` in `wrangler.jsonc` first.
 
+## Member browser sign-in
+
+After setup, an existing member with a full-role, unrestricted key can request a
+one-use sign-in link (15-minute expiry):
+
+```sh
+curl -X POST "$DROPWAY_URL/api/v1/login-links" \
+  -H "Authorization: Bearer $DROPWAY_API_KEY" -H 'Content-Type: application/json' -d '{}'
+```
+
+Open the returned secret `url` in the intended person's browser. Administrators may
+specify `memberId` for another existing member, but cannot grant greater authority.
+Restricted API keys cannot become full-role browser sessions. Use an HTTPS app origin.
+`/dashboard/sessions` lists sessions, revokes selected sessions and signs out. Sessions
+last 30 days and slide with activity. Removing a member invalidates their sessions.
+API-key sign-in and the resource dashboard remain available; ordinary REST resources
+and MCP use bearer tokens, not cookies. No persistent API key is minted by browser login.
+
+Email sign-in is optional: configure a Cloudflare Email Service `send_email` binding
+named `EMAIL` and `EMAIL_FROM` with a sender on your verified sending domain. Without a
+sender override the adapter uses `noreply@<app-host>` (which must be a verified sending
+host for delivery). Existing members receive a six-digit code with five tries and a
+15-minute expiry. Resending during that interval does not reset the budget. Without
+`EMAIL` or an embedding `EmailAdapter`, the UI hides email sign-in and both operations
+return `feature_unavailable`. Delivery uses the current
+[Cloudflare Email Service structured Workers API](https://developers.cloudflare.com/email-service/api/send-emails/workers-api/),
+not an HTTP API credential or an implicit signup flow.
+
+Optional Cloudflare Access: configure **both** `ACCESS_TEAM_DOMAIN` (team hostname or
+HTTPS team origin, such as `example.cloudflareaccess.com`) and `ACCESS_AUD` (application
+audience). The default identity verifies RS256 signatures using that team's fixed JWKS
+endpoint, issuer, audience and expiry, then maps a unique existing active member email.
+An unsigned token or an email header alone grants no authority. Access never creates a
+member implicitly. An explicit bearer credential takes precedence.
+
+Anonymous claim links keep proof in their URL fragment. Opening the claim page keeps
+it in this tab across sign-in and sends it only when submitting the actual claim form.
+Browser cookie writes require exact app `Origin` **and** `Sec-Fetch-Site: same-origin`;
+SameSite alone does not protect workers.dev sibling origins. Embedding-cookie deployments
+still need their own security verification. Do not activate a release before its required
+independent review/security and deployment checks pass.
+
 ## First run: create the owner
 
 With the CLI (it saves the owner key in `~/.config/dropway/credentials.json`, mode 0600):

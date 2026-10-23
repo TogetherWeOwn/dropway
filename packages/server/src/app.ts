@@ -2,10 +2,10 @@ import { Hono, type Context } from "hono";
 import { appOrigin } from "@dropway/core";
 import type { DropwayEnv } from "./env";
 import type { McpHandlerFactory, McpToolDefinition, UiSlots } from "./extensions";
-import { APP_PAGE_CSP, escapeHtml, htmlPage } from "./html";
 import { buildOpenApi } from "./openapi";
 import { agentSkillsIndex, legacySkillsIndex, llmsFullTxt, llmsTxt, skillInstance, skillMarkdown, SKILL_NAME } from "./discovery";
 import { homePage, installUi } from "./ui";
+import { claimPage, claimSubmission } from "./ui/signin";
 
 /**
  * App-origin pages: home, /openapi.json, /llms.txt, /health, /claim, /mcp,
@@ -13,10 +13,6 @@ import { homePage, installUi } from "./ui";
  * page with uiSlots.landing and add pages with uiSlots.pages; the MCP server
  * plugs in through createDropway({ mcp }).
  */
-
-function pageHeaders(): Record<string, string> {
-  return { "Content-Security-Policy": APP_PAGE_CSP, "X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin" };
-}
 
 /** /llms.txt lives in ./discovery; re-exported here for compatibility. */
 export { llmsTxt } from "./discovery";
@@ -55,16 +51,8 @@ export function createAppRouter(opts: { app: Hono<DropwayEnv>; uiSlots: UiSlots;
   app.get("/.well-known/skills/:name/SKILL.md", skill);
   app.get("/.well-known/agent-skills/index.json", async (c) => c.json(await agentSkillsIndex(c.get("dw")), 200, { "Cache-Control": "public, max-age=300", "Access-Control-Allow-Origin": "*" }));
   app.get("/.well-known/skills/index.json", (c) => c.json(legacySkillsIndex(c.get("dw").config.instanceName), 200, { "Cache-Control": "public, max-age=300", "Access-Control-Allow-Origin": "*" }));
-  app.get("/claim", (c) => {
-    const slug = c.req.query("slug") ?? "";
-    const o = appOrigin(c.get("dw"));
-    const body = `<main class="dw-system"><div class="dw-code">CLAIM</div><h1>Keep this site</h1>
-<p>Anonymous sites expire. To keep <code>${escapeHtml(slug)}</code>, call the API with an API key of this instance and the claim token (the part of this link after <code>#token=</code>):</p>
-<pre style="white-space:pre-wrap;word-break:break-all;background:var(--code);padding:1rem;border-radius:8px">curl -X POST ${escapeHtml(o)}/api/v1/sites/${escapeHtml(slug)}/claim \\
-  -H "Authorization: Bearer $DROPWAY_API_KEY" -H "Content-Type: application/json" \\
-  -d '{"claimToken":"dwc_..."}'</pre></main>`;
-    return c.html(htmlPage({ title: "Claim a site", body }), 200, pageHeaders());
-  });
+  app.get("/claim", claimPage);
+  app.post("/claim", claimSubmission);
 
   const mcpHandler = opts.mcp?.(opts.mcpTools);
   app.all("/mcp", (c) => {

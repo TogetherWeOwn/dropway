@@ -197,7 +197,7 @@ tables in their own migrations or their own D1 database.
 
 ## Extension points: `createDropway(options)`
 
-`@dropway/server` exports `EXTENSION_API_VERSION = 1` for this public embedding
+`@dropway/server` exports `EXTENSION_API_VERSION = 2` for this public embedding
 contract. Update it and the Extension API section in `CHANGELOG.md` when changing
 the contract. `test/extension-contract.test.ts` exercises every existing extension
 point with fake adapters and real emulated D1/R2/KV bindings; it runs in public CI.
@@ -263,6 +263,29 @@ consumers, scripts, tests). Inside routes, use `c.get("dw")` and
   (`src/publish.ts`, `src/client.ts`) uses only `fetch`, so `test/cli-publish.test.ts` runs it against
   the real Worker inside workerd; `packages/cli/test` covers the rest, end to end against a local Worker.
   A new REST endpoint usually needs no CLI change: `dropway api <METHOD> <path>` reaches it.
+
+## Built-in member sign-in
+
+`services/sessions.ts` owns hashed login links (15 minutes, atomic one-use exchange),
+30-day sliding/revocable sessions, member authorization and the strict browser-write
+header check. `services/email-signin.ts` owns existing-member code challenges (five tries,
+15 minutes, HMAC hashes, no signup). `services/access-identity.ts` verifies RS256 Access
+assertions against configured team JWKS, issuer, audience and time claims before mapping
+an existing unique member email. Explicit bearer credentials always take precedence.
+
+The default identity adapter still ignores cookies on ordinary REST resource routes and
+MCP. Thin `/api/v1/auth/*` browser-auth handlers explicitly resolve the built-in session;
+claim uses `GET /claim` plus `POST /claim`, calling the same core claim service as REST/MCP.
+Cookie writes require exact `Origin` AND `Sec-Fetch-Site: same-origin`, not SameSite alone.
+`/dashboard/sessions` lists/revokes sessions and signs out. The existing resource dashboard
+continues using API keys; no session is converted into a persistent API key. The claim
+script keeps fragment proof in tab storage across sign-in and sends it only in the claim
+POST. No user content runs on these pages. API-key sign-in remains cookie-free.
+
+`adapters.email.send(message, dw)` optionally overrides delivery. Without it, `EMAIL.send`
+(Cloudflare Email Service) delivers; without either, email options are hidden and the
+operations return `feature_unavailable`. `EMAIL_FROM` sets the verified sender. Embedding
+cookie adapters and `uiSlots.session` remain separate and require their own security proof.
 
 ## Conventions
 

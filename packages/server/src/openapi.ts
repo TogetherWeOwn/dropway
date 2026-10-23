@@ -106,6 +106,24 @@ export function buildOpenApi(origin: string, instanceName: string, anonymousPubl
       "/api/v1": {
         get: op("api_index", "API index with links to the docs", { tags: ["agents"], security: false, mcpExclude: "discovery document; use whoami" }),
       },
+      "/api/v1/login-links": {
+        post: op("create_login_link", "Create a one-use member login link (15 minutes)", { tags: ["members"], requestBody: body({ type: "object", properties: { memberId: { type: "string" } } }), responses: { 201: json({ type: "object", properties: { url: { type: "string" }, expiresAt: { type: "number" } } }) }, description: "Bearer-only. A full-role unrestricted key can mint for itself; minting for another member requires member administration and cannot grant greater authority. Treat the returned URL as a secret." }),
+      },
+      "/api/v1/auth/sessions": {
+        get: op("list_sessions", "List your active browser sessions", { tags: ["members"], security: false, mcpExclude: "explicit browser-session endpoint; requires __Host-dw_session, never used as REST resource authority" }),
+      },
+      "/api/v1/auth/sessions/{id}": {
+        delete: op("revoke_session", "Revoke one of your browser sessions", { tags: ["members"], params: [pathParam("id", "An id returned by list_sessions")], security: false, description: "Requires a live session cookie, exact app Origin AND Sec-Fetch-Site: same-origin.", mcpExclude: "browser-session operation" }),
+      },
+      "/api/v1/auth/logout": {
+        post: op("logout_session", "Revoke the current browser session and clear its cookie", { tags: ["members"], security: false, description: "Requires a live session cookie, exact app Origin AND Sec-Fetch-Site: same-origin.", mcpExclude: "browser-session operation" }),
+      },
+      "/api/v1/auth/email-code": {
+        post: op("request_email_code", "Send an existing member a sign-in code", { tags: ["members"], security: false, requestBody: body({ type: "object", required: ["email"], properties: { email: { type: "string" } } }), responses: { 202: json({ type: "object" }) }, description: "Optional EMAIL or EmailAdapter. Uniform response for unknown members, no signup. One challenge per email per 15 minutes; request does not reset the attempt budget.", mcpExclude: "browser sign-in operation" }),
+      },
+      "/api/v1/auth/email-code/verify": {
+        post: op("verify_email_code", "Exchange a delivered code for a browser session", { tags: ["members"], security: false, requestBody: body({ type: "object", required: ["email", "code"], properties: { email: { type: "string" }, code: { type: "string" } } }), description: "One use, 15 minutes, at most five tries. Requires exact app Origin AND Sec-Fetch-Site: same-origin. Sets a Secure, HttpOnly, host-only session cookie.", mcpExclude: "browser sign-in operation" }),
+      },
       "/api/v1/me": {
         get: op("whoami", "Who am I: principal, tenant, member, scopes", { tags: ["keys"], responses: { 200: json(ref("Whoami")) } }),
       },
@@ -325,7 +343,12 @@ export function buildOpenApi(origin: string, instanceName: string, anonymousPubl
       "/health": {
         get: op("health", "Health check", { tags: ["agents"], security: false, responses: { 200: json({ type: "object", properties: { ok: { type: "boolean" }, service: { type: "string" } } }) }, mcpExclude: "monitoring" }),
       },
-      "/claim": { get: op("claim_page", "Claim page for anonymous sites (token in the URL fragment)", { tags: ["agents"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use claim_site" }) },
+      "/claim": {
+        get: op("claim_page", "Claim page for anonymous sites (token in the URL fragment)", { tags: ["agents"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page; use claim_site" }),
+        post: op("claim_page_submit", "Claim with a browser session and anonymous site proof", { tags: ["pages"], security: false, description: "Form fields slug and claimToken. Live session plus exact app Origin AND Sec-Fetch-Site: same-origin required. Never accepts a proof on the page GET.", responses: { 303: { description: "Claimed; redirect to session page" } }, mcpExclude: "browser form; agents use claim_site with a bearer key" }),
+      },
+      "/__dropway/auth.js": { get: op("signin_script", "First-party browser session and claim script", { tags: ["pages"], security: false, responses: { 200: text("JavaScript", "text/javascript") }, mcpExclude: "browser asset" }) },
+      "/dashboard/sessions": { get: op("sessions_page", "Signed-in member sessions and logout", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page" }) },
       "/login": {
         get: op("login_page", "Sign-in page (API key; first-run setup)", { tags: ["pages"], security: false, responses: { 200: text("HTML", "text/html") }, mcpExclude: "browser page" }),
         post: op("login_form_fallback", "Where the sign-in forms post before the page script has loaded: redirects back to /login and ignores the body", { tags: ["pages"], security: false, responses: { 303: { description: "Redirect to /login?retry=1" } }, mcpExclude: "browser page" }),

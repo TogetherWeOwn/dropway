@@ -200,6 +200,11 @@ ${visibleTools.map((t) => `- \`${t.name}\`: ${firstSentence(t.description)}`).jo
 }
 
 const ERROR_CODES: Array<[string, string]> = [
+  ["400 invalid_login_link, invalid_email", "Request a new login link or enter your existing member email."],
+  ["401 invalid_session, invalid_login_link, invalid_email_code, invalid_access_identity", "Sign in again; codes allow five tries in 15 minutes and links are one use. Access must identify an existing member through a valid signed assertion."],
+  ["403 cross_origin_request, insecure_session_origin, restricted_login_key, session_account_mismatch", "Open the HTTPS app directly with exact Origin and same-origin metadata; use a full-role unrestricted key to mint links. Sign out deliberately before switching accounts."],
+  ["404 session_not_found", "Only your own active sessions can be revoked; list them first."],
+  ["503 email_delivery_failed", "Ask for a login link, or try email sign-in again after 15 minutes."],
   ["400 invalid_request, invalid_json, invalid_path, duplicate_path, invalid_sha256, invalid_slug, slug_reserved", "Input problems; details.fields lists every bad field. Fix and resend."],
   ["400 hash_mismatch, size_mismatch", "Uploaded bytes differ from the declared sha256 or size. Re-read the file; do not re-encode it."],
   ["400 confirm_mismatch", "Destructive call without the right confirm value; details.expected names it."],

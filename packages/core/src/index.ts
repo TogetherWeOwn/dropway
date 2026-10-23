@@ -19,6 +19,8 @@ export * from "./lib/filetypes";
 
 export * from "./services/events";
 export * from "./services/identity";
+export * from "./services/sessions";
+export * from "./services/email-signin";
 export * from "./services/keys";
 export * from "./services/tenants";
 export * from "./services/live";
