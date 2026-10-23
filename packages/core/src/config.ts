@@ -3,6 +3,8 @@
  * then overridden by whatever the embedding app passes to createDropway({ config }).
  */
 
+import { QUOTA_KEYS, type QuotaKey, type Quotas } from "./policy";
+
 const MB = 1024 * 1024;
 
 /** Size and count caps applied to a publish. A PolicyAdapter may return different values per caller. */
@@ -77,6 +79,8 @@ export interface DropwayConfig {
   anonymous: AnonymousConfig;
   /** Default caps for API-key publishes. */
   limits: Limits;
+  /** Admin-set resource quotas. null means unlimited, zero refuses new resources. */
+  quotas: Quotas;
   /** Secret that may create the owner (first run) and mint recovery owner keys. */
   adminBootstrapKey: string | null;
   /** HMAC secret for cookies and IP hashing. */
@@ -85,13 +89,14 @@ export interface DropwayConfig {
   liveCacheTtlSeconds: number;
 }
 
-export type ConfigOverrides = Partial<Omit<DropwayConfig, "anonymous" | "limits">> & {
+export type ConfigOverrides = Partial<Omit<DropwayConfig, "anonymous" | "limits" | "quotas">> & {
   anonymous?: Partial<Omit<AnonymousConfig, "limits">> & { limits?: Partial<Limits> };
   limits?: Partial<Limits>;
+  quotas?: Partial<Quotas>;
 };
 
 /** Worker vars and secrets read by resolveConfig. All optional strings. */
-export interface DropwayVars {
+export interface DropwayVars extends Partial<Record<`QUOTA_${Uppercase<QuotaKey>}`, string>> {
   INSTANCE_NAME?: string;
   APP_ORIGIN?: string;
   LEGACY_APP_ORIGINS?: string;
@@ -215,6 +220,12 @@ export function resolveConfig(vars: DropwayVars, overrides: ConfigOverrides = {}
     multiTenant: overrides.multiTenant ?? false,
     anonymous,
     limits,
+    quotas: Object.fromEntries(QUOTA_KEYS.map((key) => {
+      const value = overrides.quotas?.[key] !== undefined ? overrides.quotas[key] : vars[`QUOTA_${key.toUpperCase()}` as keyof DropwayVars];
+      const n = value === null || value === undefined || value === "" ? null : Number(value);
+      if (n !== null && (!Number.isSafeInteger(n) || n < 0)) throw new Error(`Invalid quota ${key}: expected a non-negative integer or null.`);
+      return [key, n];
+    })) as Quotas,
     adminBootstrapKey,
     signingSecret: overrides.signingSecret ?? (vars.SIGNING_SECRET?.trim() || adminBootstrapKey || "dropway-insecure-dev-secret"),
     liveCacheTtlSeconds: Math.max(30, overrides.liveCacheTtlSeconds ?? 30),

@@ -226,13 +226,16 @@ export const HTTP_OPERATIONS = [
     },
     http: {
       statuses: [200, 201],
-      handler: async (c) => {
+      policyId: "publish_site",
+      parseInput: async (c) => {
         const dw = D(c);
         const p = P(c);
         if (p.kind === "anonymous" && !dw.config.anonymous.enabled) throw anonymousDisabled();
         const lim = await dw.adapters.policy.limits(p, { siteId: null, tenantId: p.kind === "member" ? p.tenantId : null }, dw);
-        const input = await parsePublishRequest(dw, c.req.raw, lim.oneShotMaxBytes);
-        const out = await publishFiles(dw, p, input, { client: clientOf(c) });
+        return parsePublishRequest(dw, c.req.raw, lim.oneShotMaxBytes);
+      },
+      handler: async (c, input: Awaited<ReturnType<typeof parsePublishRequest>>) => {
+        const out = await publishFiles(D(c), P(c), input, { client: clientOf(c) });
         return c.json(out, out.created ? 201 : 200);
       },
       contentTypes: ["multipart/form-data", "application/json", "application/zip", "application/octet-stream"],

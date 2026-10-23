@@ -92,7 +92,7 @@ export const VERSION_OPERATIONS = [
     path: "/api/v1/sites/{slug}/versions/{id}",
     summary: "Delete a version",
     toolset: "versions",
-    scopes: ["sites:write"],
+    scopes: ["sites:delete"],
     description:
       "Permanently delete one version that is not live (for example one that leaked a secret). The live version cannot be deleted: restore or publish another first. Set confirm to the site's slug.",
     input: fromSchema({
@@ -108,10 +108,10 @@ export const VERSION_OPERATIONS = [
     output: fromSchema(obj({ deleted: { type: "boolean" }, id: { type: "string" } }, ["deleted", "id"])),
     annotations: DESTROY,
     async handler(a, { dw, principal }) {
-      const site = await getSiteByRef(dw, principal, a.site, "sites:write");
+      const site = await getSiteByRef(dw, principal, a.site, "sites:delete");
       requireConfirm(a.confirm, site.slug);
       const v = await resolveVersionRef(dw, site, a.version);
-      return deleteVersion(dw, site, v.id);
+      return deleteVersion(dw, principal, site, v.id);
     },
     http: {
       input: fromSchema({
@@ -121,8 +121,8 @@ export const VERSION_OPERATIONS = [
       }),
       output: fromSchema({ type: "object" }),
       handler: async (c) => {
-        const site = await getSiteFor(D(c), P(c), c.req.param("slug")!, "sites:write");
-        return c.json(await deleteVersion(D(c), site, c.req.param("id")!));
+        const site = await getSiteFor(D(c), P(c), c.req.param("slug")!, "sites:delete");
+        return c.json(await deleteVersion(D(c), P(c), site, c.req.param("id")!));
       },
     },
     tool: { summarize: (r) => `Deleted version ${r.id}.` },

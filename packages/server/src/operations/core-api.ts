@@ -4,6 +4,7 @@ import {
   claimSite,
   deleteSite,
   describeSite,
+  describePolicy,
   finalizeVersionByRef,
   getMember,
   getSiteByRef,
@@ -44,7 +45,7 @@ export const CORE_API_OPERATIONS = [
     toolset: "core",
     mcp: { alwaysLoad: true },
     description:
-      "Describe this Dropway instance and your credential: who you are (member, role, scopes, single-site restriction), the instance URLs (app, API, MCP, how site URLs look), whether anonymous publishing is on, and the size limits that apply to you. Call it first when unsure what you may do.",
+      "Describe your credential, instance URLs, capabilities (including missing bindings), size limits, resource quotas and current usage. Call first when unsure what you may do.",
     input: fromSchema({
       type: "object",
       properties: {},
@@ -58,22 +59,16 @@ export const CORE_API_OPERATIONS = [
           member: ANY_OR_NULL,
           instance: ANY,
           limits: ANY,
+          capabilities: ANY,
+          usage: ANY,
         },
-        ["principal", "instance", "limits"],
+        ["principal", "instance", "limits", "capabilities", "usage"],
       ),
     ),
     annotations: RO,
     async handler(_args, { dw, principal }) {
       const o = appOrigin(dw);
-      const tenantId = principal.kind === "member" ? principal.tenantId : null;
-      const limits = await dw.adapters.policy.limits(
-        principal,
-        {
-          siteId: principal.kind === "claim" ? principal.siteId : null,
-          tenantId,
-        },
-        dw,
-      );
+      const policy = await describePolicy(dw, principal);
       return {
         principal: whoamiPrincipal(principal),
         tenant: principal.kind === "member" ? serializeTenant(await getTenant(dw, principal.tenantId)) : null,
@@ -92,7 +87,7 @@ export const CORE_API_OPERATIONS = [
           accessModes: ["public", "password"],
           fileSources: ["content", "url", "sha256", "copyFrom"],
         },
-        limits,
+        ...policy,
       };
     },
     scopes: [],
@@ -121,8 +116,10 @@ export const CORE_API_OPERATIONS = [
       handler: async (c) => {
         const p = P(c);
         const dw = D(c);
+        const policy = await describePolicy(dw, p);
         if (p.kind === "member") {
           return c.json({
+            ...policy,
             principal: "member",
             tenant: serializeTenant(await getTenant(dw, p.tenantId)),
             member: serializeMember(await getMember(dw, p.memberId)),
@@ -131,8 +128,9 @@ export const CORE_API_OPERATIONS = [
             siteRestriction: p.siteId,
           });
         }
-        if (p.kind === "claim") return c.json({ principal: "claim_token", siteId: p.siteId });
+        if (p.kind === "claim") return c.json({ ...policy, principal: "claim_token", siteId: p.siteId });
         return c.json({
+          ...policy,
           principal: p.kind,
           anonymousPublish: dw.config.anonymous.enabled,
         });
@@ -173,7 +171,7 @@ export const CORE_API_OPERATIONS = [
     mcp: { alwaysLoad: true },
     scopes: ["sites:write"],
     description:
-      "Publish files to a live URL in one call. Without `site` a new site with a generated name is created; with `site` set to a slug you own, ALL its files are replaced by `files` (a new immutable version); with a new slug, a site of that name is created. Each file needs a path plus one source: content (text, or base64 for small binaries), url (the server downloads a public https URL), sha256+size (bytes already stored or uploaded afterwards), or copyFrom. Returns status (live, unchanged or awaiting_upload), the live `url` to share exactly as returned, the version, and next steps. To change only some files of an existing site use update_site_files instead. Put index.html (or index.md / README.md) at the root so the URL opens a page.",
+      "Publish files to a live URL in one call. Without `site` a new site with a generated name is created; with `site` set to a slug you own, ALL its files are replaced by `files` (a new immutable version); with a new slug, a site of that name is created. Each file needs a path plus one source: content (text, or base64 for small binaries), url (the server downloads a public https URL), sha256+size (bytes already stored or uploaded afterwards), or copyFrom. Returns status (live, unchanged or awaiting_upload), the live `url`, version and next steps. Share `url` exactly as returned. Use update_site_files for partial edits. A root index.html, index.md or README.md opens as the site's page.",
     input: fromSchema({
       type: "object",
       properties: {
@@ -1042,7 +1040,7 @@ export const CORE_API_OPERATIONS = [
     path: "/api/v1/sites/{slug}",
     summary: "Delete a site",
     toolset: "core",
-    scopes: ["sites:write"],
+    scopes: ["sites:delete"],
     description: "Delete a site and all its versions. Its URL stops working at once and the slug becomes free. Set confirm to the site's slug.",
     input: fromSchema({
       type: "object",
@@ -1053,7 +1051,7 @@ export const CORE_API_OPERATIONS = [
     output: fromSchema(obj({ deleted: { type: "boolean" }, slug: { type: "string" } }, ["deleted", "slug"])),
     annotations: DESTROY,
     async handler(a, { dw, principal }) {
-      const site = await getSiteByRef(dw, principal, a.site, "sites:write");
+      const site = await getSiteByRef(dw, principal, a.site, "sites:delete");
       requireConfirm(a.confirm, site.slug);
       return deleteSite(dw, principal, site.slug);
     },

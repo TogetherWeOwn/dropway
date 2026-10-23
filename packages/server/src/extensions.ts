@@ -58,6 +58,8 @@ export interface McpToolDefinition {
   idempotent?: boolean;
   /** Remove secrets from a result before it is stored for idempotent replay. */
   redactForReplay?(result: unknown): unknown;
+  /** Reauthorize a cached result before exposing it; generated registry tools recheck policy here. */
+  beforeReplay?(args: Record<string, unknown>, ctx: McpToolContext): void | Promise<void>;
   /** Only list the tool when this returns true (e.g. a feature switched on in config). */
   enabled?(dw: DropwayContext): boolean;
   /** One plain-English line describing a successful result. */

@@ -187,18 +187,19 @@ single `.zip` goes to `POST /api/v1/publish` instead. `.git/`, `node_modules/`,
 
 - `tenants`: exactly one in this build (created by `POST /api/v1/setup`).
 - `members`: owner / admin / member of a tenant; `external_ref` links an outer identity system.
-- `api_keys`: SHA-256 of the key, `scopes` (`sites:read sites:write keys:write members:write`), optional `site_id` restriction.
+- `api_keys`: SHA-256 of the key, `scopes` (`sites:read sites:write sites:delete keys:write members:write data:write secrets:write admin`), optional `site_id` restriction.
 - `sites`: `tenant_id` NULL = anonymous (then `claim_token_hash`, `expires_at`).
 - `versions`: immutable manifests; `status` pending|ready; `manifest_hash` (identical republish = `unchanged`); `base_version_id` (409 `version_conflict`).
 - `version_files`: path -> sha256, size, content type.
 - `blobs` + `blob_scopes`: bytes exist once in R2; a scope (`t:<tenant>` or `s:<anonymous site>`) skips an upload only for bytes it has proven it holds, so dedupe never reveals another owner's files.
+- `usage_counters`: active owned sites and unique bytes in their ready versions, refreshed in the lifecycle transaction. `recomputeUsage(dc, tenantId)` repairs drift; the midnight cron emits one `storage_snapshot` per tenant. Upload proof is not storage usage: pending manifests are not charged.
 
 Never edit an applied migration; add `000N_*.sql`. Extensions keep their own
 tables in their own migrations or their own D1 database.
 
 ## Extension points: `createDropway(options)`
 
-`@dropway/server` exports `EXTENSION_API_VERSION = 2` for this public embedding
+`@dropway/server` exports `EXTENSION_API_VERSION = 3` for this public embedding
 contract. Update it and the Extension API section in `CHANGELOG.md` when changing
 the contract. `test/extension-contract.test.ts` exercises every existing extension
 point with fake adapters and real emulated D1/R2/KV bindings; it runs in public CI.
@@ -210,7 +211,7 @@ export default createDropway({
   config: { multiTenant: true },               // or (env) => ({ ... }); overrides vars
   adapters: {
     identity,   // resolve(request, dw) -> Principal (sessions, OAuth, tenant selection...)
-    policy,     // limits(principal, owner, dw); beforeCreateSite; beforeDeploy (throw ApiError to refuse)
+    policy,     // limits; capability; quota; beforeOperation; beforeCreateSite; beforeDeploy (with newBytes)
     metering,   // record(UsageEvent, dw), called after the response; default no-op
   },
   hooks: [{ onPublish, onDelete, onRequest }], // after the response; errors are logged only
