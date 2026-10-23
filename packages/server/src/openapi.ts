@@ -1,7 +1,7 @@
 import { createOperationRegistry } from "./operations/registry";
 import { schemaJson, type OperationDefinition } from "./operations";
 import { PAGE_PATHS } from "./page-openapi";
-import { resolveConfig, type DropwayContext } from "@dropway/core";
+import { ApiError, resolveConfig, type DropwayContext } from "@dropway/core";
 
 type Json = Record<string, any>;
 const json = (schema: Json, example: unknown, description = "OK") => ({
@@ -105,14 +105,7 @@ export function buildOpenApi(origin: string, instanceName: string, anonymousOrOp
         [status]: success,
         default: json(
           { $ref: "#/components/schemas/Error" },
-          {
-            error: {
-              code: "invalid_request",
-              message: "Invalid request.",
-              hint: "Correct the input and retry.",
-            },
-            requestId: "request-example",
-          },
+          new ApiError(400, "invalid_request", "Invalid request.", "Correct the input and retry.").toJSON("request-example", origin),
           "Error with a stable code and remediation hint",
         ),
       };

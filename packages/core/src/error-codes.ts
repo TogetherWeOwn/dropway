@@ -93,7 +93,7 @@ export const ERROR_CODES: Readonly<Record<string, ErrorCode>> = {
 /** Shared by the checked-in Markdown generator and the instance's /docs/errors.md. */
 export function errorCatalogMarkdown(): string {
   const rows = Object.entries(ERROR_CODES).sort(([a], [b]) => a.localeCompare(b)).map(([code, entry]) =>
-    `| \`${code}\` | ${entry.status} | ${entry.retryable} | ${entry.hint.replace(/\|/g, "\\|")} |`,
+    `| \`${code}\` | ${entry.status} | ${entry.retryable} | ${entry.hint.replace(/\\/g, "\\\\").replace(/\|/g, "\\|")} |`,
   );
   return [
     "<!-- Generated from packages/core/src/error-codes.ts. Run npm run errors:sync. -->",
