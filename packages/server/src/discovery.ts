@@ -16,8 +16,11 @@ import { buildOpenApi } from "./openapi";
  */
 
 export const SKILL_NAME = "dropway";
-export const SKILL_DESCRIPTION =
-  "Publish files, folders and static sites to a live URL with Dropway, then update, version, roll back and share them. Use when the user wants to publish, host, share, deploy or preview HTML pages, Markdown docs, reports, images, PDFs, demos or a built web app, or to change, check or roll back something already on Dropway.";
+/** Skill description naming the product (the instance name; "Dropway" for the repository copy). */
+export function skillDescription(product: string): string {
+  return `Publish files, folders and static sites to a live URL with ${product}, then update, version, roll back and share them. Use when the user wants to publish, host, share, deploy or preview HTML pages, Markdown docs, reports, images, PDFs, demos or a built web app, or to change, check or roll back something already on ${product}.`;
+}
+export const SKILL_DESCRIPTION = skillDescription("Dropway");
 
 export interface SkillInstance {
   origin: string;
@@ -34,17 +37,20 @@ export function skillMarkdown(instance: SkillInstance | null): string {
 - ${instance.anonymousPublish ? "This instance also accepts publishing without a key: such sites expire after 24 hours and return a claim token." : "This instance requires an API key for every publish."}`
     : `- Instance: \`$DROPWAY_URL\` (the app origin, for example \`https://dropway.<account>.workers.dev\`). API key: \`$DROPWAY_API_KEY\` (starts with \`dw_\`; the instance owner creates keys). If either is missing, ask the user.
 - \`$DROPWAY_URL/skill.md\` serves this skill with the instance's own URLs and settings filled in.`;
+  // The product name people see is the instance's; the skill's name stays "dropway" so installs keep working.
+  // Kept to one plain YAML-safe line, since it also goes into the front matter.
+  const product = (instance ? instance.instanceName.replace(/[\r\n:#"']+/g, " ").trim() : "") || "Dropway";
   return `---
 name: ${SKILL_NAME}
-description: ${SKILL_DESCRIPTION}
+description: ${skillDescription(product)}
 license: MIT
 metadata:
-  homepage: https://github.com/TogetherWeOwn/dropway
+  homepage: ${instance ? instance.origin : "https://github.com/TogetherWeOwn/dropway"}
 ---
 
-# Dropway
+# ${product}
 
-Dropway turns files into a live URL. Every publish is an immutable version you can roll back. People opening a site get the right view for each file (HTML runs as a real page, Markdown is rendered, images, PDFs and code are displayed) and \`?raw=1\` on any file URL returns the raw bytes.
+${product} turns files into a live URL. Every publish is an immutable version you can roll back. People opening a site get the right view for each file (HTML runs as a real page, Markdown is rendered, images, PDFs and code are displayed) and \`?raw=1\` on any file URL returns the raw bytes.
 
 ## Connect
 
@@ -100,7 +106,7 @@ export async function agentSkillsIndex(dw: DropwayContext) {
       {
         name: SKILL_NAME,
         type: "skill-md",
-        description: SKILL_DESCRIPTION,
+        description: skillDescription(dw.config.instanceName),
         url: `${appOrigin(dw)}/.well-known/agent-skills/${SKILL_NAME}/SKILL.md`,
         digest: `sha256:${await sha256Hex(md)}`,
       },
@@ -109,8 +115,8 @@ export async function agentSkillsIndex(dw: DropwayContext) {
 }
 
 /** /.well-known/skills/index.json (legacy v0.1.0 layout: <base>/<name>/SKILL.md). */
-export function legacySkillsIndex() {
-  return { skills: [{ name: SKILL_NAME, description: SKILL_DESCRIPTION, files: ["SKILL.md"] }] };
+export function legacySkillsIndex(product = "Dropway") {
+  return { skills: [{ name: SKILL_NAME, description: skillDescription(product), files: ["SKILL.md"] }] };
 }
 
 // ---------------------------------------------------------------- llms.txt

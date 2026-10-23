@@ -36,6 +36,14 @@ export interface DropwayConfig {
   /** Public origin of the app + API, no trailing slash. null = the origin of each request. */
   appOrigin: string | null;
   /**
+   * Former public origins of the app, for example a workers.dev hostname after a move to a domain.
+   * On these hosts the API, MCP, /health, /.well-known/* and the agent documents keep working and
+   * carry Deprecation + Link headers; other GET/HEAD requests 308 to appOrigin. Needs appOrigin.
+   */
+  legacyAppOrigins: string[];
+  /** Deprecation date of the legacy origins, Unix seconds (header `Deprecation: @<seconds>`). */
+  legacyDeprecatedAt: number;
+  /**
    * subdomain: https://<slug>.<sitesDomain>/ (each site its own origin; recommended).
    * path: <sitesOrigin>/<slug>/ when sitesOrigin is set, else <appOrigin><sitesPathPrefix>/<slug>/ (interim, sandboxed).
    */
@@ -86,6 +94,8 @@ export type ConfigOverrides = Partial<Omit<DropwayConfig, "anonymous" | "limits"
 export interface DropwayVars {
   INSTANCE_NAME?: string;
   APP_ORIGIN?: string;
+  LEGACY_APP_ORIGINS?: string;
+  LEGACY_DEPRECATED_AT?: string;
   SITES_MODE?: string;
   SITES_DOMAIN?: string;
   SITES_ORIGIN?: string;
@@ -125,6 +135,19 @@ export function normaliseOrigin(v: string | undefined | null): string | null {
   }
 }
 
+/** Comma- or space-separated origins, normalised and de-duplicated; invalid entries are dropped. */
+export function normaliseOrigins(v: string | undefined | null): string[] {
+  return [...new Set((v ?? "").split(/[\s,]+/).map(normaliseOrigin).filter((o): o is string => o !== null))];
+}
+
+/** ISO 8601 date or Unix seconds -> Unix seconds (0 when unset or invalid). */
+function unixSeconds(v: string | undefined): number {
+  const s = (v ?? "").trim();
+  if (!s) return 0;
+  const n = /^\d+$/.test(s) ? Number(s) * 1000 : Date.parse(s);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n / 1000) : 0;
+}
+
 function normaliseDomain(v: string | undefined | null): string | null {
   const d = (v ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^\.+|\.+$/g, "");
   return d || null;
@@ -139,6 +162,8 @@ export function resolveConfig(vars: DropwayVars, overrides: ConfigOverrides = {}
     sitesMode = "path";
   }
   const appOrigin = overrides.appOrigin !== undefined ? overrides.appOrigin : normaliseOrigin(vars.APP_ORIGIN);
+  // Legacy app origins only make sense with a fixed APP_ORIGIN to send people and agents to.
+  const legacyAppOrigins = appOrigin ? (overrides.legacyAppOrigins ?? normaliseOrigins(vars.LEGACY_APP_ORIGINS)).filter((o) => o !== appOrigin) : [];
   const sitesOriginVar = overrides.sitesOrigin !== undefined ? overrides.sitesOrigin : normaliseOrigin(vars.SITES_ORIGIN);
   // The effective sites origin. SITES_ORIGIN applies in path mode only: subdomain mode ignores it,
   // so a value left over from path mode must not drop that origin from LEGACY_SITES_ORIGINS below.
@@ -177,6 +202,8 @@ export function resolveConfig(vars: DropwayVars, overrides: ConfigOverrides = {}
   return {
     instanceName: overrides.instanceName ?? (vars.INSTANCE_NAME?.trim() || "Dropway"),
     appOrigin,
+    legacyAppOrigins,
+    legacyDeprecatedAt: overrides.legacyDeprecatedAt ?? unixSeconds(vars.LEGACY_DEPRECATED_AT),
     sitesMode,
     sitesDomain: sitesMode === "subdomain" ? sitesDomain : null,
     sitesOrigin,

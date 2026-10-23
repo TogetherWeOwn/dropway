@@ -146,8 +146,18 @@ function clientName(env: NodeJS.ProcessEnv): string {
   return `dropway-cli/${VERSION}`;
 }
 
+/** Instances already reported as moved, per Io (one note per run). */
+const movedNoted = new WeakMap<Io, Set<string>>();
+
 function makeClient(io: Io, api: string, token: string | null): DropwayClient {
-  return new DropwayClient({ api, token, fetch: io.fetch, client: clientName(io.env) });
+  const onMoved = (to: string) => {
+    const seen = movedNoted.get(io) ?? new Set<string>();
+    movedNoted.set(io, seen);
+    if (seen.has(api)) return;
+    seen.add(api);
+    io.stderr(`Note: ${api} has moved to ${to}. The old address still works for now; make the new one your default with: dropway login --api ${to}\n`);
+  };
+  return new DropwayClient({ api, token, fetch: io.fetch, client: clientName(io.env), onMoved });
 }
 
 function requireKey(inst: Instance, what = "This command"): string {
