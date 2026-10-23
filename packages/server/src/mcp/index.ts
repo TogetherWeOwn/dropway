@@ -14,7 +14,7 @@ import type { DropwayEnv } from "../env";
 import type { McpHandlerFactory, McpToolDefinition } from "../extensions";
 import { IDEMPOTENCY_KEY } from "./schemas";
 import { requireOperationScopes } from "../operations";
-import { Validator, type OutputUnit } from "@cfworker/json-schema";
+import { dereference, validate as validateSchema, type OutputUnit, type Schema, type ValidationResult } from "@cfworker/json-schema";
 
 /**
  * Remote MCP server at /mcp: Streamable HTTP, stateless, built with createMcpHandler
@@ -45,7 +45,9 @@ export interface McpEndpointOptions {
 type CompiledTool = {
   def: McpToolDefinition;
   input: ReturnType<typeof fromJsonSchema>;
-  validate: Validator;
+  validate: (value: unknown) => ValidationResult;
+  schema: Schema;
+  lookup: ReturnType<typeof dereference>;
   output: ReturnType<typeof fromJsonSchema> | undefined;
 };
 
@@ -84,27 +86,80 @@ function compile(tools: readonly McpToolDefinition[]): CompiledTool[] {
     const dialect = typeof schema.$schema === "string" ? schema.$schema.replace(/#$/, "") : "";
     const draft = /\/draft-0[67]\/schema$/.test(dialect) ? "7" : dialect.endsWith("/2019-09/schema") ? "2019-09" : "2020-12";
     const wireInput = { "~standard": { ...input["~standard"], validate: (value: unknown) => ({ value }) } };
-    return { def, input: wireInput, validate: new Validator(schema, draft, false), output: def.outputSchema ? fromJsonSchema(def.outputSchema) : undefined };
+    const lookup = dereference(schema);
+    return {
+      def, input: wireInput, schema, lookup,
+      validate: (value) => validateSchema(value, schema, draft, lookup, false),
+      output: def.outputSchema ? fromJsonSchema(def.outputSchema) : undefined,
+    };
   });
 }
 
-function validationFields(errors: OutputUnit[]): Array<{ path: string; message: string }> {
-  const fields = errors.map((issue) => {
-    const path = decodeURI(issue.instanceLocation).slice(1).split("/").slice(1).map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
-    // The pinned engine locates missing properties at their containing object;
-    // only its diagnostic names the missing key (including quotes in key names).
-    const missing = issue.keyword === "required"
-      ? /^Instance does not have required property "(.*)"\.$/s.exec(issue.error)
-      : issue.keyword === "dependentRequired" || issue.keyword === "dependencies" ? /^Instance has ".*" but does not have "(.*)"\.$/s.exec(issue.error) : null;
-    if (missing) path.push(missing[1]!);
-    return { path: path.join("."), message: issue.error, keyword: issue.keyword };
+function pointerSegments(location: string): string[] {
+  return location === "#" ? [] : decodeURI(location).slice(2).split("/").map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
+}
+
+function ownValue(value: unknown, key: string): unknown {
+  return value !== null && typeof value === "object" && Object.hasOwn(value, key) ? (value as Record<string, unknown>)[key] : undefined;
+}
+
+/** Follow the engine's evaluation path, including references, to the failed keyword. */
+function schemaKeyword(schema: Schema, lookup: ReturnType<typeof dereference>, issue: OutputUnit): unknown {
+  const path = pointerSegments(issue.keywordLocation);
+  // cfworker 4.1.1 spells dependentRequired's location "dependantRequired".
+  path[path.length - 1] = issue.keyword;
+  let current: unknown = schema;
+  let anchor: unknown;
+  for (const part of path) {
+    const isSchema = typeof ownValue(current, "__absolute_uri__") === "string";
+    if (isSchema && ownValue(current, "$recursiveAnchor") === true && anchor === undefined) anchor = current;
+    if (isSchema && part === "$ref") current = lookup[ownValue(current, "__absolute_ref__") as string];
+    else if (isSchema && part === "$recursiveRef") current = anchor ?? lookup[ownValue(current, "__absolute_recursive_ref__") as string];
+    else current = ownValue(current, part);
+  }
+  return current;
+}
+
+function fieldPath(path: string[]): string {
+  return path.map((part, i) => /^(?:[A-Za-z_$][\w$]*|0|[1-9]\d*)$/.test(part) ? `${i ? "." : ""}${part}` : `[${JSON.stringify(part)}]`).join("");
+}
+
+function validationFields(errors: OutputUnit[], schema: Schema, lookup: ReturnType<typeof dereference>, value: unknown): Array<{ path: string; message: string }> {
+  const collected = new Set<string>();
+  const fields = errors.flatMap((issue) => {
+    const path = pointerSegments(issue.instanceLocation);
+    const field = { path, message: issue.error, keyword: issue.keyword };
+    if (!["required", "dependentRequired", "dependencies"].includes(issue.keyword)) return [field];
+    const instance = path.reduce<unknown>((current, part) => ownValue(current, part), value);
+    if (!instance || typeof instance !== "object") return [field];
+    const key = JSON.stringify([issue.instanceLocation, issue.keywordLocation]);
+    if (collected.has(key)) return [];
+    collected.add(key);
+    // Missing-key names come from the schema and input, never diagnostic prose:
+    // both trigger and missing names may themselves contain quotes/delimiters.
+    const constraint = schemaKeyword(schema, lookup, issue);
+    const missing: typeof field[] = [];
+    if (issue.keyword === "required" && Array.isArray(constraint)) {
+      for (const name of constraint as string[]) {
+        if (!(name in instance)) missing.push({ ...field, path: [...path, name], message: `Instance does not have required property "${name}".` });
+      }
+    } else if (constraint && typeof constraint === "object") {
+      for (const [trigger, names] of Object.entries(constraint)) {
+        if (!(trigger in instance) || !Array.isArray(names)) continue;
+        for (const name of names as string[]) {
+          if (!(name in instance)) missing.push({ ...field, path: [...path, name], message: `Instance has "${trigger}" but does not have "${name}".` });
+        }
+      }
+    }
+    return missing.length ? missing : [field];
   });
-  const wrappers = new Set(["properties", "additionalProperties", "items", "prefixItems", "dependentSchemas"]);
+  const wrappers = new Set(["properties", "additionalProperties", "items", "prefixItems", "dependentSchemas", "dependencies", "$ref", "$recursiveRef"]);
   const result = new Map<string, { path: string; message: string }>();
   for (const field of fields) {
-    if (wrappers.has(field.keyword) && fields.some((other) => other.path !== field.path && (!field.path || other.path.startsWith(`${field.path}.`)))) continue;
-    // Prefer the first specific failure over follow-on unevaluated-property noise.
-    if (!result.has(field.path)) result.set(field.path, { path: field.path, message: field.message });
+    if (wrappers.has(field.keyword) && fields.some((other) => other.path.length > field.path.length && field.path.every((part, i) => part === other.path[i]))) continue;
+    // Deduplicate by segments, not a lossy rendering of literal separators.
+    const key = JSON.stringify(field.path);
+    if (!result.has(key)) result.set(key, { path: fieldPath(field.path), message: field.message });
   }
   return [...result.values()];
 }
@@ -161,7 +216,7 @@ function buildServer(compiled: CompiledTool[], ctx: { dw: DropwayContext; princi
     { name: options.name ?? "dropway", title: dw.config.instanceName, version: MCP_SERVER_VERSION, websiteUrl: appOrigin(dw) },
     { instructions: (options.instructions ?? mcpInstructions)(dw) },
   );
-  for (const { def, input, validate, output } of compiled) {
+  for (const { def, input, validate, schema, lookup, output } of compiled) {
     server.registerTool(
       def.name,
       {
@@ -175,10 +230,10 @@ function buildServer(compiled: CompiledTool[], ctx: { dw: DropwayContext; princi
       async (rawArgs: unknown) => {
         try {
           scopeCheck(principal, def);
-          const parsed = validate.validate(rawArgs ?? {});
+          const parsed = validate(rawArgs ?? {});
           if (!parsed.valid) {
             throw new ApiError(400, "invalid_request", `Invalid input for ${def.name}.`, "Correct the listed fields and retry.", {
-              fields: validationFields(parsed.errors),
+              fields: validationFields(parsed.errors, schema, lookup, rawArgs ?? {}),
             });
           }
           const args = { ...((rawArgs ?? {}) as Record<string, unknown>) };

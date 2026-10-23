@@ -69,22 +69,26 @@ export function validateManifest(files: unknown, lim: Limits): { entries: Normal
       invalid(badRequest("invalid_manifest", "Each file must be an object with path, size and sha256."), field);
       return;
     }
-    let path = String(f.path ?? "");
+    let path = "";
     try {
+      path = String(f.path ?? "");
       path = normaliseFilePath(path);
       if (seen.has(path)) invalid(badRequest("duplicate_path", `The path "${path}" appears more than once.`), `${field}.path`);
       seen.add(path);
     } catch (error) {
-      if (!(error instanceof ApiError)) throw error;
-      invalid(error, `${field}.path`);
+      invalid(error instanceof ApiError ? error : badRequest("invalid_path", "File path must be a string."), `${field}.path`);
     }
-    const size = Number(f.size);
+    // JSON objects can shadow toString/valueOf. A failed coercion is still a
+    // client field error, and must not discard errors collected from siblings.
+    let size = NaN;
+    try { size = Number(f.size); } catch { /* validated below */ }
     if (!Number.isInteger(size) || size < 0) {
       invalid(badRequest("invalid_size", `size for "${path}" must be a non-negative integer (bytes).`), `${field}.size`);
     } else if (size > lim.maxFileBytes) {
       invalid(tooLarge("file_too_large", `"${path}" is ${size} bytes; the per-file limit is ${lim.maxFileBytes}.`, "Compress or split the file.", { path, size, limit: lim.maxFileBytes }), `${field}.size`);
     }
-    const sha256 = String(f.sha256 ?? "").toLowerCase();
+    let sha256 = "";
+    try { sha256 = String(f.sha256 ?? "").toLowerCase(); } catch { /* validated below */ }
     if (!SHA256_RE.test(sha256)) invalid(badRequest("invalid_sha256", `sha256 for "${path}" must be 64 hex characters.`, "Compute it with `sha256sum <file>` or `shasum -a 256 <file>`."), `${field}.sha256`);
     if (f.contentType != null && typeof f.contentType !== "string") {
       invalid(badRequest("invalid_manifest", `contentType for "${path}" must be a string or null.`, "Send a MIME type string, null, or omit contentType to infer it from the path."), `${field}.contentType`);

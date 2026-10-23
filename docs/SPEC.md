@@ -1091,7 +1091,10 @@ are sampled, not written one by one. Reads use the SQL API when the operator set
 
 R-03 adds `retryable`, `retryAfterSeconds`, `docs` and `next` while preserving the existing fields.
 Manifest and operation-schema validation collect bad fields in `details.fields`; source validation
-also uses this collection. Legacy semantic service validators retain their stable error codes.
+also uses this collection. MCP field paths use dots for identifier/numeric segments and JSON-quoted
+brackets for other property names: literal `a.b` is `["a.b"]`, distinct from nested `a.b`;
+`items.0["x/y"]` identifies a literal slash in a key. Missing required/dependency keys use the
+same notation. Legacy semantic service validators retain their stable error codes.
 Version conflicts include `liveVersionId`, `liveVersionNumber`, `liveVersionClient` and
 `liveVersionAt` (publication time in epoch milliseconds). HTTP 429/503 always send `Retry-After`,
 matching the envelope delay (one second when omitted). `/docs/errors` and `/docs/errors.md` are
