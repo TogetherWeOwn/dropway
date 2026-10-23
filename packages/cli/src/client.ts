@@ -100,15 +100,14 @@ export interface ClientOptions {
   /** Longest Retry-After we are willing to sleep, in seconds. Default 30. */
   maxRetryAfterSeconds?: number;
   /**
-   * Called once when the instance answers with a Deprecation header and a
-   * `Link: <...>; rel="successor-version"` on another origin (it moved; the old origin still works).
+   * Called once when the instance answers with a `Link: <...>; rel="successor-version"` on another
+   * origin (it moved; the old origin still works). A `Deprecation` header is optional.
    */
   onMoved?: (newOrigin: string) => void;
 }
 
 /** The successor origin named by a deprecated response, or null. */
 export function movedTo(res: Response, current: string): string | null {
-  if (!res.headers.has("deprecation")) return null;
   const m = /<([^>]+)>\s*;\s*rel="?successor-version"?/i.exec(res.headers.get("link") ?? "");
   if (!m) return null;
   let url: URL;

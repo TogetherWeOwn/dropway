@@ -128,6 +128,14 @@ describe("legacy app origin: agents keep working, pages move", () => {
     expect(other.headers.get("deprecation")).toBeNull();
   });
 
+  it("omits Deprecation when LEGACY_DEPRECATED_AT is unset, but keeps the successor Link", async () => {
+    const undated = await freshInstance({ appOrigin: NEW, legacyAppOrigins: [ORIGIN], instanceName: "Kofra" });
+    const me = await undated.call("/api/v1/me", { key: undated.ownerKey });
+    expect(me.status).toBe(200);
+    expect(me.headers.get("deprecation")).toBeNull();
+    expect(me.headers.get("link")).toContain(`<${NEW}/api/v1/me>; rel="successor-version"`);
+  });
+
   it("does nothing without APP_ORIGIN", async () => {
     const plain = await freshInstance({ legacyAppOrigins: [ORIGIN] });
     expect(plain.dropway.context({} as never, { waitUntil() {} }).config.legacyAppOrigins).toEqual([]);

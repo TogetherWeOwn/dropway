@@ -54,11 +54,12 @@ describe("client helpers", () => {
     expect(html.retryable).toBe(true);
   });
 
-  it("notices an instance that moved (Deprecation + Link rel=successor-version) once, and keeps using it", async () => {
+  it("notices an instance that moved (Link rel=successor-version, Deprecation optional) once, and keeps using it", async () => {
     const moved = { Deprecation: "@1792713600", Link: '<https://kofra.test/api/v1/me>; rel="successor-version"', "Content-Type": "application/json" };
     expect(movedTo(new Response("{}", { headers: moved }), "https://old.test")).toBe("https://kofra.test");
     expect(movedTo(new Response("{}", { headers: moved }), "https://kofra.test")).toBeNull();
-    expect(movedTo(new Response("{}", { headers: { Link: moved.Link } }), "https://old.test")).toBeNull();
+    // Link alone is enough (an instance moved without LEGACY_DEPRECATED_AT sends no Deprecation header).
+    expect(movedTo(new Response("{}", { headers: { Link: moved.Link } }), "https://old.test")).toBe("https://kofra.test");
     expect(movedTo(new Response("{}", { headers: { ...moved, Link: '<https://kofra.test/x>; rel="describedby"' } }), "https://old.test")).toBeNull();
     expect(movedTo(new Response("{}", { headers: { ...moved, Link: '<javascript:alert(1)>; rel="successor-version"' } }), "https://old.test")).toBeNull();
 

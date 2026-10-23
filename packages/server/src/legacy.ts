@@ -44,10 +44,10 @@ export function legacyAppRedirect(req: Request, url: URL, successor: string): Re
   return new Response(null, { status: 308, headers: { Location: successor, "Cache-Control": "no-store" } });
 }
 
-/** Copy of `res` with the deprecation headers (RFC 9745) and the successor URL. */
+/** Copy of `res` with the successor URL, plus `Deprecation` (RFC 9745) when LEGACY_DEPRECATED_AT is set. */
 export function withDeprecationHeaders(res: Response, dw: DropwayContext, successor: string): Response {
   const out = new Response(res.body, res);
-  out.headers.set("Deprecation", `@${dw.config.legacyDeprecatedAt}`);
+  if (dw.config.legacyDeprecatedAt > 0) out.headers.set("Deprecation", `@${dw.config.legacyDeprecatedAt}`);
   out.headers.append("Link", `<${successor}>; rel="successor-version"`);
   if (out.headers.has("Access-Control-Allow-Origin")) {
     const expose = out.headers.get("Access-Control-Expose-Headers");
