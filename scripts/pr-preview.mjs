@@ -1,7 +1,7 @@
 /** Composite action adapter. The CLI owns publishing; this file only coordinates PRs. */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFile, mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -73,13 +73,38 @@ async function preview() {
     for (let page = 1; page <= 100; page++) {
       const comments = await github("GET", `${commentsPath}?per_page=100&page=${page}`);
       if (!Array.isArray(comments)) fail("GitHub returned an invalid comment list.");
+      // The marker is public text: bind it to the supported bot identity so a
+      // copied marker from another bot (or a human) can never be edited here.
       const found = comments.find((comment) => comment.user?.type === "Bot" &&
+        comment.user?.login === "github-actions[bot]" &&
         typeof comment.body === "string" && comment.body.startsWith(marker) &&
         Number.isSafeInteger(comment.id) && comment.id > 0);
       if (found) return found.id;
       if (comments.length < 100) return null;
     }
     fail("Comment search exceeded 10,000 comments; no duplicate comment was created.");
+  }
+
+  // The publisher follows file symlinks, so a link could upload bytes from
+  // outside the workspace. Previews refuse them outright: directory and broken
+  // links stay allowed because the publisher already skips them.
+  async function rejectFileSymlinks(root) {
+    const pending = [""];
+    while (pending.length) {
+      const relDir = pending.pop();
+      const dirents = await readdir(join(root, relDir), { withFileTypes: true });
+      for (const d of dirents) {
+        const rel = relDir ? `${relDir}/${d.name}` : d.name;
+        if (d.isSymbolicLink()) {
+          const target = await stat(join(root, rel)).catch(() => null);
+          if (target?.isFile()) {
+            fail(`folder contains a symlinked file (${rel}); replace it with a copy or remove it. Previews never publish symlinks.`);
+          }
+          continue;
+        }
+        if (d.isDirectory()) pending.push(rel);
+      }
+    }
   }
 
   let folder;
@@ -91,6 +116,7 @@ async function preview() {
     if (isAbsolute(path) || path === ".." || path.startsWith(`..${sep}`) || !(await stat(folder)).isDirectory()) {
       fail("folder must be a directory within the caller workspace.");
     }
+    await rejectFileSymlinks(folder);
   }
 
   // Keep caller dropway.json, saved credentials and other CI credentials out of the CLI.
@@ -107,15 +133,44 @@ async function preview() {
       return { code: 0, data: JSON.parse(result.stdout) };
     } catch (error) {
       // stdout/stderr may contain tokens, content, or terminal workflow commands.
-      if (Number.isInteger(error.code)) return { code: error.code };
+      // Keep only the stable snake_case error code; never print the bodies.
+      if (Number.isInteger(error.code)) {
+        let errorCode;
+        try {
+          const parsed = JSON.parse(error.stdout ?? "");
+          if (parsed?.ok === false && typeof parsed.error?.code === "string") errorCode = parsed.error.code;
+        } catch {
+          // Non-JSON failure output carries no verified code; callers fail closed.
+        }
+        return { code: error.code, errorCode };
+      }
       fail("Dropway CLI could not complete. Check the instance, folder and runtime.");
     }
   }
 
   try {
     if (event.action === "closed") {
+      // A bare "not found" exit is not proof of absence: a key without
+      // sites:read, a wrong instance, or a proxy 404 all exit 4 while the
+      // preview stays public. Verify the key first, then only tolerate a
+      // verified Dropway site_not_found, and confirm successful deletions.
+      const identity = await cli(["whoami"]);
+      if (identity.code !== 0) fail(`Dropway cleanup failed: the preview key was rejected (CLI exit ${identity.code}). Check the key and instance.`);
+      const scopes = identity.data?.scopes;
+      if (identity.data?.principal !== "member" || !Array.isArray(scopes) ||
+          !scopes.includes("sites:read") || !scopes.includes("sites:write") ||
+          identity.data?.siteRestriction) {
+        fail("Dropway cleanup failed: the preview key needs unrestricted sites:read and sites:write. Check the key and instance.");
+      }
       const result = await cli(["delete", slug, "--yes"]);
-      if (result.code !== 0 && result.code !== 4) fail(`Dropway cleanup failed (CLI exit ${result.code}); only a missing site is ignored.`);
+      if (result.code === 4 && result.errorCode === "site_not_found") {
+        console.log("Dropway preview removed (or already absent).");
+        return;
+      }
+      if (result.code !== 0) fail(`Dropway cleanup failed (CLI exit ${result.code}); only a verified missing site is ignored.`);
+      if (result.data?.deleted !== true || result.data?.slug !== slug) {
+        fail("Dropway cleanup failed: the instance did not confirm deletion. Check the instance.");
+      }
       console.log("Dropway preview removed (or already absent).");
       return;
     }

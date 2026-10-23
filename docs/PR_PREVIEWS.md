@@ -11,10 +11,13 @@ zero-runtime-dependency CLI source from the same reviewed action revision.
 - A Linux runner with Bash and **Node 22.18+ with native TypeScript enabled**.
   `actions/setup-node` with Node 24 is recommended. The packaged CLI itself still
   supports Node 20; this source-based action has the newer runtime requirement.
-- An existing Dropway instance and an API key with `sites:read` and `sites:write`
-  access. Use a **dedicated preview member/account**, not an administrative or
-  production key. Preview files and URLs are public; never put credentials or
-  private data in the build output. The CLI's normal secret-file checks apply.
+- An existing Dropway instance and an API key with **unrestricted** `sites:read`
+  and `sites:write` access. Use a **dedicated preview member/account**, not an
+  administrative or production key. Cleanup verifies both scopes first and
+  refuses site-restricted keys, since a restricted key cannot prove the preview
+  is really gone. Preview files and URLs are public; never put credentials or
+  private data in the build output. The CLI's normal secret-file checks apply,
+  and symlinked files are refused outright: replace them with copies.
 - `contents: read` to check out the project and `pull-requests: write` for the
   job's `GITHUB_TOKEN`. Repository/organization policy must allow that permission.
   The default GitHub Actions bot token is the supported comment identity.
@@ -97,12 +100,17 @@ pushes reuse that name; different repositories and PRs do not share it. Reserve
 this namespace for the action. Renaming/transferring a repository or changing
 instances changes the identity; remove any old previews separately with the CLI.
 
-The action paginates up to 10,000 comments to locate its marked bot comment and
-edits it rather than appending on each push. Human comments are untouched. Close
-removes only the calculated preview, without needing a checkout of the PR branch
-or a build folder. Repeated close succeeds if the site is already absent; other
-errors, including invalid keys, still fail. The original URL comment remains as
-a record; the deleted preview URL no longer serves the files.
+The action paginates up to 10,000 comments to locate its marked comment and
+edits it rather than appending on each push. Only a marked comment authored by
+`github-actions[bot]` is ever edited; a copied marker from another bot or a
+human is left alone (a custom `github-token` that comments as someone else gets
+a new comment per run instead of an update). Close removes only the calculated
+preview, without needing a checkout of the PR branch or a build folder.
+Repeated close succeeds if the site is already absent, but only a verified
+missing site is ignored: the key's scopes are checked first, unexpected
+instance answers stay failures, and the instance must confirm deletion. The
+original URL comment remains as a record; the deleted preview URL no longer
+serves the files.
 
 ## Failures, verification and rollback
 
@@ -120,7 +128,10 @@ a record; the deleted preview URL no longer serves the files.
   composite Bash step, real CLI and local Worker (HTML/binary read-back), with a
   local GitHub comment API. It covers stable identities, pagination, update,
   cleanup/repeated cleanup, unsafe events, missing keys and credential-safe
-  failures. This is not proof of a real GitHub workflow's permissions or a live
+  failures, plus symlink/outside-folder refusal, unsafe instance URLs,
+  insufficient-scope and foreign-origin cleanup failures, bot-identity comment
+  matching, and parent-environment isolation of the CLI child. This is not proof
+  of a real GitHub workflow's permissions or a live
   instance deployment; validate those in a non-production preview account.
 - Roll back by pinning the previous reviewed action commit or removing the
   consumer workflow. To remove a leftover preview, use `dropway delete <slug>

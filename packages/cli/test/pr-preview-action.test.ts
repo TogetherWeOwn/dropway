@@ -8,7 +8,8 @@
  * No registry install, real GitHub call, privileged PR checkout, or deployment.
  */
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -128,7 +129,7 @@ async function sites() {
   return (await response.json() as any).sites.map((site: any) => site.slug).sort();
 }
 
-async function preview(options: { repository?: string; number?: number; action?: string; eventName?: string; fork?: boolean; folder?: boolean; content?: string; inputs?: Record<string, string> } = {}) {
+async function preview(options: { repository?: string; number?: number; action?: string; eventName?: string; fork?: boolean; folder?: boolean; content?: string; inputs?: Record<string, string>; setup?: (cwd: string) => Promise<void>; env?: Record<string, string> } = {}) {
   const repository = options.repository ?? "sample/docs";
   const number = options.number ?? ++serial + 100;
   const temp = await mkdtemp(join(work, "run-"));
@@ -139,6 +140,7 @@ async function preview(options: { repository?: string; number?: number; action?:
     await writeFile(join(cwd, "build output/index.html"), options.content ?? html);
     await writeFile(join(cwd, "build output/assets/data.bin"), binary);
   }
+  if (options.setup) await options.setup(cwd);
   const repo = { id: repository === "sample/docs" ? 1001 : 2002, full_name: repository, fork: false };
   const event = {
     action: options.action ?? "opened", number, repository: repo,
@@ -157,6 +159,7 @@ async function preview(options: { repository?: string; number?: number; action?:
       GITHUB_TOKEN: options.inputs?.["github-token"] ?? githubToken, GITHUB_API_URL: githubApi,
       TEST_NODE: process.execPath, TEST_CLI: cliBundle, TEST_ALLOWED_ORIGINS: `${api},${githubApi}`,
       NODE_OPTIONS: `--import=${fetchGuard}`, DROPWAY_CONFIG_DIR: join(temp, "config"), CI: "true",
+      ...options.env,
     },
   });
   const visible = result.logs + JSON.stringify(result.outputs) + JSON.stringify([...comments.values()]);
@@ -168,6 +171,11 @@ function published(result: Awaited<ReturnType<typeof preview>>) {
   expect(result.code, "publish must succeed").toBe(0);
   expect(result.outputs.slug).toMatch(/^[a-z0-9][a-z0-9-]*$/);
   expect(result.outputs.url).toBe(`${api}/s/${result.outputs.slug}/`);
+}
+
+/** The documented preview identity: pr-<sha256(repository)[:20]>-<PR number>. */
+function previewSlug(repository: string, number: number) {
+  return `pr-${createHash("sha256").update(repository.toLowerCase()).digest("hex").slice(0, 20)}-${number}`;
 }
 
 // Controls prove the real CLI and local runner work even before action.yml exists.
@@ -255,20 +263,24 @@ describe("composite PR preview acceptance", () => {
     expect(await sites()).toEqual(before.filter((slug: string) => slug !== first.outputs.slug));
   });
 
-  it.each(["token", "github-token"])("missing %s never publishes or comments", async (name) => {
+  it.each(["token", "github-token", "api"])("missing %s fails without publishing or commenting", async (name) => {
     const before = await sites();
     const count = mutations.length;
-    await preview({ inputs: { [name]: "" } });
+    const result = await preview({ inputs: { [name]: "" } });
+    expect(result.code, "missing credentials must fail, not silently succeed").not.toBe(0);
+    expect(result.outputs.url ?? "").toBe("");
+    expect(result.outputs.slug ?? "").toBe("");
     expect(await sites()).toEqual(before);
     expect(mutations).toHaveLength(count);
   });
 
   it.each([
     { fork: true }, { eventName: "pull_request_target" }, { eventName: "workflow_run" }, { action: "edited" },
-  ])("untrusted or unsupported context %j has no side effects", async (context) => {
+  ])("untrusted or unsupported context %j skips successfully with no side effects", async (context) => {
     const before = await sites();
     const count = mutations.length;
-    await preview(context);
+    const result = await preview(context);
+    expect(result.code, "unsupported context must skip successfully").toBe(0);
     expect(await sites()).toEqual(before);
     expect(mutations).toHaveLength(count);
   });
@@ -292,5 +304,127 @@ describe("composite PR preview acceptance", () => {
       expect(result.code).not.toBe(0);
       expect(comments.has("sample/docs#207")).toBe(false);
     } finally { githubFailure = false; }
+  });
+
+  it("refuses a build containing a file symlink, so outside bytes are never published", async () => {
+    const before = await sites();
+    const count = mutations.length;
+    const result = await preview({
+      number: 208,
+      setup: async (cwd) => {
+        const secret = join(dirname(cwd), "private-ci-settings.json");
+        await writeFile(secret, JSON.stringify({ environment: "staging", replicas: 2 }));
+        await symlink(secret, join(cwd, "build output/assets/linked.json"));
+      },
+    });
+    expect(result.code).not.toBe(0);
+    expect(await sites()).toEqual(before);
+    expect(mutations).toHaveLength(count);
+    const slug = previewSlug("sample/docs", 208);
+    expect((await fetch(`${api}/s/${slug}/assets/linked.json?raw=1`)).status).toBe(404);
+  });
+
+  it("refuses an existing folder outside the workspace", async () => {
+    const before = await sites();
+    const count = mutations.length;
+    const result = await preview({
+      number: 209, folder: false, inputs: { folder: "../outside" },
+      setup: async (cwd) => {
+        await mkdir(join(dirname(cwd), "outside"), { recursive: true });
+        await writeFile(join(dirname(cwd), "outside/index.html"), html);
+      },
+    });
+    expect(result.code).not.toBe(0);
+    expect(await sites()).toEqual(before);
+    expect(mutations).toHaveLength(count);
+  });
+
+  it("refuses a folder that is a symlink to outside the workspace", async () => {
+    const before = await sites();
+    const count = mutations.length;
+    const result = await preview({
+      number: 210, folder: false, inputs: { folder: "linked" },
+      setup: async (cwd) => {
+        await mkdir(join(dirname(cwd), "outside"), { recursive: true });
+        await writeFile(join(dirname(cwd), "outside/index.html"), html);
+        await symlink(join(dirname(cwd), "outside"), join(cwd, "linked"));
+      },
+    });
+    expect(result.code).not.toBe(0);
+    expect(await sites()).toEqual(before);
+    expect(mutations).toHaveLength(count);
+  });
+
+  it.each([
+    ["credential-bearing", (origin: string) => origin.replace("://", "://user:pass@")],
+    ["whitespace", (origin: string) => `${origin} `],
+    ["non-origin path", (origin: string) => `${origin}/api/v1`],
+  ])("refuses a %s api URL without side effects", async (_label, mutate) => {
+    const before = await sites();
+    const count = mutations.length;
+    const result = await preview({ number: 211, inputs: { api: mutate(api) } });
+    expect(result.code).not.toBe(0);
+    expect(await sites()).toEqual(before);
+    expect(mutations).toHaveLength(count);
+  });
+
+  it("does not leak parent-only env or preloads into the CLI child", async () => {
+    const dir = join(work, "sentinel");
+    await mkdir(dir, { recursive: true });
+    const marker = join(dir, "child-marker.txt");
+    await rm(marker, { force: true });
+    const recorder = join(dir, "recorder.mjs");
+    await writeFile(recorder, `import { appendFileSync } from "node:fs";
+if (process.env.DROPWAY_API_KEY && process.env.DW_PARENT_ONLY) appendFileSync(${JSON.stringify(marker)}, "leaked\\n");
+`);
+    const result = await preview({ number: 212, env: { NODE_OPTIONS: `--import=${recorder}`, DW_PARENT_ONLY: "1" } });
+    published(result);
+    await expect(readFile(marker, "utf8")).rejects.toThrow();
+  });
+
+  it("cleanup with a key missing sites:read fails while the preview stays live", async () => {
+    const first = await preview({ number: 213 });
+    published(first);
+    const created = await fetch(`${api}/api/v1/keys`, {
+      method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "write-only-cleanup", scopes: ["sites:write"] }),
+    });
+    expect(created.status).toBe(201);
+    const writeOnly = (await created.json() as any).key;
+    expect(typeof writeOnly).toBe("string");
+    const closed = await preview({ number: 213, action: "closed", folder: false, inputs: { token: writeOnly } });
+    expect(closed.code).not.toBe(0);
+    expect(await (await fetch(`${first.outputs.url}?raw=1`)).text()).toBe(html);
+  });
+
+  it("cleanup against a non-Dropway origin fails instead of reporting success", async () => {
+    const before = await sites();
+    // The fake GitHub API stands in for a foreign origin: authenticated requests
+    // get plain 404s with no Dropway error envelope, which must never read as
+    // "already absent".
+    const result = await preview({ number: 214, action: "closed", folder: false, inputs: { api: githubApi, token: githubToken } });
+    expect(result.code).not.toBe(0);
+    expect(await sites()).toEqual(before);
+  });
+
+  it("updates only its own bot comment when others reuse the marker", async () => {
+    const first = await preview({ number: 215 });
+    published(first);
+    const target = "sample/docs#215";
+    const genuine = comments.get(target)![0]!;
+    const marker = genuine.body.split("\n")[0]!;
+    const foreign = { id: 99001, body: `${marker}\nUnrelated automation`, user: { login: "unrelated-app[bot]", type: "Bot" } };
+    const human = { id: 99002, body: `${marker}\nCopied marker`, user: { login: "person", type: "User" } };
+    comments.set(target, [foreign, human, { ...genuine, body: genuine.body.replace(first.outputs.url!, "https://stale.example.test/") }]);
+    const start = mutations.length;
+    const update = await preview({ number: 215, action: "synchronize" });
+    published(update);
+    const patches = mutations.slice(start).filter((entry) => entry.method === "PATCH");
+    expect(patches).toHaveLength(1);
+    expect(patches[0]!.path).toBe(`/repos/sample/docs/issues/comments/${genuine.id}`);
+    const list = comments.get(target)!;
+    expect(list.find((comment) => comment.id === genuine.id)!.body).toContain(update.outputs.url!);
+    expect(list.find((comment) => comment.id === 99001)!.body).toBe(foreign.body);
+    expect(list.find((comment) => comment.id === 99002)!.body).toBe(human.body);
   });
 });
