@@ -14,7 +14,9 @@
 //   brand    no visible former product name, no "scanned/virus/verified" claims outside user content
 //   status   the HTTP status the screen expects
 //   tokens   (G8) color-scheme and theme-color metas match the mode; no old-palette colour in the HTML or CSS
-//   fontload (G9) font responses carry the section-4 headers; layout shift while loading <= 0.02
+//   fontload (G9) font responses carry the section-4 headers; layout shift <= 0.02 on a separate, uncached load
+//            of the same address with the app's API held (so only the page, its CSS and its fonts can move
+//            it), counted until the fonts are ready + 300 ms
 //   motion   (G11) reduced motion: no transitions on buttons and the switch, no skeleton animation, no smooth scroll
 //   flash    (G7) explicit modes: the HTML already carries data-theme, and every frame painted until load has
 //            the mode's paper behind it (sampled each animation frame from the first one)
@@ -924,12 +926,69 @@ async function pixelDiff(browser, a, b) {
   }
 }
 
+/**
+ * G9 layout shift, measured on its own load: a fresh context (nothing cached, so the fonts really arrive
+ * after the first paint) in which the app's API never answers, so the only things that can move the page
+ * are the page itself, its CSS and its fonts. All shifts until the fonts are ready (+300 ms) count.
+ */
+async function fontShift(browser, mf, fx, sc, contextOptions, url, explicit) {
+  const context = await browser.newContext(contextOptions);
+  try {
+    await context.route("**/*", async (route) => {
+      const req = route.request();
+      const u = req.url();
+      if (!/^https:\/\/([a-z0-9-]+\.)?kofra(-sites)?\.test\//.test(u)) return route.abort();
+      if (u.startsWith(`${APP}/api/`)) return; // held: no data, so no data-driven shifts
+      const body = req.postDataBuffer();
+      const res = await mf.dispatchFetch(u, { method: req.method(), headers: await req.allHeaders(), body: body && req.method() !== "GET" && req.method() !== "HEAD" ? body : undefined, redirect: "manual" });
+      const headers = {};
+      res.headers.forEach((v, k) => {
+        headers[k] = v;
+      });
+      const location = res.headers.get("location");
+      if (location && res.status >= 300 && res.status < 400 && req.isNavigationRequest()) {
+        const to = new URL(location, u).href.replace(/[&"<>]/g, (c) => ({ "&": "&amp;", '"': "&quot;", "<": "&lt;", ">": "&gt;" })[c]);
+        return route.fulfill({ status: 200, headers: { "content-type": "text/html; charset=utf-8" }, body: `<!doctype html><meta http-equiv="refresh" content="0;url=${to}">` });
+      }
+      await route.fulfill({ status: res.status, headers, body: Buffer.from(await res.arrayBuffer()) });
+    });
+    if (explicit && sc.origin === "app") await context.addCookies([{ name: "__Host-dw_theme", value: explicit, url: `${APP}/`, secure: true, sameSite: "Lax" }]);
+    await context.addInitScript(({ key, auth }) => {
+      if (auth && location.hostname === "kofra.test") sessionStorage.setItem("dropway.key", key);
+      if (window.top !== window) return;
+      window.__g9 = [];
+      try {
+        new PerformanceObserver((l) => {
+          for (const e of l.getEntries()) {
+            if (e.hadRecentInput) continue;
+            const n = (e.sources ?? [])[0]?.node;
+            const name = n ? (n.nodeType === 1 ? n.tagName.toLowerCase() + (typeof n.className === "string" && n.className ? `.${n.className.trim().split(/\s+/).join(".")}` : "") : "#text") : "?";
+            const src = (e.sources ?? [])[0];
+            const rect = (r) => (r ? `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}` : "");
+            window.__g9.push([e.startTime, e.value, `${name} ${rect(src?.previousRect)} -> ${rect(src?.currentRect)}`]);
+          }
+        }).observe({ type: "layout-shift", buffered: true });
+      } catch {}
+    }, { key: fx.owner, auth: !!sc.auth });
+    const page = await context.newPage();
+    await page.goto(url, { waitUntil: "load", timeout: 30000 });
+    await page.evaluate(() => document.fonts.ready);
+    await page.waitForTimeout(300);
+    const shifts = await page.evaluate(() => window.__g9 ?? []);
+    const cls = Math.round(shifts.reduce((a, [, v]) => a + v, 0) * 1000) / 1000;
+    return { cls, shifts: shifts.slice(0, 5).map(([t, v, n]) => `${Math.round(v * 1000) / 1000} ${n} @${Math.round(t)}ms`) };
+  } finally {
+    await context.close();
+  }
+}
+
 async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
   const explicit = mode === "light" || mode === "dark" ? mode : null;
   const os = explicit ? (explicit === "dark" ? "light" : "dark") : mode.replace("auto-", "");
   const expected = explicit ?? os;
   const pass = opts.pass ?? "matrix";
-  const context = await browser.newContext({ ...VIEWPORTS[width], colorScheme: os, timezoneId: "Europe/London", locale: "en-GB", ignoreHTTPSErrors: true, reducedMotion: "reduce", forcedColors: pass === "forced" ? "active" : "none" });
+  const contextOptions = { ...VIEWPORTS[width], colorScheme: os, timezoneId: "Europe/London", locale: "en-GB", ignoreHTTPSErrors: true, reducedMotion: "reduce", forcedColors: pass === "forced" ? "active" : "none" };
+  const context = await browser.newContext(contextOptions);
   const failed = [];
   const consoleMsgs = [];
   const fontHeaders = [];
@@ -1037,7 +1096,13 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
         .catch(() => {});
     }
     if (sc.act) await sc.act(page, state);
-    await page.evaluate(() => document.fonts.ready);
+    // Every face the page declares and uses is in before the capture (a face still in its block period
+    // would leave text blank in the screenshot), then two frames for the swap to paint.
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+      await Promise.all([...document.fonts].filter((f) => f.status === "loading").map((f) => f.loaded.catch(() => {})));
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    });
     await page.waitForTimeout(sc.frame ? 900 : 200);
   } catch (e) {
     consoleMsgs.push(`harness: ${e.message.split("\n")[0]}`);
@@ -1106,6 +1171,7 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
   // G4 runs last: it moves focus and scrolls.
   const walk = sc.userPage || pass === "reflow" ? null : await focusWalk(page).catch((e) => ({ error: String(e).slice(0, 200), stops: [] }));
   await context.close();
+  const g9 = sc.userPage ? { cls: 0, shifts: [] } : await fontShift(browser, mf, fx, sc, contextOptions, url, explicit).catch((e) => ({ cls: 1, shifts: [`harness: ${String(e).slice(0, 160)}`] }));
   if (sc.after) {
     const api = async (path, init = {}) => {
       const res = await mf.dispatchFetch(`${APP}/api/v1${path}`, { ...init, headers: { Authorization: `Bearer ${fx.owner}`, ...(init.headers ?? {}) } });
@@ -1156,7 +1222,9 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
     brand: { pass: userContent || !BANNED.test(probe.text), detail: (probe.text.match(BANNED) ?? [])[0] ?? null },
     status: { pass: !sc.status || status === sc.status, detail: status },
     tokens: { pass: sc.userPage || (metasOk && oldHex.length === 0), detail: { colorScheme: probe.colorScheme, themeColors: probe.themeColors, oldHex } },
-    fontload: { pass: badFont.length === 0 && probe.cls <= 0.02, detail: { cls: probe.cls, clsAfterLoad: probe.clsAfterLoad, shifts: probe.shifts, fonts: fontHeaders.length, bad: badFont.slice(0, 3) } },
+    // G9: the shift measured on a load with the API held (fonts and CSS only); the cell's own load is
+    // reported too (pageLoad), including what the dashboard does once its data arrives.
+    fontload: { pass: badFont.length === 0 && g9.cls <= 0.02, detail: { cls: g9.cls, shifts: g9.shifts, pageLoad: { cls: probe.cls, clsAfterLoad: probe.clsAfterLoad, shifts: probe.shifts }, fonts: fontHeaders.length, bad: badFont.slice(0, 3) } },
     motion: { pass: sc.userPage || (probe.motion.buttons.length === 0 && probe.motion.skel.length === 0 && probe.motion.scroll === "auto"), detail: probe.motion },
   };
   if (explicit && !sc.userPage && !sc.staticTheme && !forced) {

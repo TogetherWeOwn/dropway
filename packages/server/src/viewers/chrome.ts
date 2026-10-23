@@ -106,7 +106,7 @@ export function viewerBar(vc: ViewerContext, tabs: ViewerTab[], extra = ""): str
   const type = vc.file.contentType.split(";")[0]!;
   const origin = appOrigin(vc.dw);
   return `<header class="k-vbar">
-<div class="k-vfile"><a class="k-wm" href="${escapeHtml(origin)}" rel="nofollow">${escapeHtml(vc.dw.config.instanceName)}</a><span class="k-chip k-accent">${escapeHtml(kind)}</span><nav class="k-crumbs" aria-label="Path">${crumbs(vc)}</nav><span class="k-vmeta">${formatBytes(vc.file.size)} · ${escapeHtml(type)}</span><span class="k-sum k-mini k-hide-sm">${fileSeal(vc.file.path, vc.file.sha256)}<span><code title="SHA-256 ${escapeHtml(vc.file.sha256)}">${escapeHtml(vc.file.sha256.slice(0, 12))}…</code></span></span></div>
+<div class="k-vfile"><a class="k-wm" href="${escapeHtml(origin)}" rel="nofollow">${escapeHtml(vc.dw.config.instanceName)}</a><span class="k-chip k-accent">${escapeHtml(kind)}</span><nav class="k-crumbs" aria-label="Path" title="${escapeHtml(vc.file.path)}">${crumbs(vc)}</nav><span class="k-vmeta">${formatBytes(vc.file.size)} · ${escapeHtml(type)}</span><span class="k-sum k-mini k-hide-sm">${fileSeal(vc.file.path, vc.file.sha256)}<span><code title="SHA-256 ${escapeHtml(vc.file.sha256)}">${escapeHtml(vc.file.sha256.slice(0, 12))}…</code></span></span></div>
 <nav class="k-seg" aria-label="View">${tabs
     .map((t) => `<a href="${escapeHtml(t.raw ? t.href : withTheme(vc, t.href))}"${t.current ? ' aria-current="page"' : ""} rel="nofollow">${escapeHtml(t.label)}</a>`)
     .join("")}</nav>

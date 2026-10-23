@@ -1828,15 +1828,18 @@ export function dropwayClient(motifsFactory) {
     });
 
     var mode = new URLSearchParams(location.search).get("mode") || "view";
-    renderTools(current, mode);
     if (!authed()) {
+      renderTools(current, mode);
       clear(tree);
       add(tree, h("div", { class: "k-vside-h" }, h("p", { class: "k-small", text: "Sign in to browse every file of this site." }), h("a", { class: "k-btn k-sm", href: signInHref(location.pathname + location.search), text: "Sign in" })));
       return;
     }
+    // Signed in: the server-drawn toolbar stays until the file list arrives, and is then drawn once with
+    // everything it shows (kind, size, seal, copy buttons), so it changes height at most once.
     try {
       manifest = await api("/sites/" + encodeURIComponent(slug) + "/files");
     } catch (e) {
+      renderTools(current, mode);
       clear(tree);
       add(tree, h("div", { class: "k-vside-h" }, errorBox(e, "Could not list files")));
       return;

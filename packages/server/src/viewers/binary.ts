@@ -89,14 +89,14 @@ export const binaryViewer: Viewer = {
     const body = `<main class="k-listing">
 <div class="k-empty"><h1 class="k-binh">${escapeHtml(vc.file.path.split("/").pop() ?? vc.file.path)}</h1><p>No preview for this type yet. Download it to open it with an app you trust.</p><a class="k-btn" href="${escapeHtml(vc.downloadUrl)}" rel="nofollow" download>Download</a></div>
 <div class="k-table-wrap k-bintable"><table class="k-table">${rows
-      .map(([k, v]) => `<tr><th scope="row">${escapeHtml(k)}</th><td class="${k === "SHA-256" ? "k-mono k-break" : "k-break"}">${escapeHtml(v)}</td></tr>`)
+      .map(([k, v]) => `<tr><th scope="row">${escapeHtml(k)}</th><td class="k-break">${k === "SHA-256" ? `<code class="k-sha">${escapeHtml(v)}</code>` : escapeHtml(v)}</td></tr>`)
       .join("")}</table></div>
 <h2 class="k-binh2">First ${Math.min(256, head.byteLength)} bytes</h2>
 <pre class="k-hex" tabindex="0" aria-label="First bytes, hexadecimal">${escapeHtml(hexDump(head.subarray(0, 256)))}</pre></main>`;
     return viewerPage(vc, {
       tabs: standardTabs(vc, { rendered: "Info", raw: false }),
       body,
-      css: ".k-binh{font-size:clamp(24px,3vw,32px);margin:0 0 10px;overflow-wrap:anywhere}.k-bintable{margin-top:24px}.k-bintable th{width:8rem}.k-break{overflow-wrap:anywhere;word-break:break-all}.k-binh2{font:500 10.5px/1.3 var(--mono);letter-spacing:.11em;text-transform:uppercase;color:var(--accent-2);margin:32px 0 8px}.k-hex{margin:0;padding:16px 18px;background:var(--paper-3);border:1px solid var(--rule-soft);overflow:auto;font-size:12.5px;line-height:1.6;color:var(--ink)}",
+      css: ".k-binh{font-size:clamp(24px,3vw,32px);margin:0 0 10px;overflow-wrap:anywhere}.k-bintable{margin-top:24px}.k-bintable th{width:8rem}.k-break{overflow-wrap:anywhere;word-break:break-all}.k-listing>.k-empty p{max-width:30em;margin-left:auto;margin-right:auto}.k-sha{display:inline-block;width:16ch;max-width:100%;font:inherit;font-family:var(--mono);background:none;padding:0;word-break:break-all}.k-binh2{font:500 10.5px/1.3 var(--mono);letter-spacing:.11em;text-transform:uppercase;color:var(--accent-2);margin:32px 0 8px}.k-hex{margin:0;padding:16px 18px;background:var(--paper-3);border:1px solid var(--rule-soft);overflow:auto;font-size:12.5px;line-height:1.6;color:var(--ink)}",
     });
   },
 };
