@@ -397,6 +397,51 @@ if (process.env.KOFRA_API_KEY && process.env.DW_PARENT_ONLY) appendFileSync(${JS
     expect(await (await fetch(`${first.outputs.url}?raw=1`)).text()).toBe(html);
   });
 
+  it("cleanup with a neighbor-site-restricted key refuses instead of reporting success", async () => {
+    const previewBytes = "<h1>Preview B must remain live</h1>";
+    const neighborBytes = "<h1>Neighbor A must remain live</h1>";
+    const first = await preview({ number: 216, content: previewBytes });
+    const neighbor = await preview({ number: 217, content: neighborBytes });
+    published(first); published(neighbor);
+    expect(first.outputs.slug).not.toBe(neighbor.outputs.slug);
+    const created = await fetch(`${api}/api/v1/keys`, {
+      method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "restricted-cleanup", scopes: ["sites:read", "sites:write"], site: neighbor.outputs.slug }),
+    });
+    expect(created.status).toBe(201);
+    const restricted = (await created.json() as any).key;
+    expect(typeof restricted).toBe("string");
+    expect(/^dw_[A-Za-z0-9_-]{43}$/.test(restricted), "fixture must return a valid key without printing it").toBe(true);
+    const identity = await promisify(execFile)(process.execPath, [cliBundle, "whoami", "--json"], {
+      env: { PATH: process.env.PATH, KOFRA_API: api, KOFRA_API_KEY: restricted, KOFRA_CONFIG_DIR: join(work, "restricted-cleanup-config") },
+    });
+    expect((identity.stdout + identity.stderr).includes(restricted), "whoami must not print the restricted key").toBe(false);
+    const whoami = JSON.parse(identity.stdout);
+    expect(whoami.signedIn).toBe(true);
+    expect(whoami.scopes).toEqual(["sites:read", "sites:write"]);
+    expect(typeof whoami.siteRestriction).toBe("string");
+    expect(Boolean(whoami.siteRestriction), "fixture identity must have a non-null site restriction").toBe(true);
+    const before = await sites();
+    expect(before).toEqual(expect.arrayContaining([first.outputs.slug, neighbor.outputs.slug]));
+    const count = mutations.length;
+    const beforeComments = structuredClone([...comments.entries()]);
+    const closed = await preview({ number: 216, action: "closed", folder: false, inputs: { token: restricted } });
+    const visible = closed.logs + JSON.stringify(closed.outputs) + JSON.stringify([...comments.values()]) + JSON.stringify(mutations);
+    expect(visible.includes(restricted), "restricted key must not appear in logs, outputs, summaries, or comments").toBe(false);
+    expect(closed.code, "site-restricted cleanup must fail, not claim another preview was deleted").not.toBe(0);
+    expect(closed.outputs.url ?? "").toBe("");
+    expect(closed.outputs.slug ?? "").toBe("");
+    expect(await sites()).toEqual(before);
+    const previewResponse = await fetch(`${first.outputs.url}?raw=1`);
+    expect(previewResponse.status).toBe(200);
+    expect(await previewResponse.text()).toBe(previewBytes);
+    const neighborResponse = await fetch(`${neighbor.outputs.url}?raw=1`);
+    expect(neighborResponse.status).toBe(200);
+    expect(await neighborResponse.text()).toBe(neighborBytes);
+    expect(mutations).toHaveLength(count);
+    expect([...comments.entries()]).toEqual(beforeComments);
+  });
+
   it("cleanup against a non-Kofra origin fails instead of reporting success", async () => {
     const before = await sites();
     // The fake GitHub API stands in for a foreign origin: authenticated requests
