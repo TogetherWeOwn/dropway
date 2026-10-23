@@ -1,9 +1,9 @@
 import type { DropwayContext } from "../context";
-import { unauthorized } from "../errors";
+import { ApiError, unauthorized } from "../errors";
 import type { Principal } from "../principal";
 import { memberPrincipal } from "./sessions";
 import type { MemberRow } from "./tenants";
-import { accessVerificationKey } from "./access-jwks";
+import { AccessKeyCacheBusyError, accessVerificationKey } from "./access-jwks";
 
 function bytes(value: string): Uint8Array {
   if (!/^[A-Za-z0-9_-]+$/.test(value)) throw new Error("Invalid base64url");
@@ -43,5 +43,10 @@ export async function resolveAccessIdentity(dc: DropwayContext, token: string, i
       .bind(payload.email.trim().toLowerCase()).all<MemberRow>();
     if (results.length !== 1) throw denied();
     return memberPrincipal(results[0]!, ip, "access");
-  } catch { throw denied(); }
+  } catch (error) {
+    if (error instanceof AccessKeyCacheBusyError) {
+      throw new ApiError(503, "access_key_cache_busy", "The Access verification-key cache is temporarily busy.", "Retry shortly; if this persists, check the server's Access issuer capacity.");
+    }
+    throw denied();
+  }
 }

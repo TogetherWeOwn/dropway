@@ -11,12 +11,14 @@ const REFRESH_MS = 30_000;
 // bounded slots as successes; arbitrary token kids never allocate cache entries.
 const issuers = new Map<string, IssuerState>();
 
+export class AccessKeyCacheBusyError extends Error {}
+
 function issuerState(issuer: string): IssuerState {
   let state = issuers.get(issuer);
   if (!state) {
     if (issuers.size >= MAX_ISSUERS) {
       const idle = [...issuers].find(([, entry]) => !entry.pending && Date.now() >= entry.refreshAt);
-      if (!idle) throw new Error("Access key cache is busy");
+      if (!idle) throw new AccessKeyCacheBusyError("Access key cache is busy");
       issuers.delete(idle[0]);
     }
     state = { refreshAt: 0 };
@@ -78,10 +80,8 @@ export async function accessVerificationKey(issuer: string, kid: string): Promis
       state.refreshAt = startedAt + REFRESH_MS;
       state.pending = (async () => {
         const keys = await fetchKeys(issuer);
-        // Import the requested key before committing a refresh. Other admitted
-        // keys import lazily, once each; unknown kids allocate nothing.
-        const requested = keys.get(kid);
-        if (requested) await importKey(requested);
+        // Commit the complete fetched set before individual imports so one bad
+        // key cannot discard valid siblings or retain removed keys on rotation.
         state.keyset = { keys, expiresAt: startedAt + TRUST_MS };
       })().finally(() => { state.pending = undefined; });
     }
