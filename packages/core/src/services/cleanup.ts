@@ -12,10 +12,16 @@ export interface CleanupReport {
   purgedSites: number;
   abandonedDeploys: number;
   deletedBlobs: number;
+  expiredSessions: number;
+  expiredLoginLinks: number;
+  expiredEmailCodes: number;
+  /** Eligible rows remaining after this invocation, not merely a full batch. */
+  authBacklog: { sessions: boolean; loginLinks: boolean; emailCodes: boolean };
 }
 
 /**
  * Hourly housekeeping (Worker cron):
+ * 0. purge expired auth rows (at most 200 per table, oldest expiry first);
  * 1. expire anonymous sites past expires_at (soft delete, slug freed);
  * 2. purge rows of sites deleted more than an hour ago;
  * 3. drop pending deploys older than a day;
@@ -23,8 +29,38 @@ export interface CleanupReport {
  * Each step is bounded so one run stays well inside Worker limits.
  */
 export async function runCleanup(dc: DropwayContext, now = Date.now()): Promise<CleanupReport> {
-  const report: CleanupReport = { expiredSites: 0, purgedSites: 0, abandonedDeploys: 0, deletedBlobs: 0 };
+  const report: CleanupReport = {
+    expiredSites: 0, purgedSites: 0, abandonedDeploys: 0, deletedBlobs: 0,
+    expiredSessions: 0, expiredLoginLinks: 0, expiredEmailCodes: 0,
+    authBacklog: { sessions: false, loginLinks: false, emailCodes: false },
+  };
   const db = dc.env.DB;
+
+  // Auth runs first so unrelated storage failures cannot starve metadata expiry.
+  // Expiry alone determines eligibility: used/revoked/exhausted live rows still
+  // carry security budgets. Select and recheck in one statement, never a stale ID list.
+  const [sessions, links, codes] = await db.batch([
+    db.prepare(`DELETE FROM sessions WHERE expires_at <= ? AND id_hash IN (
+      SELECT id_hash FROM sessions WHERE expires_at <= ? ORDER BY expires_at, id_hash LIMIT 200
+    )`).bind(now, now),
+    db.prepare(`DELETE FROM login_links WHERE expires_at <= ? AND token_hash IN (
+      SELECT token_hash FROM login_links WHERE expires_at <= ? ORDER BY expires_at, token_hash LIMIT 200
+    )`).bind(now, now),
+    db.prepare(`DELETE FROM email_codes WHERE expires_at <= ? AND id IN (
+      SELECT id FROM email_codes WHERE expires_at <= ? ORDER BY expires_at, id LIMIT 200
+    )`).bind(now, now),
+  ]);
+  report.expiredSessions = sessions!.meta.changes;
+  report.expiredLoginLinks = links!.meta.changes;
+  report.expiredEmailCodes = codes!.meta.changes;
+  const backlog = await db.prepare(`SELECT
+    EXISTS (SELECT 1 FROM sessions WHERE expires_at <= ?) AS sessions,
+    EXISTS (SELECT 1 FROM login_links WHERE expires_at <= ?) AS loginLinks,
+    EXISTS (SELECT 1 FROM email_codes WHERE expires_at <= ?) AS emailCodes
+  `).bind(now, now, now).first<{ sessions: number; loginLinks: number; emailCodes: number }>();
+  report.authBacklog = {
+    sessions: !!backlog!.sessions, loginLinks: !!backlog!.loginLinks, emailCodes: !!backlog!.emailCodes,
+  };
 
   // 1. Expire anonymous sites.
   const { results: expired } = await db
@@ -91,7 +127,8 @@ export async function runCleanup(dc: DropwayContext, now = Date.now()): Promise<
       report.deletedBlobs++;
     }
   }
-  if (report.expiredSites || report.purgedSites || report.abandonedDeploys || report.deletedBlobs) {
+  if (report.expiredSites || report.purgedSites || report.abandonedDeploys || report.deletedBlobs ||
+      report.expiredSessions || report.expiredLoginLinks || report.expiredEmailCodes || Object.values(report.authBacklog).some(Boolean)) {
     console.log(JSON.stringify({ event: "cleanup", ...report }));
   }
   return report;

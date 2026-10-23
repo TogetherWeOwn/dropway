@@ -99,6 +99,52 @@ return `feature_unavailable`. Delivery uses the current
 not an HTTP API credential or an implicit signup flow. Both enabled email-code operations
 require exact app Origin and same-origin Fetch Metadata, including cookieless requests.
 
+### Authentication metadata retention
+
+Expiry removes authority immediately; it does **not** itself remove stored rows.
+The existing hourly cleanup purges `sessions`, `login_links` and `email_codes` only
+when their stored `expires_at` is at or before the cleanup clock, with no additional
+grace period. Used links, revoked sessions and used/exhausted codes stay stored until
+expiry so cleanup cannot reset live proof, resend or attempt windows. Both email-code
+purposes follow this rule. Guarded session renewal moves the effective expiry forward;
+it does not make `members.last_seen_at` an activity feed. That member field remains
+unpopulated and must not be advertised as member activity tracking.
+
+The retention target is the **first successful hourly cleanup after expiry**: up to
+one extra hour without backlog or outage. Thus a session that is never renewed has
+a target of 30 days plus one hour from issuance, and a 15-minute link/code has a
+target of 75 minutes from creation. Code resends preserve the original expiry.
+Renewed sessions have no fixed issuance-age ceiling; their target follows the latest
+guarded effective expiry. These are operational targets, not unconditional storage
+deadlines or promises about provider backups.
+
+Each invocation deletes at most **200 rows per auth table (600 total)**, ordered by
+expiry then primary key using the additive `0005_auth_retention.sql` indexes. Each
+delete selects and rechecks expiry atomically. There is no unbounded catch-up loop.
+The default hourly schedule therefore services at most 200 expired rows per table
+per hour; a larger backlog needs multiple successful invocations and continuing
+arrivals can prevent it from draining. A cron outage or D1 failure extends retention;
+D1 errors propagate instead of returning a successful cleanup report. Auth retention
+runs first so an unrelated storage failure cannot starve it; an auth D1 failure
+therefore aborts that invocation before site/blob cleanup. A later step may fail
+after the auth batch commits. The full report/log is emitted only if all steps
+complete, so a failed invocation does not imply that no rows were deleted.
+
+`CleanupReport` and the `cleanup` log event include `expiredSessions`,
+`expiredLoginLinks`, `expiredEmailCodes` and `authBacklog` booleans (`sessions`,
+`loginLinks`, `emailCodes`). Backlog means eligible rows actually remain after this
+invocation, not merely that it deleted a full batch. Reporting includes only counts
+and booleans, never row identifiers, email addresses, member/device/IP metadata or
+proofs. A backlog or missed/failed run means the one-hour target is not established;
+check successful scheduled executions as well as these reports. Quiet runs with no
+work do not emit a `cleanup` event.
+
+**Activation remains gated.** Before public production sign-in activation, require
+fresh security/privacy disposition for the exact release head, successful scheduled
+cleanup evidence at the expected volume, and no overdue auth backlog. This change
+alone does not lift an existing activation hold or authorize a production backfill,
+live-data deletion, production test/migration, or provider/secret/host change.
+
 Optional Cloudflare Access: configure **both** `ACCESS_TEAM_DOMAIN` (team hostname or
 HTTPS team origin, such as `example.cloudflareaccess.com`) and `ACCESS_AUD` (application
 audience). The default identity verifies RS256 signatures using that team's fixed JWKS
