@@ -99,12 +99,18 @@ export function cacheControlFor(path: string, live: LiveSite): string {
   return fingerprinted ? "public, max-age=31536000, immutable" : "public, max-age=0, must-revalidate";
 }
 
-/** Headers on every response for user content. */
+/**
+ * Headers on every response for user content. Public sites are readable from anywhere (CORS *,
+ * CORP cross-origin). Password-protected sites are not: no CORS, and CORP same-origin unless the
+ * site is sandboxed (an opaque-origin page would then be refused its own images and scripts).
+ */
 export function securityHeaders(h: Headers, live: LiveSite | null, mode: ServeMode) {
+  const gated = !!live?.passwordHash;
   h.set("X-Content-Type-Options", "nosniff");
   h.set("Referrer-Policy", "strict-origin-when-cross-origin");
   h.set("Strict-Transport-Security", "max-age=31536000");
-  h.set("Access-Control-Allow-Origin", "*");
+  if (gated) h.delete("Access-Control-Allow-Origin");
+  else h.set("Access-Control-Allow-Origin", "*");
   h.set("X-Robots-Tag", live?.expiresAt ? "noindex" : "all");
   if (live) {
     h.set("X-Dropway-Site", live.slug);
@@ -114,7 +120,7 @@ export function securityHeaders(h: Headers, live: LiveSite | null, mode: ServeMo
       h.set("Cross-Origin-Embedder-Policy", "require-corp");
       h.set("Cross-Origin-Resource-Policy", "same-origin");
     } else {
-      h.set("Cross-Origin-Resource-Policy", "cross-origin");
+      h.set("Cross-Origin-Resource-Policy", gated && !mode.sandbox ? "same-origin" : "cross-origin");
     }
   }
   if (mode.sandbox) {
@@ -149,7 +155,14 @@ async function passwordCookieValue(dw: DropwayContext, live: LiveSite): Promise<
   return (await hmacHex(dw.config.signingSecret, `${live.siteId}:${live.passwordHash}`)).slice(0, 40);
 }
 
-const cookieName = (live: LiveSite) => `dw_pw_${live.slug.replace(/[^a-z0-9]/g, "_")}`;
+/**
+ * Gate cookie names. Subdomain mode uses the __Host- prefix (Path=/, no Domain), so a sibling
+ * <x>.<SITES_DOMAIN> cannot set or overwrite it. `embedded` is the CHIPS (Partitioned) cookie set
+ * when the password is entered inside a frame, which only the app may host (the dashboard file
+ * viewer on another site): it lives in that top-level site's partition only.
+ */
+const cookieName = (live: LiveSite, mode: ServeMode, embedded = false) =>
+  `${mode.kind === "subdomain" ? "__Host-" : ""}dw_pw${embedded ? "e" : ""}_${live.slug.replace(/[^a-z0-9]/g, "_")}`;
 
 function readCookie(req: Request, name: string): string | null {
   const raw = req.headers.get("cookie");
@@ -164,7 +177,7 @@ function readCookie(req: Request, name: string): string | null {
 async function handlePassword(dw: DropwayContext, req: Request, live: LiveSite, mode: ServeMode, filePath: string): Promise<Response | null> {
   if (!live.passwordHash) return null;
   const expected = await passwordCookieValue(dw, live);
-  if (readCookie(req, cookieName(live)) === expected) return null;
+  if (readCookie(req, cookieName(live, mode)) === expected || readCookie(req, cookieName(live, mode, true)) === expected) return null;
 
   if (req.method === "POST" && filePath === PASSWORD_PATH) {
     const form = await req.formData().catch(() => null);
@@ -173,9 +186,18 @@ async function handlePassword(dw: DropwayContext, req: Request, live: LiveSite, 
     const safeNext = next.startsWith(mode.base) && !next.startsWith("//") ? next : mode.base;
     if (typeof password === "string" && (await verifyPassword(password, live.passwordHash))) {
       const h = new Headers({ Location: safeNext, "Cache-Control": "no-store" });
-      // Sandboxed pages have an opaque origin, so their sub-resource requests count as cross-site.
-      const sameSite = mode.sandbox ? "None" : "Lax";
-      h.append("Set-Cookie", `${cookieName(live)}=${expected}; Path=${mode.base}; Max-Age=604800; HttpOnly; Secure; SameSite=${sameSite}`);
+      const dest = req.headers.get("sec-fetch-dest");
+      const attrs = `Path=${mode.base}; Max-Age=604800; HttpOnly; Secure`;
+      if (mode.sandbox) {
+        // Sandboxed pages have an opaque origin, so their sub-resource requests count as cross-site.
+        h.append("Set-Cookie", `${cookieName(live, mode)}=${expected}; ${attrs}; SameSite=None`);
+      } else if (dest === "iframe" || dest === "frame") {
+        // Entered in the app's file viewer, a cross-site frame once sites have their own domain:
+        // a Lax cookie would not be sent there, so use a cookie partitioned to that top-level site.
+        h.append("Set-Cookie", `${cookieName(live, mode, true)}=${expected}; ${attrs}; SameSite=None; Partitioned`);
+      } else {
+        h.append("Set-Cookie", `${cookieName(live, mode)}=${expected}; ${attrs}; SameSite=Lax`);
+      }
       return new Response(null, { status: 303, headers: h });
     }
     return passwordForm(dw, req, live, mode, safeNext, true);
@@ -191,6 +213,8 @@ function passwordForm(dw: DropwayContext, req: Request, live: LiveSite, mode: Se
 <button style="padding:.6rem 1rem;border:0;border-radius:8px;background:var(--accent);color:#fff;cursor:pointer">Open</button></form>
 ${failed ? '<p style="color:var(--accent)">That password is not right.</p>' : ""}`;
   const r = systemResponse(dw, req, mode, live, 401, "PASSWORD", "This site is password protected", "Enter the password to view it.", extra);
+  // Only the app (its file viewer) may frame the form; X-Frame-Options covers browsers without CSP 2.
+  r.headers.set("Content-Security-Policy", `${r.headers.get("Content-Security-Policy")}; frame-ancestors ${appOrigin(dw)}`);
   r.headers.set("X-Frame-Options", "DENY");
   return r;
 }
@@ -251,10 +275,11 @@ export async function serveSite(
   const url = new URL(req.url);
   const method = req.method.toUpperCase();
   if (method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS", "Access-Control-Max-Age": "86400" },
-    });
+    // Password-protected sites are not readable cross-origin, so their preflights grant nothing.
+    const gated = !!(await getLiveSite(dw, slug))?.passwordHash;
+    const headers: Record<string, string> = { "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS", "Access-Control-Max-Age": "86400" };
+    if (!gated) headers["Access-Control-Allow-Origin"] = "*";
+    return new Response(null, { status: 204, headers });
   }
 
   const filePath = requestPathToFilePath(pathname);
@@ -268,6 +293,17 @@ export async function serveSite(
     return systemResponse(dw, req, mode, live, 410, "EXPIRED", "This site has expired", "Anonymous sites are temporary. Publish again, or claim a site with an API key to keep it. See {app}.");
   }
 
+  // Password-protected sites only answer navigations (top level or frames, such as the app's file
+  // viewer) and their own pages' requests. Until the sites domain is on the Public Suffix List,
+  // <a>.<domain> and <b>.<domain> are the same site, so a Lax gate cookie alone would let one
+  // site load another's unlocked scripts with <script src>. Sandboxed pages are opaque origins
+  // whose own requests count as cross-site, so they are left to the cookie.
+  if (live.passwordHash && !mode.sandbox && !isNavigation(req)) {
+    const site = req.headers.get("sec-fetch-site");
+    if (site === "same-site" || site === "cross-site") {
+      return systemResponse(dw, req, mode, live, 403, "403", "Not available here", "This site is password protected, so other sites cannot load it.");
+    }
+  }
   const gate = await handlePassword(dw, req, live, mode, filePath);
   if (gate) return gate;
 

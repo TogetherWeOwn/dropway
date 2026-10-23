@@ -136,7 +136,7 @@ export const CORE_MCP_TOOLS: McpToolDefinition[] = [
       type: "object",
       properties: {
         files: { type: "array", minItems: 1, items: FILE_INPUT, description: "Every file of the site." },
-        site: { type: "string", description: "Optional. Slug, id or URL of your existing site to replace, or a new slug (3-63 chars: a-z, 0-9, single hyphens)." },
+        site: { type: "string", description: "Optional. Slug, id or URL of your existing site to replace, or a new slug (3-56 chars: a-z, 0-9, single hyphens)." },
         ...SETTINGS_INPUT,
         password: { type: "string", minLength: 4, maxLength: 200, description: "Optional visitor password (see set_site_access)." },
         message: { type: "string", maxLength: 200, description: "Short note about this version, like a commit message." },
@@ -428,7 +428,7 @@ export const CORE_MCP_TOOLS: McpToolDefinition[] = [
     description: "Reserve a site (optionally with a chosen slug and settings) without publishing files yet. Usually you do not need this: publish_site creates the site and publishes in one call.",
     inputSchema: {
       type: "object",
-      properties: { slug: { type: "string", description: "3-63 chars: a-z, 0-9, single hyphens. Omit for a generated name." }, ...SETTINGS_INPUT },
+      properties: { slug: { type: "string", description: "3-56 chars: a-z, 0-9, single hyphens. Omit for a generated name." }, ...SETTINGS_INPUT },
       additionalProperties: false,
     },
     outputSchema: obj({ site: SITE_OUT, url: { type: "string" }, slug: { type: "string" } }, ["site", "url"]),
@@ -447,7 +447,7 @@ export const CORE_MCP_TOOLS: McpToolDefinition[] = [
     description: "Give a site a new slug, which changes its URL. The old URL stops working immediately (no redirect yet), so update any links you shared.",
     inputSchema: {
       type: "object",
-      properties: { site: SITE_REF, newSlug: { type: "string", description: "3-63 chars: a-z, 0-9, single hyphens." } },
+      properties: { site: SITE_REF, newSlug: { type: "string", description: "3-56 chars: a-z, 0-9, single hyphens." } },
       required: ["site", "newSlug"],
       additionalProperties: false,
     },

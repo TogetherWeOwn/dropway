@@ -51,6 +51,12 @@ export interface DropwayConfig {
   sitesDomain: string | null;
   /** Path mode only: origin of a sites-only deployment. null = serve sites from the app origin. */
   sitesOrigin: string | null;
+  /**
+   * Former origins that served sites in path mode (<origin>/<slug>/<path>), for example a
+   * workers.dev sites Worker after a move to subdomain mode. Requests there answer 308 to the
+   * same path and query on the site's current URL.
+   */
+  legacySitesOrigins: string[];
   /** Path mode on the app origin: prefix in front of /<slug>/. */
   sitesPathPrefix: string;
   /**
@@ -94,6 +100,7 @@ export interface DropwayVars {
   SITES_DOMAIN?: string;
   SITES_ORIGIN?: string;
   SITES_SANDBOX?: string;
+  LEGACY_SITES_ORIGINS?: string;
   ANONYMOUS_PUBLISH?: string;
   ANON_TTL_HOURS?: string;
   ANON_SITES_PER_HOUR?: string;
@@ -157,8 +164,15 @@ export function resolveConfig(vars: DropwayVars, overrides: ConfigOverrides = {}
   const appOrigin = overrides.appOrigin !== undefined ? overrides.appOrigin : normaliseOrigin(vars.APP_ORIGIN);
   // Legacy app origins only make sense with a fixed APP_ORIGIN to send people and agents to.
   const legacyAppOrigins = appOrigin ? (overrides.legacyAppOrigins ?? normaliseOrigins(vars.LEGACY_APP_ORIGINS)).filter((o) => o !== appOrigin) : [];
-  let sitesOrigin = overrides.sitesOrigin !== undefined ? overrides.sitesOrigin : normaliseOrigin(vars.SITES_ORIGIN);
-  if (sitesOrigin && appOrigin && sitesOrigin === appOrigin) sitesOrigin = null;
+  const sitesOriginVar = overrides.sitesOrigin !== undefined ? overrides.sitesOrigin : normaliseOrigin(vars.SITES_ORIGIN);
+  // The effective sites origin. SITES_ORIGIN applies in path mode only: subdomain mode ignores it,
+  // so a value left over from path mode must not drop that origin from LEGACY_SITES_ORIGINS below.
+  const sitesOrigin = sitesMode === "path" && sitesOriginVar !== appOrigin ? sitesOriginVar : null;
+  const legacySitesOrigins =
+    overrides.legacySitesOrigins ??
+    [...new Set((vars.LEGACY_SITES_ORIGINS ?? "").split(/[\s,]+/).map(normaliseOrigin))].filter(
+      (o): o is string => o !== null && o !== appOrigin && o !== sitesOrigin,
+    );
   const sharedOrigin = sitesMode === "path" && !sitesOrigin;
   // SITES_SANDBOX: true (every site), false (none, unless sites share the app origin), auto (default: anonymous sites on a sites origin).
   const sandboxVar = (vars.SITES_SANDBOX ?? "").trim().toLowerCase();
@@ -192,7 +206,8 @@ export function resolveConfig(vars: DropwayVars, overrides: ConfigOverrides = {}
     legacyDeprecatedAt: overrides.legacyDeprecatedAt ?? unixSeconds(vars.LEGACY_DEPRECATED_AT),
     sitesMode,
     sitesDomain: sitesMode === "subdomain" ? sitesDomain : null,
-    sitesOrigin: sitesMode === "path" ? sitesOrigin : null,
+    sitesOrigin,
+    legacySitesOrigins,
     sitesPathPrefix: (overrides.sitesPathPrefix ?? "/s").replace(/\/+$/, ""),
     // Sites that share the app origin are always sandboxed: they must never touch the app's storage.
     sitesSandbox: sharedOrigin ? true : sandboxRequested,

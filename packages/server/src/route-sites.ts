@@ -28,7 +28,7 @@ import { resolvePath, type ServeMode } from "./serve";
  */
 export type SiteRoute =
   | { kind: "site"; slug: string; path: string; mode: ServeMode }
-  | { kind: "redirect"; location: string; status: 301 | 307; byReferer: boolean }
+  | { kind: "redirect"; location: string; status: 301 | 307 | 308; byReferer: boolean }
   | { kind: "sites_home" }
   | { kind: "sites_not_found" }
   | { kind: "app" };
@@ -60,17 +60,37 @@ async function siteHasPath(dw: DropwayContext, slug: string, pathname: string, r
   return resolvePath(live, p, req, { kind: "path", base, sandbox: true, rewrite: null }, false).kind !== "not_found";
 }
 
+/**
+ * A former path-mode sites origin (config.legacySitesOrigins): <origin>/<slug>/<rest>?q answers
+ * 308 to <current site URL><rest>?q, so old links, embeds and bookmarks keep working. An absolute
+ * path from a page of site X there (Referer) goes to X. Never cached: a rollback works at once.
+ */
+function legacySitesRoute(dw: DropwayContext, req: Request, url: URL): SiteRoute {
+  if (url.pathname === "/") return dw.config.appOrigin ? { kind: "redirect", location: dw.config.appOrigin, status: 308, byReferer: false } : { kind: "sites_not_found" };
+  const first = url.pathname.split("/")[1];
+  if (isSiteSlug(first)) return { kind: "redirect", location: siteUrl(dw, first) + url.pathname.slice(first.length + 2) + url.search, status: 308, byReferer: false };
+  const ref = refererSlug(req, url, "");
+  if (ref) return { kind: "redirect", location: siteUrl(dw, ref) + url.pathname.slice(1) + url.search, status: 307, byReferer: true };
+  return { kind: "sites_not_found" };
+}
+
 export async function routeSiteRequest(dw: DropwayContext, req: Request): Promise<SiteRoute> {
   const c = dw.config;
   const url = new URL(req.url);
   const method = req.method.toUpperCase();
   const readOnly = method === "GET" || method === "HEAD";
 
+  if (c.legacySitesOrigins.includes(url.origin)) return legacySitesRoute(dw, req, url);
+
   if (c.sitesMode === "subdomain" && c.sitesDomain) {
     const host = url.hostname.toLowerCase();
     if (host.endsWith(`.${c.sitesDomain}`)) {
       const label = host.slice(0, -(c.sitesDomain.length + 1));
-      if (!label.includes(".")) return { kind: "site", slug: label, path: url.pathname, mode: { kind: "subdomain", base: "/", sandbox: c.sitesSandbox, rewrite: null } };
+      if (isSiteSlug(label)) return { kind: "site", slug: label, path: url.pathname, mode: { kind: "subdomain", base: "/", sandbox: c.sitesSandbox, rewrite: null } };
+      // Reserved labels are never user sites: www goes to the app; the rest (files, fallback,
+      // customers, ...) belong to the platform and answer 404 here unless an embedding app
+      // handles those hosts first. Dotted and malformed labels have no certificate or site.
+      if (label === "www" && c.appOrigin) return { kind: "redirect", location: c.appOrigin, status: 301, byReferer: false };
       return { kind: "sites_not_found" };
     }
     if (host === c.sitesDomain) return { kind: "redirect", location: appOrigin(dw), status: 301, byReferer: false };
@@ -129,5 +149,7 @@ export function redirectResponse(route: Extract<SiteRoute, { kind: "redirect" }>
     h.set("Vary", "Referer");
     h.set("X-Dropway-Resolved-By", "referer");
   }
+  // 308 = a legacy origin moved: not cached, so moving back works at once.
+  if (route.status === 308) h.set("Cache-Control", "no-store");
   return new Response(null, { status: route.status, headers: h });
 }
