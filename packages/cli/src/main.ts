@@ -11,6 +11,7 @@ import { bool, int, parseArgs, str, UsageError, type FlagSpecs, type Parsed } fr
 import { CliError, DropwayClient, EXIT, normaliseApi, type FetchLike } from "./client.ts";
 import { linkKey, linkPath, readCredentials, readLink, removeCredentials, saveCredentials, writeLink, type ProjectLink } from "./config.ts";
 import { collectFiles } from "./files.ts";
+import { encryptFiles } from "./encrypt.ts";
 import { formatBytes, plural, shortTime, table } from "./output.ts";
 import { publish, publishZip, waitForVersion, type ProgressEvent, type PublishResult, type VersionInfo } from "./publish.ts";
 import { VERSION } from "./version.ts";
@@ -244,6 +245,7 @@ const publishCmd: Command = {
     wait: { kind: "boolean" },
     "wait-timeout": { kind: "string" },
     concurrency: { kind: "string" },
+    encrypt: { kind: "boolean" },
     "allow-secrets": { kind: "boolean" },
     "dry-run": { kind: "boolean" },
     save: { kind: "boolean" },
@@ -259,6 +261,7 @@ const publishCmd: Command = {
   --wait                Return only once the live URL serves the new version
   --wait-timeout <s>    Seconds for --wait (default 90)
   --concurrency <n>     Parallel uploads (default 6)
+  --encrypt             Encrypt locally with AES-256-GCM; share key only in the URL fragment
   --allow-secrets       Publish even if files look like they contain credentials
   --dry-run             List what would be published; contact nothing
   --no-save             Do not record the site in ./dropway.json
@@ -280,8 +283,11 @@ running the same command again updates that site.`,
     const waitTimeout = int(p, "wait-timeout", 1, 3600);
 
     const st = await stat(resolve(io.cwd, target)).catch(() => null);
-    if (!st) throw new CliError({ code: "path_not_found", message: `No such file or directory: ${target}`, exitCode: EXIT.usage });
+    if (!st) throw new CliError({ code: "path_not_found", message: `No such file or directory: ${target}`, hint: "Choose an existing file or folder.", exitCode: EXIT.usage });
     const isZip = st.isFile() && /\.zip$/i.test(target);
+    const encrypt = bool(p, "encrypt") === true;
+    if (encrypt && isZip) throw new CliError({ code: "encrypted_zip_unsupported", message: "Encrypted publishing does not support ZIP archives.", hint: "Extract the archive locally, then publish its folder with --encrypt.", exitCode: EXIT.usage });
+    if (encrypt && bool(p, "spa")) throw new CliError({ code: "encrypted_spa_unsupported", message: "Encrypted publishing does not support SPA routing.", hint: "Publish a static entry document without --spa.", exitCode: EXIT.usage });
 
     const inst = dryRun ? null : await resolveInstance(p, io);
     const token = anonymous ? null : inst ? requireKey(inst, "Publishing") : null;
@@ -297,6 +303,7 @@ running the same command again updates that site.`,
     const settings = { message: str(p, "message"), title: str(p, "title"), spa: bool(p, "spa") };
 
     let result: PublishResult;
+    let waitUrl: string | undefined;
     if (isZip) {
       if (dryRun) {
         out.result({ dryRun: true, path: target, zip: true, bytes: st.size }, `Would upload ${target} (${formatBytes(st.size)}); the instance unpacks it.`);
@@ -332,8 +339,9 @@ running the same command again updates that site.`,
         );
         return EXIT.ok;
       }
+      const encrypted = encrypt ? await encryptFiles(collected.files) : null;
       const client = makeClient(io, inst!.api, token);
-      result = await publish(client, collected.files, {
+      result = await publish(client, encrypted?.files ?? collected.files, {
         site,
         ...settings,
         baseVersionId: str(p, "base"),
@@ -344,6 +352,11 @@ running the same command again updates that site.`,
           else if (e.phase === "finalize") out.progress("Going live...");
         },
       });
+      if (encrypted) {
+        waitUrl = new URL("encrypted.bin?raw=1", result.url).href;
+        result.url = `${inst!.api}/__dropway/encrypted/${enc(result.slug)}#${encrypted.fragment}`;
+        result.warnings.push({ code: "encrypted_link", message: "Anyone with this full URL can decrypt. Keep it safe: lost keys cannot be recovered. Each encrypted republish creates a new key. See the CLI guide for host/recipient limits." });
+      }
       out.progress(null);
     }
 
@@ -356,7 +369,7 @@ running the same command again updates that site.`,
     let waited: boolean | undefined;
     if (bool(p, "wait") && result.version?.id) {
       out.progress("Waiting for the live URL to serve the new version...");
-      waited = await waitForVersion(result.url, result.version.id, { timeoutMs: (waitTimeout ?? 90) * 1000, fetch: io.fetch });
+      waited = await waitForVersion(waitUrl ?? result.url, result.version.id, { timeoutMs: (waitTimeout ?? 90) * 1000, fetch: io.fetch });
       out.progress(null);
     }
 
