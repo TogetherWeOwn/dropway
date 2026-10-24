@@ -1,6 +1,6 @@
 # @dropway/client
 
-Typed REST client for [Kofra](https://github.com/TogetherWeOwn/dropway), generated from the operation registry. Fetch-only with zero dependencies: runs on Node 20+, Cloudflare Workers and browsers. The `kofra` CLI's transport builds on this package.
+Typed REST client for [Kofra](https://github.com/TogetherWeOwn/kofra), generated from the operation registry. Fetch-only with zero dependencies. Import it directly on Node 22.18+ (type stripping) or Cloudflare Workers, or through a bundler anywhere else. The `kofra` CLI's transport builds on this package.
 
 ```ts
 import { DropwayClient } from "@dropway/client";

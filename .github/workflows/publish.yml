@@ -2,7 +2,7 @@
 #
 # Trusted publishing (OIDC): no tokens stored. Operator to-do, once per package
 # name on npmjs.com: Settings > Trusted publisher > GitHub Actions, with
-# organization TogetherWeOwn, repository dropway, workflow publish.yml.
+# organization TogetherWeOwn, repository kofra, workflow publish.yml.
 # The four packages version in lockstep; push tag vX.Y.Z to release.
 name: publish
 on:
@@ -25,7 +25,11 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Tag matches the workspace versions
-        run: test "v$(node -p 'require("./packages/client/package.json").version')" = "${{ github.ref_name }}"
+        run: |
+          for p in packages/core packages/server packages/client packages/cli; do
+            v=$(node -p "require('./$p/package.json').version")
+            test "v$v" = "${{ github.ref_name }}" || { echo "tag ${{ github.ref_name }} does not match $p ($v)"; exit 1; }
+          done
       - run: npm run build -w kofra
       - run: npm publish --provenance --access public -w @dropway/core
       - run: npm publish --provenance --access public -w @dropway/server

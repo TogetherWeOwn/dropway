@@ -29,4 +29,12 @@ describe("npm publish configuration", () => {
       expect(workflow, name).toContain(name);
     }
   });
+
+  it("gates the release on every package version matching the tag", () => {
+    const workflow = readFileSync(join(root, ".github", "workflows", "publish.yml"), "utf8");
+    const gate = workflow.slice(workflow.indexOf("Tag matches"), workflow.indexOf("- run: npm run build -w kofra"));
+    // Match the loop membership exactly: "packages/cli" is a prefix of "packages/client",
+    // so per-directory substring checks cannot pin the cli package.
+    expect(gate).toContain("for p in packages/core packages/server packages/client packages/cli");
+  });
 });
