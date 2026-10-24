@@ -52,6 +52,7 @@ import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { chromium } from "playwright-core";
+import { filmstrip, SETTLE } from "./shared.mjs";
 
 const ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 const args = process.argv.slice(2);
@@ -1052,25 +1053,6 @@ const FOCUS_PROBE = () => {
 };
 
 /** G4: Tab from the top of the page (or of an open dialog) through every focusable element, then Shift+Tab back. */
-/**
- * Until the page stops scrolling (a smooth scroll to the focused element, with normal motion), at most ~3 s. Run it
- * in the page (page.evaluate(SETTLE)). Exported for the hosted harness, which walks focus the same way.
- */
-export const SETTLE = () =>
-  new Promise((done) => {
-    let last = null;
-    let still = 0;
-    let n = 0;
-    const tick = () => {
-      const now = `${scrollX},${scrollY}`;
-      still = now === last ? still + 1 : 0;
-      last = now;
-      if (still >= 5 || ++n > 180) done();
-      else requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  });
-
 async function focusWalk(page, opts = {}) {
   await page.evaluate(() => {
     const host = document.querySelector("dialog[open]") ?? document.body;
@@ -1530,106 +1512,34 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
   return { screen: sc.id, title: sc.title, pass, mode, width, file, sha256: createHash("sha256").update(png).digest("hex"), masked, ms: Date.now() - t0, gates, axeReview, fontEnv };
 }
 
-/**
- * G7b filmstrip: in each explicit mode, load a few screens with the app stylesheet held back (1.2 s) and the fonts
- * held back (0.6 s), record every frame the compositor paints (CDP screencast, PNG) until load + 400 ms, and check
- * each frame's dominant colour: dark in Dark, light in Light. A white frame in Dark (or a dark one in Light) is a
- * flash of the wrong mode, whatever the computed styles said.
- */
+/** G7b filmstrip (shared.mjs) on two app screens and two site screens, served by this run's Worker. */
 async function filmstripChecks(browser, mf, fx) {
-  const out = {};
-  const targets = [
-    ["J10", `${APP}/login`, "app"],
-    ["J15", `${APP}/dashboard`, "app"],
-    ["J46", site("nosuch"), "site"],
-    ["J57", site("fx-site", "README.md"), "site"],
-  ];
-  for (const [id, url0, origin] of targets) {
-    for (const mode of ["light", "dark"]) {
-      const os = mode === "dark" ? "light" : "dark"; // the OS says the opposite, so only the explicit choice can paint the mode
-      const context = await browser.newContext({ ...VIEWPORTS[1440], colorScheme: os, ignoreHTTPSErrors: true, reducedMotion: "reduce" });
-      try {
-        await context.route("**/*", async (route) => {
-          const req = route.request();
-          const u = req.url();
-          if (!/^https:\/\/([a-z0-9-]+\.)?kofra(-sites|-separate)?\.test\//.test(u)) return route.abort();
-          const body = req.postDataBuffer();
-          const res = await mf.dispatchFetch(u, { method: req.method(), headers: await req.allHeaders(), body: body && req.method() !== "GET" && req.method() !== "HEAD" ? body : undefined, redirect: "manual" });
-          const headers = {};
-          res.headers.forEach((v, k) => {
-            headers[k] = v;
-          });
-          const bytes = Buffer.from(await res.arrayBuffer());
-          const path = new URL(u).pathname;
-          if (path.startsWith("/__dropway/ui/") && path.endsWith(".css")) await new Promise((r) => setTimeout(r, 1200));
-          if (path.startsWith("/__dropway/fonts/")) await new Promise((r) => setTimeout(r, 600));
-          await route.fulfill({ status: res.status, headers, body: bytes });
-        });
-        if (origin === "app") await context.addCookies([{ name: "__Host-dw_theme", value: mode, url: `${APP}/`, secure: true, sameSite: "Lax" }]);
-        await context.addInitScript(({ key }) => {
-          if (location.hostname === "kofra.test") sessionStorage.setItem("dropway.key", key);
-        }, { key: fx.owner });
-        const page = await context.newPage();
-        const cdp = await context.newCDPSession(page);
-        const url = origin === "site" ? `${url0}${url0.includes("?") ? "&" : "?"}theme=${mode}` : url0;
-        // The tab first shows the page once, so the frames recorded below start from it: a fresh tab's about:blank
-        // is painted in the OS scheme (the browser's frame, not ours) and the compositor can hand one over after
-        // the new document commits. Routing turns the HTTP cache off, so the second load is held back again.
-        await page.goto(url, { waitUntil: "load", timeout: 30000 });
-        const frames = [];
-        cdp.on("Page.screencastFrame", (f) => {
-          if (process.env.FILMSTRIP_DEBUG) writeFileSync(join(OUT, `film-${id}-${mode}-${String(f.metadata.timestamp).replace(".", "_")}.png`), Buffer.from(f.data, "base64"));
-          frames.push(f.data);
-          cdp.send("Page.screencastFrameAck", { sessionId: f.sessionId }).catch(() => {});
-        });
-        await cdp.send("Page.startScreencast", { format: "png", everyNthFrame: 1, maxWidth: 360, maxHeight: 225 });
-        await page.goto(url, { waitUntil: "load", timeout: 30000 });
-        await page.waitForTimeout(400);
-        await cdp.send("Page.stopScreencast").catch(() => {});
-        const colours = await dominantColours(browser, frames);
-        const lum = ([r, g, b]) => (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-        const wrong = colours.filter((c) => (mode === "dark" ? lum(c) > 0.25 : lum(c) < 0.6));
-        out[`filmstrip ${id} ${mode}`] = { pass: frames.length > 0 && wrong.length === 0, detail: { frames: frames.length, colours: [...new Set(colours.map((c) => `rgb(${c.join(",")})`))].slice(0, 6), wrong: wrong.length } };
-      } catch (e) {
-        out[`filmstrip ${id} ${mode}`] = { pass: false, detail: String(e).slice(0, 200) };
-      } finally {
-        await context.close();
-      }
-    }
-  }
+  const out = await filmstrip(browser, {
+    contextOptions: VIEWPORTS[1440],
+    targets: [
+      { id: "J10", url: () => `${APP}/login` },
+      { id: "J15", url: () => `${APP}/dashboard` },
+      { id: "J46", url: (mode) => `${site("nosuch")}?theme=${mode}` },
+      { id: "J57", url: (mode) => `${site("fx-site", "README.md")}?theme=${mode}` },
+    ],
+    respond: async (req) => {
+      const u = req.url();
+      if (!/^https:\/\/([a-z0-9-]+\.)?kofra(-sites|-separate)?\.test\//.test(u)) return null;
+      const body = req.postDataBuffer();
+      const res = await mf.dispatchFetch(u, { method: req.method(), headers: await req.allHeaders(), body: body && req.method() !== "GET" && req.method() !== "HEAD" ? body : undefined, redirect: "manual" });
+      const headers = {};
+      res.headers.forEach((v, k) => {
+        headers[k] = v;
+      });
+      return { status: res.status, headers, body: Buffer.from(await res.arrayBuffer()) };
+    },
+    prepare: async (context, mode) => {
+      await context.addCookies([{ name: "__Host-dw_theme", value: mode, url: `${APP}/`, secure: true, sameSite: "Lax" }]);
+      await context.addInitScript((key) => location.hostname === "kofra.test" && sessionStorage.setItem("dropway.key", key), fx.owner);
+    },
+  });
   for (const [k, v] of Object.entries(out)) console.log(`${k}: ${v.pass ? "ok" : `FAIL ${JSON.stringify(v.detail)}`}`);
   return out;
-}
-
-/** The most common colour of each base64 PNG frame (decoded on a canvas, 4-bit buckets), as [r, g, b]. */
-async function dominantColours(browser, frames) {
-  if (!frames.length) return [];
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  try {
-    return await page.evaluate(async (list) => {
-      const out = [];
-      for (const b64 of list) {
-        const img = new Image();
-        img.src = `data:image/png;base64,${b64}`;
-        await img.decode();
-        const c = new OffscreenCanvas(img.width, img.height);
-        const g = c.getContext("2d", { willReadFrequently: true });
-        g.drawImage(img, 0, 0);
-        const d = g.getImageData(0, 0, img.width, img.height).data;
-        const counts = new Map();
-        for (let i = 0; i < d.length; i += 4) {
-          const k = ((d[i] >> 4) << 8) | ((d[i + 1] >> 4) << 4) | (d[i + 2] >> 4);
-          counts.set(k, (counts.get(k) ?? 0) + 1);
-        }
-        const [k] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
-        out.push([((k >> 8) & 15) * 17, ((k >> 4) & 15) * 17, (k & 15) * 17]);
-      }
-      return out;
-    }, frames);
-  } finally {
-    await context.close();
-  }
 }
 
 function gallery(list, matrix, checks = {}, source = {}) {
