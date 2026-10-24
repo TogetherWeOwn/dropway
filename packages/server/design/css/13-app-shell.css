@@ -71,7 +71,6 @@ html:has(.toast){scroll-padding-bottom:7rem}
 .bare{display:block}
 .banner .btnrow{margin-top:10px}
 .panel form>.btnrow,.panel form>.btn{margin-top:18px}
-.panel>h2{font-size:27px;margin:2px 0 14px}
 .pubbar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-start;justify-content:space-between;margin-top:14px}
 .pubbar>.small{min-width:0;flex:1 1 16rem}
 .pubbar .fwarn{margin:6px 0 0}

@@ -26,6 +26,9 @@
   .notes{grid-template-columns:minmax(0,1fr)}
   .note:nth-child(n){padding-left:0;border-left:0}
 }
+/* A panel's own h2 (a second panel on a page whose h1 sits in the first) is a step below the h1 (after the
+   shared .panel h1,.panel h2 rule, so it wins). */
+.panel>h2{font-size:27px;margin:2px 0 14px}
 /* The small rotated stamp (app pages only; site pages use .bigstamp). */
 .stamp{display:inline-block;border:2px solid var(--signal);color:var(--danger);font:500 11.5px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;padding:6px 8px 5px;border-radius:var(--r-stamp);transform:rotate(-3deg);background:color-mix(in srgb,var(--surface) 35%,transparent)}
 /* Admin ledgers. */
@@ -65,7 +68,8 @@
   .table tr>td:empty{display:none}
   .table td[data-label]::before{content:attr(data-label);content:attr(data-label) / "";display:block;margin-bottom:3px;font:500 10.5px/1.3 var(--mono);text-transform:uppercase;letter-spacing:.11em;color:var(--accent-2)}
   .table tr>.num{text-align:left;white-space:normal}
-  .table td.num .sub{display:inline;margin-left:.5em}
+  .table td.num .sub{display:inline;margin-left:.3em}
+  .table td.num .sub::before{content:"· "}
   .table td.act{display:flex;flex-wrap:wrap;gap:8px}
   .table td.act .btn+.btn{margin:0}
   .table .chip{white-space:normal;overflow-wrap:anywhere}

@@ -1060,7 +1060,7 @@ export function dropwayClient(motifsFactory) {
           });
           add(
             out,
-            secretBlock(label, k, "Shown once. Store it in your password manager; agents use it as Authorization: Bearer <key>."),
+            secretBlock(label, k, "Store it in your password manager; agents use it as Authorization: Bearer <key>."),
             h("button", {
               type: "button",
               class: "k-btn",
@@ -1512,7 +1512,7 @@ export function dropwayClient(motifsFactory) {
         var k = await api("/keys", { method: "POST", body: body });
         add(
           created,
-          secretBlock("Key “" + (k.name || k.prefix) + "” created", k.key, "Shown once. Give it to the agent or person as KOFRA_API_KEY."),
+          secretBlock("Key “" + (k.name || k.prefix) + "” created", k.key, "Give it to the agent or person as KOFRA_API_KEY."),
           h("div", { class: "k-codeblock" }, h("div", { class: "k-codeblock-h" }, h("span", { class: "k-k", text: "Environment" })), h("pre", { tabindex: "0", text: "export KOFRA_URL=" + boot.origin + "\nexport KOFRA_API_KEY=" + k.key })),
         );
         form.reset();
@@ -1549,7 +1549,7 @@ export function dropwayClient(motifsFactory) {
               "tr",
               {},
               h("td", {}, h("strong", { text: k.name || "Unnamed" }), k.current ? h("span", { class: "k-chips k-rowchips" }, h("span", { class: "k-chip k-accent", text: "This browser" })) : null, h("span", { class: "k-sub k-mono", text: k.prefix + "…" })),
-              h("td", { "data-label": "Scopes" }, h("span", { class: "k-chips" }, k.scopes.map(function (sc) {
+              h("td", { class: "k-wide", "data-label": "Scopes" }, h("span", { class: "k-chips" }, k.scopes.map(function (sc) {
                 return h("span", { class: "k-chip", text: sc });
               })), k.siteId ? h("span", { class: "k-sub", text: "One site only" }) : null),
               h("td", { class: "k-num k-small" }, h("span", { title: localTime(k.createdAt), text: "Created " + ago(k.createdAt) }), h("span", { class: "k-sub", title: k.lastUsedAt ? localTime(k.lastUsedAt) : null, text: k.lastUsedAt ? "Used " + ago(k.lastUsedAt) : "Never used" })),
@@ -1635,7 +1635,7 @@ export function dropwayClient(motifsFactory) {
       clear(out);
       try {
         var r = await api("/members", { method: "POST", body: { email: form.elements.email.value.trim(), name: form.elements.name.value.trim() || undefined, role: form.elements.role.value } });
-        add(out, secretBlock("API key for " + (r.member.email || r.member.name), r.apiKey.key, "Shown once. Send it to them over a private channel; they sign in with it."));
+        add(out, secretBlock("API key for " + (r.member.email || r.member.name), r.apiKey.key, "Send it to them over a private channel; they sign in with it."));
         form.reset();
         loadMembers();
       } catch (err) {
