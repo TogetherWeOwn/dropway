@@ -175,6 +175,51 @@ describe("server-rendered colour mode (no flash, no script)", () => {
   });
 });
 
+describe.each(["path", "subdomain"] as const)("frame redirect URL normalization (%s mode)", (sitesMode) => {
+  const fixture = async () => {
+    const dw = await freshInstance({ sitesMode, sitesDomain: "sites.test" });
+    const pub = await dw.json("/api/v1/publish", { method: "POST", key: dw.ownerKey, body: form({ "index.html": "<p>hi</p>", "docs/a.txt": "a", "docs/b.md": "# B" }) });
+    expect(pub.status).toBe(201);
+    const site = new URL(pub.body.url as string);
+    const base = site.pathname;
+    expect(base).toBe(sitesMode === "path" ? `/s/${pub.body.slug}/` : "/");
+    const open = async (next: string, theme = "dark") => {
+      const res = await dw.call(`${site.origin}${base}__dropway/open?${new URLSearchParams({ next, theme })}`, { headers: { "Sec-Fetch-Dest": "iframe" } });
+      expect(res.status).toBe(303);
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      const location = res.headers.get("location")!;
+      expect(new URL(location, site).origin).toBe(site.origin);
+      return location;
+    };
+    return { base, open };
+  };
+
+  const escapes = sitesMode === "path"
+    ? ["../other/", "../..//evil.test/", "%2e%2e/other/", "%2E%2E/%2e%2e//evil.test/", ".%2e/other/"]
+    : ["..//evil.test/", "docs/../..//evil.test/", "%2e%2e//evil.test/", "docs/%2E%2E/.%2e//evil.test/"];
+  it.each(escapes)("falls back to the site root after normalizing %s", async (suffix) => {
+    const { base, open } = await fixture();
+    // `next` is query-encoded, so normalization happens inside the route, not before dispatch.
+    expect(await open(`${base}${suffix}?keep=1&theme=light`)).toBe(base);
+  });
+
+  it.each([
+    ["docs/../docs/?tag=a&tag=b&x=%2B&theme=light", "docs/?tag=a&tag=b&x=%2B&theme=dark"],
+    ["docs/%2e%2e/docs/b.md?view=1&embed=1&keep=1", "docs/b.md?view=1&embed=1&keep=1&theme=dark"],
+    ["docs/../index.html?keep=1&theme=light", "index.html?keep=1"],
+    ["docs/./a.txt?raw=1&keep=1&theme=light", "docs/a.txt?raw=1&keep=1"],
+    ["docs/../docs/b.md?download=1&keep=1&theme=light", "docs/b.md?download=1&keep=1"],
+  ])("keeps a normalized in-base target and its query: %s", async (suffix, expected) => {
+    const { base, open } = await fixture();
+    expect(await open(`${base}${suffix}`)).toBe(`${base}${expected}`);
+  });
+
+  it("Auto removes an incoming theme without adding one to the normalized listing", async () => {
+    const { base, open } = await fixture();
+    expect(await open(`${base}docs/../docs/?keep=1&theme=light`, "auto")).toBe(`${base}docs/?keep=1`);
+  });
+});
+
 describe("CSP: no inline script, no external font origin", () => {
   it("no-script app pages: APP_PAGE_CSP exactly, no script-src, no <script> at all, fonts and CSS from 'self'", async () => {
     expect(APP_PAGE_CSP).toBe("default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");

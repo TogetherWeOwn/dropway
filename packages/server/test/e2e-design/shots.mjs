@@ -525,6 +525,19 @@ export function checkSelection(only = ONLY, widths = WIDTHS, modes = MODES) {
   if (!widths.length || !modes.length || badWidth.length || badMode.length) throw new Error(`Nothing valid to run: widths ${widths.join(",") || "none"} (390, 768, 1440), modes ${modes.join(",") || "none"} (light, dark, auto-light, auto-dark)`);
 }
 
+/** Own the fresh worker's directory until startup succeeds and the caller takes over cleanup. */
+export async function startFreshWorker(start = startWorker) {
+  const dir = mkdtempSync(join(tmpdir(), "kofra-shots-fresh-"));
+  try {
+    return { ...(await start(dir)), dir };
+  } catch (error) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {} // A cleanup error must not replace the original startup error.
+    throw error;
+  }
+}
+
 async function main() {
   checkSelection();
   if (!CHROME) throw new Error("No Chrome: set CHROME_PATH");
@@ -572,10 +585,7 @@ async function main() {
     for (const job of main.filter((x) => x.mutates).flatMap(jobsFor)) await runOne(job);
     if (EXTRA && !ONLY) checks.themeSwitch = await themeSwitchChecks(browser, mf, fx);
     for (const sc of fresh) {
-      if (!second) {
-        const dir = mkdtempSync(join(tmpdir(), "kofra-shots-fresh-"));
-        second = { ...(await startWorker(dir)), dir };
-      }
+      if (!second) second = await startFreshWorker();
       if (sc.needsOwner && !second.owner) {
         const r = await second.mf.dispatchFetch(`${APP}/api/v1/setup`, { method: "POST", headers: { Authorization: `Bearer ${BOOT}`, "Content-Type": "application/json" }, body: JSON.stringify({ email: "new@kofra.test" }) });
         second.owner = (await r.json()).apiKey.key;

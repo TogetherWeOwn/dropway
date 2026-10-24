@@ -1,12 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 // @ts-expect-error plain ESM build script without type declarations
 import { buildDesign, classesIn, minifyCss, prefixCss, prefixSelector } from "../../../scripts/build-design.mjs";
 import { APP_CSS, SITE_CSS, THEME_TOKENS } from "../src/ui/design.generated";
 import { kofraMotifs } from "../src/ui/motifs";
-import { checkSelection, exitCodeFor } from "./e2e-design/shots.mjs";
+import { checkSelection, exitCodeFor, startFreshWorker } from "./e2e-design/shots.mjs";
 
 /**
  * The Security Print design system as code: the k- prefixer, the generated modules being in sync with
@@ -207,6 +208,62 @@ describe("motifs", () => {
 });
 
 describe("screenshot harness (npm run design:shots)", () => {
+  it("removes only its owned directory when fresh-worker startup rejects, preserving the original error", async () => {
+    const sibling = mkdtempSync(join(tmpdir(), "kofra-shots-sibling-"));
+    const marker = join(sibling, "keep.txt");
+    writeFileSync(marker, "not owned by the failed startup");
+    const error = new Error("fresh worker migration failed");
+    let owned = "";
+    try {
+      await expect(startFreshWorker(async (dir) => {
+        owned = dir;
+        mkdirSync(join(dir, "bundle"));
+        writeFileSync(join(dir, "bundle/index.js"), "partial bundle");
+        await Promise.resolve();
+        throw error;
+      })).rejects.toBe(error);
+      expect(owned).not.toBe("");
+      expect(existsSync(owned)).toBe(false);
+      expect(readFileSync(marker, "utf8")).toBe("not owned by the failed startup");
+    } finally {
+      if (owned) rmSync(owned, { recursive: true, force: true });
+      rmSync(sibling, { recursive: true, force: true });
+    }
+  });
+  it("also cleans the fresh directory if startup throws before returning a promise", async () => {
+    const error = new Error("bundle failed");
+    let owned = "";
+    try {
+      await expect(startFreshWorker((dir) => {
+        owned = dir;
+        throw error;
+      })).rejects.toBe(error);
+      expect(owned).not.toBe("");
+      expect(existsSync(owned)).toBe(false);
+    } finally {
+      if (owned) rmSync(owned, { recursive: true, force: true });
+    }
+  });
+  it("hands a successful fresh worker and its directory to the caller for final cleanup", async () => {
+    let disposed = false;
+    const mf = { dispose: async () => { disposed = true; } };
+    const db = {};
+    const second = await startFreshWorker(async (dir) => {
+      writeFileSync(join(dir, "ready.txt"), "ready");
+      return { mf, db };
+    });
+    try {
+      expect(second.mf).toBe(mf);
+      expect(second.db).toBe(db);
+      expect(disposed).toBe(false);
+      expect(readFileSync(join(second.dir, "ready.txt"), "utf8")).toBe("ready");
+    } finally {
+      await second.mf.dispose();
+      rmSync(second.dir, { recursive: true, force: true });
+    }
+    expect(disposed).toBe(true);
+    expect(existsSync(second.dir)).toBe(false);
+  });
   it("exits non-zero when any cell or switch check fails, and for an empty run", () => {
     const ok = { gates: { csp: { pass: true }, axe: { pass: true } } };
     const bad = { gates: { csp: { pass: true }, overflow: { pass: false } } };
