@@ -10,8 +10,9 @@ the command help and the CLI guide will point here rather than restate it.
 
 Before asking for credentials or publishing to the wrong origin, an agent
 should be able to answer three questions offline: which configuration
-source actually wins, whether each source is absent, valid, malformed or
-unreadable, and what to do next. Today it cannot:
+source actually wins, whether each consulted source is absent, valid,
+malformed, empty or unreadable (lower sources are only reported as
+shadowed, never classified), and what to do next. Today it cannot:
 
 - `packages/cli/src/main.ts` (`resolveInstance`) implements a real
   precedence chain (`--api` flag, then `KOFRA_API`/`KOFRA_URL`, then
@@ -88,7 +89,11 @@ Rules:
   value fails resolution with `invalid_api_url`; lower sources are
   reported as shadowed, never consulted, and their values are not
   validated. This mirrors `resolveInstance`, which normalizes the first
-  present value and throws.
+  present value and throws. In JSON, shadowed chain positions appear
+  only as `source` references on `api.source_shadowed` /
+  `env.legacy_shadowed` checks, naming kind plus detail with no
+  validity claim; file health is reported separately and always (see
+  States), independent of chain position.
 - Empty string is absent for env and for every key source, but
   present-but-empty for API flag/link/default sources. The resolver
   chains env with `||` and tests keys with truthiness, so empty values
@@ -110,10 +115,12 @@ Rules:
 ### States
 
 File sources (`credentials.json`, `./dropway.json`) are always examined
-and classified as one of:
+and classified as one of (file health is independent of chain
+position: a shadowed file is still classified):
 
 - `absent`: the file does not exist.
-- `valid`: readable, parses, and has the expected shape.
+- `valid`: readable, parses, and has the expected shape (see File
+  shapes below).
 - `malformed`: parses as the wrong thing (`invalid_json`, or valid JSON
   whose top-level value or known fields have the wrong type:
   `invalid_shape`). Classification only; the resolver keeps treating
@@ -122,7 +129,45 @@ and classified as one of:
   `EACCES`/`EPERM`, `not_a_file` for `EISDIR` and friends, `io_error`
   otherwise). Closed enum; no `strerror` text is emitted.
 
-Value sources (flag, env, `link.api`, saved default) classify as:
+#### File shapes (normative)
+
+`credentials.json` is `valid` when every rule below holds; otherwise it
+is `malformed` with `invalid_shape`:
+
+- The top level is an object. Arrays, `null` and primitives are
+  `invalid_shape`. (The resolver coerces all of these to empty;
+  classification only, resolver untouched.)
+- `version`, when present, is ignored: any value (including a wrong
+  number or type, or absence) keeps the file classifiable by the
+  remaining rules, matching the resolver, which never reads it.
+- `default`, when present, is a string or `null`. Any other type is
+  `invalid_shape`. Empty string is allowed here (it becomes the
+  `empty` API value state downstream when it wins).
+- `instances`, when present, is a non-`null`, non-array object. Any
+  other type is `invalid_shape`.
+- Every `instances` entry is a non-`null`, non-array object. A
+  non-object entry is `invalid_shape`. Entry fields are not policed
+  further: `hasEntryForEffectiveApi` mirrors the resolver's truthiness
+  test (`creds.instances[api]?.key`), without retaining the value.
+- Unknown top-level and entry fields are ignored (see Compatibility
+  notes).
+
+`./dropway.json` is `valid` when every rule below holds; otherwise it
+is `malformed` with `invalid_shape`:
+
+- The top level is an object. Arrays, `null` and primitives are
+  `invalid_shape`.
+- `api`, when present, is a string (empty allowed; downstream `empty`
+  state). Any other type is `invalid_shape`.
+- `sites`, when present, is a non-`null`, non-array object whose values
+  are all strings. Any other shape is `invalid_shape`.
+- `$comment` and unknown fields are ignored.
+
+Value sources (flag, env, `link.api`, saved default) classify as
+follows. These labels describe consulted sources only — the winner of
+each chain. Shadowed lower sources keep no label: they are named on
+`api.source_shadowed` / `env.legacy_shadowed` checks without being
+read past presence or validated:
 
 - `absent`: unset; or empty for env values and for every key source.
 - `valid`: present and accepted (API values must pass origin
@@ -184,6 +229,10 @@ Field rules:
 - `source.detail` for flags is the literal flag (`--api`, `--key`); for
   env it is the literal variable name from the closed set above; for
   `project`, `default` and `saved` it is `null`.
+- `removed` appears only on the `api.value_trimmed` check. It is an
+  array of distinct strings drawn from `userinfo`, `path`, `query`
+  and `fragment`, in that order, listing each part normalization
+  dropped. All other checks omit the field.
 - `projectLink.apiMatchesEffective` is raw string equality between
   `link.api` and the effective origin, mirroring `publish`
   (`main.ts:300`), not normalized equality. A link whose `api`
@@ -218,7 +267,7 @@ real values) or `null`. Hints and templates contain no caller values.
 | `api.empty_value` | error | `empty_value` | the winning flag/link/default source is set but empty, so resolution fails with `no_instance` exactly as the resolver does (no fall-through) | `Unset the empty source or pass --api https://<your-instance>.` |
 | `api.invalid_value` | error | `invalid_api_url` | the winning value failed normalization | `Pass --api https://<your-instance>.` |
 | `api.value_trimmed` | info | `input_trimmed` | normalization dropped `userinfo`, `path`, `query` or `fragment` (listed in `removed`) | `Use the bare origin https://<host>.` |
-| `api.source_shadowed` | info | `source_shadowed` | a lower source was set but not consulted | null |
+| `api.source_shadowed` | info | `source_shadowed` | a lower source was set but not consulted (named by kind plus detail; no validity claim) | null |
 | `key.selected` | info | `source_selected` | a key source won | null |
 | `key.absent` | error | `not_logged_in` | API resolved but no key selected | `kofra login --api <effective-origin>` |
 | `key.kind_noted` | info | `key_kind` | selected key kind is `claim_token` or `other` | null |
@@ -267,9 +316,13 @@ never echoed. In particular:
   but a passing sweep alone never proves the absence of an
   `other`-shaped leak.
 - Paths are emitted with the home directory collapsed to `~` (user
-  profile on Windows), so diagnostics pasted into tickets do not leak
-  usernames. Precedent commands print raw paths; this command is held
-  to the safer form because its output is meant to be shared.
+  profile on Windows), and only when the resolved path is under that
+  home directory. When the config dir points outside the home
+  directory, `configDir.path` is `null` in JSON and the human output
+  names the selector only: outside-home paths can carry team, project
+  or machine names that must not leak into shared diagnostics.
+  Precedent commands print raw paths; this command is held to the
+  safer form because its output is meant to be shared.
 - Stored mapping keys are never enumerated: only the count and, with
   `[path]`, the single caller-provided lookup. Mapping keys can name
   private folders; the caller already knows the path they asked about.
@@ -320,6 +373,25 @@ each one with a sentinel:
 Argument-parsing failures also exit 2, but they keep the standard
 error envelope (`{ok: false, exitCode, error}`), which carries no
 `status` field. Only diagnosed outcomes carry `status`.
+
+Exit 1 uses the standard error envelope with fixed, caller-free
+content — no `status` field, no caller-derived fields:
+
+```jsonc
+{ "ok": false, "exitCode": 1,
+  "error": { "code": "unexpected_error",
+             "message": "Unexpected internal failure.",
+             "retryable": false } }
+```
+
+- `code` is exactly `unexpected_error` and `message` exactly
+  `Unexpected internal failure.` — never the thrown error's message,
+  which could carry paths or input fragments. No `hint`, `status`,
+  `details` or `requestId` (there is no server contact to identify).
+- Human stderr for exit 1 is the same fixed one-liner.
+- Redaction holds vacuously: the exit-1 envelope contains no
+  caller-derived fields at all. A future test asserts byte-exact
+  equality with the shape above on a forced internal failure.
 
 Exits 4–8 are unreachable: there is no server contact. The `exitCode`
 is echoed in JSON so piped output stays interpretable.
@@ -390,6 +462,8 @@ config dir via `KOFRA_CONFIG_DIR`, synthetic cwd, controlled env):
 | 28 | empty `--key ""` with valid env key present | flag falls through (truthiness); env key selected |
 | 29 | link `api` with trimmable suffix normalizing to the effective origin | `apiMatchesEffective: false`, mappings ignored, `foreign_instance` warning (mirrors `publish` string equality) |
 | 30 | only `DROPWAY_CONFIG_DIR` set | `configDir.selector` is `DROPWAY_CONFIG_DIR` with `viaLegacyName: true` <!-- rebrand:keep --> |
+| 31 | forced internal failure with `--json` | exit 1, byte-exact fixed error envelope, no `status`, no caller bytes |
+| 32 | `KOFRA_CONFIG_DIR` outside the home directory | `configDir.path` is `null` in JSON; human output names the selector only; no path component in either output |
 
 ## Security-review questions
 
@@ -397,7 +471,9 @@ Explicit questions for the security disposition that must precede any
 implementation:
 
 1. Is `~`-collapsed path emission acceptable in a shareable diagnostic,
-   or must paths be omitted entirely (selector only)?
+   or must paths be omitted entirely (selector only)? Out-of-home
+   paths are already `null` by the rule above; the question is only
+   about `~`-collapsed in-home paths.
 2. Is the `removed: ["userinfo"]` presence signal acceptable? It
    confirms the caller's input contained credential-bearing URL parts
    without emitting them, and nudges rotation of shell history and env.
