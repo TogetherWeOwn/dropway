@@ -8,6 +8,7 @@ import {
   ApiError,
   anonymousDisabled,
   createDeploy,
+  parseDeployOptions,
   getFile,
   getSiteFor,
   isHtml,
@@ -324,13 +325,14 @@ export const HTTP_OPERATIONS = [
         let site = await getSiteFor(dw, p, c.req.param("slug")!, "sites:write");
         const body = await readJson(c);
         const settings = parseSettings(body);
-        if (Object.keys(settings).length) site = await updateSite(dw, p, site.slug, settings);
-        const out = await createDeploy(dw, p, site, body.files, {
+        const opts = parseDeployOptions({
           message: body.message,
           client: clientOf(c),
           baseVersionId: body.baseVersionId,
           source: "api",
         });
+        if (Object.keys(settings).length) site = await updateSite(dw, p, site.slug, settings);
+        const out = await createDeploy(dw, p, site, body.files, opts);
         return c.json(out, out.unchanged ? 200 : 201);
       },
       contentTypes: ["application/json"],
