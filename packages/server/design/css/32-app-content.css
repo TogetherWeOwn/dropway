@@ -1,4 +1,6 @@
 /* App-only content: cards, three-column notes, code blocks with a header, one-line file warnings. */
+/* Inline code: a short token never wraps (pages.ts tok); a URL or command wraps only between its parts (urlCode). */
+code.tok,code.brk>span{white-space:nowrap}
 .card{background:var(--paper-2);border:1px solid var(--rule);padding:var(--s6);position:relative}
 .card h3{margin:6px 0 8px}
 .card p{color:var(--ink-2)}
@@ -68,8 +70,10 @@
   .table tr>td:empty{display:none}
   .table td[data-label]::before{content:attr(data-label);content:attr(data-label) / "";display:block;margin-bottom:3px;font:500 10.5px/1.3 var(--mono);text-transform:uppercase;letter-spacing:.11em;color:var(--accent-2)}
   .table tr>.num{text-align:left;white-space:normal}
-  .table td.num .sub{display:inline;margin-left:.3em}
-  .table td.num .sub::before{content:"· "}
+  /* The second part of a fact on the same line ("v1 · 2 files · 53 B", "Created just now · Never used"), kept whole;
+     no separator when it is empty. */
+  .table td.num .sub{display:inline;margin-left:.3em;white-space:nowrap}
+  .table td.num .sub:not(:empty)::before{content:"· "}
   .table td.act{display:flex;flex-wrap:wrap;gap:8px}
   .table td.act .btn+.btn{margin:0}
   .table .chip{white-space:normal;overflow-wrap:anywhere}
@@ -79,5 +83,12 @@
   .table.ftable tr{grid-template-columns:minmax(0,1fr) auto auto;align-items:center;padding:10px 14px}
   .table.ftable tr>:first-child,.table.ftable tr>.act{grid-column:auto}
   .table.ftable tr>.num{text-align:right}
-  .table.ftable .fname,.table.ftable tr>:first-child a{overflow-wrap:anywhere}
+  /* Paths break after a "/" (<wbr>), inside a name only as a last resort. */
+  .table.ftable .fname,.table.ftable tr>:first-child a{overflow-wrap:break-word}
+}
+/* The narrowest phones: the path takes the whole first line of its card, the size and the buttons the next. */
+@media (max-width:359.98px){
+  .table.ftable tr{grid-template-columns:minmax(0,1fr) auto}
+  .table.ftable tr>:first-child{grid-column:1/-1}
+  .table.ftable tr>.num{text-align:left}
 }

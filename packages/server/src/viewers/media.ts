@@ -14,15 +14,16 @@ import type { ViewMode, Viewer, ViewerContext } from "./index";
 const MEDIA_CSS = `
 .dw-media{display:flex;flex-direction:column;align-items:center;padding:16px 18px 32px;gap:10px;background:var(--paper-3);min-height:calc(100vh - 4rem)}
 .dw-stage{display:flex;align-items:center;justify-content:center;width:100%;min-height:calc(100vh - 9rem);border:1px solid var(--rule-soft);overflow:auto}
-.dw-stage img{display:block;max-width:100%;max-height:calc(100vh - 10rem);object-fit:contain;cursor:zoom-in}
+.dw-stage img{display:block;max-width:100%;max-height:calc(100vh - 10rem);object-fit:contain}
 #dw-zoom:checked~.dw-stage{align-items:flex-start;justify-content:flex-start}
-#dw-zoom:checked~.dw-stage img{max-width:none;max-height:none;cursor:zoom-out}
+#dw-zoom:checked~.dw-stage img{max-width:none;max-height:none}
 #dw-zoom:checked~.dw-mediabar label{border-color:var(--accent);color:var(--accent)}
 .dw-mediabar{display:flex;gap:.6rem;align-items:center;justify-content:center;flex-wrap:wrap}
 .dw-pdf{width:100%;height:calc(100vh - 3.6rem);border:0;display:block;background:var(--paper-3)}
 .dw-video{max-width:100%;max-height:calc(100vh - 9rem);background:var(--paper-3)}
 .dw-audio{width:min(40rem,100%);margin-top:18vh}
-.dw-fallback{max-width:34rem;margin:0 auto;padding:15vh 0 0;text-align:center;color:var(--muted)}
+.dw-fallback{max-width:34rem;margin:0 auto;padding:15vh var(--s5) 0;text-align:center;color:var(--muted)}
+@media (max-width:720px){.dw-fallback{padding:10vh var(--s4) 0}}
 `;
 
 /** Pixel size from the first bytes of a PNG, GIF, JPEG, WebP or BMP file. */
@@ -85,9 +86,9 @@ export const imageViewer: Viewer = {
     return viewerPage(vc, {
       tabs: mediaTabs(vc, "Image"),
       css: MEDIA_CSS,
-      body: `<main class="dw-media"><input type="checkbox" id="dw-zoom" class="k-toggle">
+      body: `<div class="dw-media"><input type="checkbox" id="dw-zoom" class="k-toggle">
 <div class="dw-mediabar"><span class="k-vmeta">${escapeHtml(meta)}</span><label for="dw-zoom" class="k-btn k-sm k-ghost k-togglebtn">Actual size</label></div>
-<label for="dw-zoom" class="dw-stage k-checker"><img src="${escapeHtml(vc.fileUrl)}" alt="${escapeHtml(name)}"${dim ? ` width="${dim.width}" height="${dim.height}"` : ""}></label></main>`,
+<div class="dw-stage k-checker"><img src="${escapeHtml(vc.fileUrl)}" alt="${escapeHtml(name)}"${dim ? ` width="${dim.width}" height="${dim.height}"` : ""}></div></div>`,
       headers: dim ? { "X-Kofra-Image-Size": `${dim.width}x${dim.height}` } : {},
     });
   },
@@ -103,9 +104,9 @@ export const svgViewer: Viewer = {
     return viewerPage(vc, {
       tabs: standardTabs(vc, { rendered: "Image", source: true }),
       css: MEDIA_CSS + ".dw-stage img{min-width:min(16rem,100%)}",
-      body: `<main class="dw-media"><input type="checkbox" id="dw-zoom" class="k-toggle">
+      body: `<div class="dw-media"><input type="checkbox" id="dw-zoom" class="k-toggle">
 <div class="dw-mediabar"><span class="k-vmeta">${escapeHtml(`${formatBytes(vc.file.size)} · SVG (scripts inside it do not run here)`)}</span><label for="dw-zoom" class="k-btn k-sm k-ghost k-togglebtn">Actual size</label></div>
-<label for="dw-zoom" class="dw-stage k-checker"><img src="${escapeHtml(vc.fileUrl)}" alt="${escapeHtml(name)}"></label></main>`,
+<div class="dw-stage k-checker"><img src="${escapeHtml(vc.fileUrl)}" alt="${escapeHtml(name)}"></div></div>`,
     });
   },
 };
@@ -120,6 +121,7 @@ export const pdfViewer: Viewer = {
       tabs: mediaTabs(vc, "PDF"),
       css: MEDIA_CSS,
       body: `<object class="dw-pdf" data="${escapeHtml(vc.rawUrl)}" type="application/pdf" aria-label="${escapeHtml(vc.file.path)}">${fallback}</object>`,
+      srHeading: true,
       csp: viewerCsp({ objectSrc: [vc.url.origin], frameSrc: [vc.url.origin] }),
     });
   },
@@ -149,8 +151,8 @@ export const videoViewer: Viewer = {
     return viewerPage(vc, {
       tabs: mediaTabs(vc, "Video"),
       css: MEDIA_CSS,
-      body: `<main class="dw-media"><video class="dw-video" controls playsinline preload="metadata" src="${escapeHtml(vc.fileUrl)}">${subtitleTracks(vc)}<a href="${escapeHtml(vc.downloadUrl)}">Download the video</a></video>
-<p class="k-small">${escapeHtml(`${formatBytes(vc.file.size)} · ${vc.file.contentType.split(";")[0]}`)}</p></main>`,
+      body: `<div class="dw-media"><video class="dw-video" controls playsinline preload="metadata" src="${escapeHtml(vc.fileUrl)}">${subtitleTracks(vc)}<a href="${escapeHtml(vc.downloadUrl)}">Download the video</a></video>
+<p class="k-small">${escapeHtml(`${formatBytes(vc.file.size)} · ${vc.file.contentType.split(";")[0]}`)}</p></div>`,
     });
   },
 };
@@ -164,8 +166,8 @@ export const audioViewer: Viewer = {
     return viewerPage(vc, {
       tabs: mediaTabs(vc, "Audio"),
       css: MEDIA_CSS,
-      body: `<main class="dw-media"><audio class="dw-audio" controls preload="metadata" src="${escapeHtml(vc.fileUrl)}"><a href="${escapeHtml(vc.downloadUrl)}">Download the audio</a></audio>
-<p class="k-small"><strong>${escapeHtml(name)}</strong> · ${escapeHtml(`${formatBytes(vc.file.size)} · ${vc.file.contentType.split(";")[0]}`)}</p></main>`,
+      body: `<div class="dw-media"><audio class="dw-audio" controls preload="metadata" src="${escapeHtml(vc.fileUrl)}"><a href="${escapeHtml(vc.downloadUrl)}">Download the audio</a></audio>
+<p class="k-small"><strong>${escapeHtml(name)}</strong> · ${escapeHtml(`${formatBytes(vc.file.size)} · ${vc.file.contentType.split(";")[0]}`)}</p></div>`,
     });
   },
 };
@@ -195,11 +197,11 @@ export const fontViewer: Viewer = {
 .dw-fs{display:flex;gap:1rem;align-items:baseline;border-top:1px solid var(--rule-soft);padding:.4rem 0}
 .dw-fs span{flex:none;width:3.5rem;color:var(--muted);font-size:.8rem;font-family:var(--mono)}
 .dw-fs p{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:"dw-specimen",var(--mono)}`,
-      body: `<main class="dw-font"><p class="k-small">${escapeHtml(`${name} · ${formatBytes(vc.file.size)} · ${vc.file.contentType.split(";")[0]}`)}</p>
+      body: `<div class="dw-font"><p class="k-small">${escapeHtml(`${name} · ${formatBytes(vc.file.size)} · ${vc.file.contentType.split(";")[0]}`)}</p>
 <div class="s big" aria-hidden="true">Aa Gg</div>
 <p class="s set">ABCDEFGHIJKLMNOPQRSTUVWXYZ<br>abcdefghijklmnopqrstuvwxyz<br>0123456789 !?&amp;@#%()[]{}.,;:'"-+=*/\\</p>
-<div class="s try" contenteditable="true" spellcheck="false" aria-label="Type to try the font">Type here to try this font.</div>
-${sizes}</main>`,
+<div class="s try" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" aria-label="Type to try the font">Type here to try this font.</div>
+${sizes}</div>`,
     });
   },
 };

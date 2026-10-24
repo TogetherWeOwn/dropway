@@ -28,7 +28,7 @@ export const MD_CSS = `
 .k-doc pre[data-lang]{position:relative}
 .k-doc pre[data-lang]::before{content:attr(data-lang);position:absolute;top:6px;right:10px;font:500 10.5px/1 var(--mono);letter-spacing:.11em;text-transform:uppercase;color:var(--accent-2)}
 .k-doc blockquote{border-left:3px solid var(--accent);padding:.1em 0 .1em 1em;color:var(--ink-2);font-family:var(--serif);font-size:1.06em}
-.k-doc table{border-collapse:collapse;display:block;overflow:auto;max-width:100%;font-size:15px;border-top:1px solid var(--accent)}
+.k-doc table{border-collapse:collapse;display:block;width:max-content;overflow:auto;max-width:100%;font-size:15px;border-top:1px solid var(--accent)}
 .k-doc th{font:500 10.5px/1.3 var(--mono);text-transform:uppercase;letter-spacing:.11em;color:var(--accent-2);text-align:left;padding:10px 14px 8px 0;border-bottom:1px solid var(--rule)}
 .k-doc td{padding:10px 14px 10px 0;border-bottom:1px solid var(--rule-soft);vertical-align:top}
 .k-doc hr{border:0;border-top:1px solid var(--rule);margin:2em 0}

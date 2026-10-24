@@ -23,6 +23,9 @@ const LABELS: Record<ThemePref, [string, string]> = {
 /** The trust line, verbatim (DESIGN.md section 10). Kofra never claims a file is safe. */
 export const TRUST_LINE = "Kofra does not scan files; open files only from people you trust.";
 
+/** id of the switch form: the no-script switch returns to `next#dw-mode`, so focus resumes at the switch. */
+export const MODE_SWITCH_ID = "dw-mode";
+
 /**
  * Auto / Light / Dark as submit buttons posting to /__dropway/theme: works on pages with no script at
  * all. Where the dashboard script runs it switches in place, without a reload. `next` is the current
@@ -35,7 +38,7 @@ export function modeSwitch(pref: ThemePref, next: string): string {
       return `<button type="submit" name="theme" value="${v}" aria-pressed="${pref === v}" title="${title}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">${ICONS[v]}</svg><span data-label="${label}">${label}</span></button>`;
     })
     .join("");
-  return `<form class="k-mode-switch" method="post" action="${THEME_PATH}"><input type="hidden" name="next" value="${e(next)}"><div role="group" aria-label="Colour theme">${buttons}</div></form>`;
+  return `<form class="k-mode-switch" id="${MODE_SWITCH_ID}" method="post" action="${THEME_PATH}"><input type="hidden" name="next" value="${e(next)}"><div role="group" aria-label="Colour theme">${buttons}</div></form>`;
 }
 
 export interface ChromeNavItem {
@@ -61,7 +64,7 @@ export function accountArea(o: AccountAreaOptions = {}): string {
   return `<a class="k-btn k-sm k-quiet" href="${e(o.signIn ?? "/login")}">Sign in</a>${o.start ? `<a class="k-btn k-sm k-hide-sm" href="${e(o.start.href)}">${e(o.start.label)}</a>` : ""}`;
 }
 
-/** The mono tag beside the wordmark when someone is signed in: "<account> · <email>" (plain text; hidden under 720px). */
+/** The tag beside the wordmark when someone is signed in: "<account> · <email>" (plain text, as typed; hidden under 720px). */
 export function identityTag(account: string | null | undefined, email: string | null | undefined): string {
   const parts = [account, email].map((x) => (x ?? "").trim()).filter(Boolean);
   // A personal account is often named after the email: say it once.
@@ -92,13 +95,18 @@ export interface AppHeaderOptions {
   navLabel?: string;
 }
 
+/**
+ * The header in reading order, which is also the visual order at every width: the first row is the wordmark,
+ * the tag, the account area and the mode switch; the navigation is the row under it. So keyboard focus moves
+ * left to right, then down, never back up the screen.
+ */
 export function appHeader(o: AppHeaderOptions): string {
   const nav = o.nav?.length
     ? `<nav class="k-nav" aria-label="${e(o.navLabel ?? "Main")}">${o.nav
         .map((n) => `<a href="${e(n.href)}"${n.href === o.active ? ' aria-current="page"' : ""}>${e(n.label)}</a>`)
         .join("")}</nav>`
     : "";
-  return `<header class="k-top"><div class="k-wrap"><a class="k-wm" href="${e(o.home ?? "/")}">${e(o.name)}</a>${o.tag || o.tagId ? `<span class="k-tag"${o.tagId ? ` id="${e(o.tagId)}"` : ""}>${e(o.tag ?? "")}</span>` : ""}${nav}<div class="k-acct"${o.accountId ? ` id="${e(o.accountId)}"` : ""}>${o.account ?? ""}</div>${o.modeSwitch === false ? "" : modeSwitch(o.theme, o.next)}</div></header>`;
+  return `<header class="k-top"><div class="k-wrap"><a class="k-wm" href="${e(o.home ?? "/")}">${e(o.name)}</a>${o.tag || o.tagId ? `<span class="k-tag"${o.tagId ? ` id="${e(o.tagId)}"` : ""}>${e(o.tag ?? "")}</span>` : ""}<div class="k-acct"${o.accountId ? ` id="${e(o.accountId)}"` : ""}>${o.account ?? ""}</div>${o.modeSwitch === false ? "" : modeSwitch(o.theme, o.next)}${nav}</div></header>`;
 }
 
 export interface AppFooterOptions {
@@ -149,5 +157,5 @@ export function siteHeader(name: string, appOrigin: string): string {
 
 /** Footer for site-origin pages: domains line, plus the trust line on pages that show files. */
 export function siteFooter(o: { name: string; appOrigin: string; domains?: string; trust?: boolean }): string {
-  return `<footer class="k-foot"><div class="k-wrap"><a class="k-wm" href="${e(o.appOrigin)}" rel="nofollow">${e(o.name)}</a>${o.domains ? `<span>${e(o.domains)}</span>` : ""}${o.trust ? `<p class="k-trust">${TRUST_LINE}</p>` : ""}</div></footer>`;
+  return `<footer class="k-foot k-sitefoot"><div class="k-wrap"><a class="k-wm" href="${e(o.appOrigin)}" rel="nofollow">${e(o.name)}</a>${o.domains ? `<span>${e(o.domains)}</span>` : ""}${o.trust ? `<p class="k-trust">${TRUST_LINE}</p>` : ""}</div></footer>`;
 }

@@ -2,6 +2,8 @@
    with the site-origin viewer bar. The frame keeps a white canvas in every mode, as a browser does (E2). */
 .page.wide{height:100vh;height:100dvh;min-height:0;overflow:hidden}
 .page.wide>main{min-height:0}
+/* The file workspace is full-bleed, header included: the wordmark sits over the file list's edge. */
+.page.wide .top>.wrap{max-width:none;padding-inline:18px}
 .vapp{display:flex;flex:1;min-height:0;width:100%}
 .vside{width:18rem;flex:none;border-right:1px solid var(--rule);background:var(--paper-2);overflow:auto;display:flex;flex-direction:column;gap:12px;padding:16px 14px}
 .vside .find{width:100%}

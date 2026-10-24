@@ -245,7 +245,7 @@ describe("viewer pages", () => {
     const again = await get("src/app.ts");
     expect(again.headers.get("x-kofra-render-cache")).toBe("memory");
     const etag = again.headers.get("etag")!;
-    expect(etag).toMatch(/^W\/"code@2\.sp1\.[0-9a-f]{8}-[a-f0-9]{64}"$/);
+    expect(etag).toMatch(/^W\/"code@2\.sp2\.[0-9a-f]{8}-[a-f0-9]{64}"$/);
     expect((await get("src/app.ts", { ...NAV, "If-None-Match": etag })).status).toBe(304);
     // A validator from before the redesign (no page version) never revalidates the new page.
     const sha = /-([a-f0-9]{64})"$/.exec(etag)![1];

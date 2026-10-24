@@ -8,6 +8,16 @@
 /* A select is as tall as the text inputs beside it (Chrome ignores line-height in selects), so the labels of a
    row of fields line up. */
 select.input{min-height:calc(1.55em + 24px)}
+/* Checkboxes and radios drawn from the tokens, so unchecked ones match the mode too (a native unchecked control
+   stays the browser's grey in Midnight). Forced colours get the native controls back (91-a11y-app.css). */
+input:is([type=checkbox],[type=radio]){-webkit-appearance:none;appearance:none;width:16px;height:16px;margin:0;flex:none;display:inline-grid;place-content:center;vertical-align:-3px;border:1.5px solid var(--edge);background:var(--field);color:var(--accent-ink);transition:background-color var(--t-fast) var(--ease),border-color var(--t-fast) var(--ease)}
+input[type=checkbox]{border-radius:3px}
+input[type=radio]{border-radius:50%}
+input:is([type=checkbox],[type=radio]):hover{border-color:var(--accent)}
+input:is([type=checkbox],[type=radio]):checked{background:var(--accent);border-color:var(--accent)}
+input[type=checkbox]:checked::before{content:"";width:9px;height:5px;border:solid currentColor;border-width:0 0 2px 2px;transform:translateY(-1px) rotate(-45deg)}
+input[type=radio]:checked::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+input:is([type=checkbox],[type=radio]):disabled{opacity:.5;cursor:not-allowed}
 .tog{display:inline-flex;gap:9px;align-items:flex-start;font-size:14px;line-height:1.4;color:var(--ink)}
 .tog input{width:16px;height:16px;margin:2px 0 0;flex:none}
 .tog .sub{font-size:13px}

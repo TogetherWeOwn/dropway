@@ -1,7 +1,8 @@
 /* Colour mode switch: Auto / Light / Dark as three submit buttons with aria-pressed (POST /__dropway/theme),
    so it works on pages with no script at all. The pressed button changes fill AND weight, never colour alone.
    Labels always show; icons from 720px. At least 30px tall. Hidden in print. */
-.mode-switch{margin:0;display:inline-flex;flex:none}
+/* scroll-margin: returning to #dw-mode after a no-script switch moves focus there without scrolling the page. */
+.mode-switch{margin:0;display:inline-flex;flex:none;scroll-margin-top:100vh}
 .mode-switch>div{display:inline-flex;border:1px solid var(--edge);border-radius:var(--r-ctl);background:var(--paper-2)}
 .mode-switch button{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:5px 11px;border:0;border-left:1px solid var(--rule-soft);background:transparent;font:500 12.5px/1.2 var(--sans);color:var(--ink-2);transition:background-color var(--t-fast) var(--ease),color var(--t-fast) var(--ease)}
 .mode-switch button:first-child{border-left:0;border-radius:3px 0 0 3px}

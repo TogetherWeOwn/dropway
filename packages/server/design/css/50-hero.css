@@ -14,7 +14,8 @@
 .per{font-family:var(--sans);font-size:14px;color:var(--ink-2);margin-left:4px}
 @media (max-width:1000px){
   .hero>.wrap{grid-template-columns:minmax(0,1fr)}
-  .hero .plate{max-width:560px}
+  /* One column: the plate spans the content width, as on phones (never a short plate with a gutter beside it). */
+  .hero .plate{max-width:none}
   .blocks{grid-template-columns:minmax(0,1fr)}
 }
 @media (max-width:720px){

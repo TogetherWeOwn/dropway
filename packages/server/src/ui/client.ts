@@ -182,6 +182,24 @@ export function dropwayClient(motifsFactory) {
     for (var i = 2; i < arguments.length; i++) addOne(el, arguments[i]);
     return el;
   }
+  /**
+   * A file path as text with a line-break opportunity after each "/" (<wbr>), so a long path wraps between its
+   * folders and its name ("notebooks/" then "rain.ipynb"): never inside a name, and never an extension on a line
+   * of its own. A single name longer than the line is the only thing that still breaks (overflow-wrap).
+   */
+  function pathBreaks(p) {
+    var out = [];
+    var text = String(p);
+    var from = 0;
+    for (var i = 1; i < text.length; i++) {
+      if (text.charAt(i - 1) === "/" && text.charAt(i) !== "/") {
+        out.push(text.slice(from, i), d.createElement("wbr"));
+        from = i;
+      }
+    }
+    out.push(text.slice(from));
+    return out;
+  }
   /** add(el, child, child, ...): append children (nodes, strings, arrays; null/false skipped). */
   function add(el) {
     for (var i = 1; i < arguments.length; i++) addOne(el, arguments[i]);
@@ -376,6 +394,7 @@ export function dropwayClient(motifsFactory) {
     return new Promise(function (resolve) {
       var input = opts.typeToConfirm ? h("input", { class: "k-input k-mono", id: "dw-dlg-input", autocomplete: "off", spellcheck: "false" }) : null;
       var ok = h("button", { class: "k-btn" + (opts.danger === false ? "" : " k-danger"), value: "ok", text: opts.confirmText || "Confirm", disabled: !!input });
+      var cancel = h("button", { class: "k-btn k-ghost", value: "cancel", text: "Cancel" });
       var dlg = h(
         "dialog",
         { class: "k-dlg" + (opts.danger === false ? "" : " k-warn"), "aria-labelledby": "dw-dlg-title", "aria-describedby": opts.message ? "dw-dlg-msg" : null },
@@ -386,7 +405,7 @@ export function dropwayClient(motifsFactory) {
           opts.message ? h("p", { id: "dw-dlg-msg", text: opts.message }) : null,
           input ? h("label", { class: "k-label", for: "dw-dlg-input", text: "Type " + opts.typeToConfirm + " to confirm" }) : null,
           input,
-          h("div", { class: "k-btnrow" }, h("button", { class: "k-btn k-ghost", value: "cancel", text: "Cancel" }), ok),
+          h("div", { class: "k-btnrow" }, cancel, ok),
         ),
       );
       if (input)
@@ -400,7 +419,9 @@ export function dropwayClient(motifsFactory) {
       });
       d.body.appendChild(dlg);
       dlg.showModal();
-      (input || ok).focus();
+      // An irreversible action never starts on its own button (Enter twice must not do it): focus the field to
+      // type into, else Cancel (WAI-ARIA APG alertdialog); a harmless confirmation starts on its button.
+      (input || (opts.danger === false ? ok : cancel)).focus();
     });
   }
 
@@ -696,7 +717,7 @@ export function dropwayClient(motifsFactory) {
     }
     var state = { items: [], skipped: [], busy: false };
     var siteSelect = h("select", { class: "k-input", id: "dw-pub-site", "aria-label": "Site to update" }, h("option", { value: "", text: "Loading sites…" }));
-    var slugInput = h("input", { class: "k-input", id: "dw-pub-slug", placeholder: "generated if empty", autocomplete: "off", spellcheck: "false", pattern: "[a-z0-9][a-z0-9-]{1,62}" });
+    var slugInput = h("input", { class: "k-input", id: "dw-pub-slug", placeholder: "generated if empty", autocomplete: "off", spellcheck: "false", pattern: "[a-z0-9][a-z0-9\\-]{1,62}" });
     var modeNew = h("input", { type: "radio", name: "dw-pub-mode", value: "new", checked: !opts.site });
     var modeUpd = h("input", { type: "radio", name: "dw-pub-mode", value: "update", checked: !!opts.site });
     var message = h("input", { class: "k-input", id: "dw-pub-msg", maxlength: "200", placeholder: "What changed (optional)" });
@@ -762,7 +783,7 @@ export function dropwayClient(motifsFactory) {
               "li",
               { class: "k-frow" },
               thumbFor(kindOfName(it.path)),
-              h("span", {}, h("span", { class: "k-fname", text: it.path }), h("span", { class: "k-fmeta", text: bytes(it.file.size) + (folder ? " · in a folder" : "") })),
+              h("span", {}, h("span", { class: "k-fname" }, pathBreaks(it.path)), h("span", { class: "k-fmeta", text: bytes(it.file.size) + (folder ? " · in a folder" : "") })),
               h("span"),
             ),
           );
@@ -1116,7 +1137,12 @@ export function dropwayClient(motifsFactory) {
         { class: "k-only-wide" },
         h("span", { class: "k-url" }, h("a", { href: s.url, target: "_blank", rel: "noopener", class: "k-small", text: s.url.replace(/^https?:\/\//, "") }), copyButton(s.url, "Copy URL of " + s.slug)),
       ),
-      h("td", { class: "k-num k-small", "data-label": "Live" }, v ? "v" + v.number : "–", h("span", { class: "k-sub", text: v ? plural(v.fileCount, "file") + " · " + bytes(v.totalBytes) : "" })),
+      // No live version: a dash (named for screen readers) and no sub-line, so no separator dangles on phones.
+      h(
+        "td",
+        { class: "k-num k-small", "data-label": "Live" },
+        v ? ["v" + v.number, h("span", { class: "k-sub", text: plural(v.fileCount, "file") + " · " + bytes(v.totalBytes) })] : [h("span", { "aria-hidden": "true", text: "–" }), h("span", { class: "k-sr", text: "Not published" })],
+      ),
       h("td", { class: "k-num k-small", "data-label": "Updated", title: s.updatedAt, text: ago(s.updatedAt) }),
       h(
         "td",
@@ -1326,7 +1352,7 @@ export function dropwayClient(motifsFactory) {
             h(
               "td",
               { class: "k-mono" },
-              v.live ? h("a", { href: "/v/" + encodeURIComponent(slug) + "/" + encodePath(f.path), text: f.path }) : h("span", { text: f.path }),
+              v.live ? h("a", { href: "/v/" + encodeURIComponent(slug) + "/" + encodePath(f.path) }, pathBreaks(f.path)) : h("span", {}, pathBreaks(f.path)),
               // 720-1099px: the kind sits under the path (its own column, and the checksum's, need 1100px).
               h("span", { class: "k-chips k-rowchips k-only-narrow k-hide-sm" }, h("span", { class: "k-chip", text: kindLabel(f.kind) })),
             ),
@@ -1513,7 +1539,7 @@ export function dropwayClient(motifsFactory) {
         add(
           created,
           secretBlock("Key “" + (k.name || k.prefix) + "” created", k.key, "Give it to the agent or person as KOFRA_API_KEY."),
-          h("div", { class: "k-codeblock" }, h("div", { class: "k-codeblock-h" }, h("span", { class: "k-k", text: "Environment" })), h("pre", { tabindex: "0", text: "export KOFRA_URL=" + boot.origin + "\nexport KOFRA_API_KEY=" + k.key })),
+          h("div", { class: "k-codeblock" }, h("div", { class: "k-codeblock-h" }, h("span", { class: "k-k", text: "Environment" })), h("pre", { tabindex: "0", role: "region", "aria-label": "Environment", text: "export KOFRA_URL=" + boot.origin + "\nexport KOFRA_API_KEY=" + k.key })),
         );
         form.reset();
         loadKeys();
@@ -1552,7 +1578,8 @@ export function dropwayClient(motifsFactory) {
               h("td", { class: "k-wide", "data-label": "Scopes" }, h("span", { class: "k-chips" }, k.scopes.map(function (sc) {
                 return h("span", { class: "k-chip", text: sc });
               })), k.siteId ? h("span", { class: "k-sub", text: "One site only" }) : null),
-              h("td", { class: "k-num k-small" }, h("span", { title: localTime(k.createdAt), text: "Created " + ago(k.createdAt) }), h("span", { class: "k-sub", title: k.lastUsedAt ? localTime(k.lastUsedAt) : null, text: k.lastUsedAt ? "Used " + ago(k.lastUsedAt) : "Never used" })),
+              // Phones: the activity takes the card's full width, so "Never used" never splits from "Created ...".
+              h("td", { class: "k-num k-small k-wide", "data-label": "Activity" }, h("span", { title: localTime(k.createdAt), text: "Created " + ago(k.createdAt) }), h("span", { class: "k-sub", title: k.lastUsedAt ? localTime(k.lastUsedAt) : null, text: k.lastUsedAt ? "Used " + ago(k.lastUsedAt) : "Never used" })),
               h("td", { class: "k-num k-small", text: k.expiresAt ? "Expires " + localTime(k.expiresAt) : "No expiry" }),
               h(
                 "td",
@@ -1656,7 +1683,7 @@ export function dropwayClient(motifsFactory) {
               {},
               h("td", {}, h("strong", { text: x.email || x.name || x.id }), x.name && x.email ? h("span", { class: "k-sub", text: x.name }) : null),
               h("td", { "data-label": "Role" }, h("span", { class: "k-chip" + (x.role === "owner" ? " k-accent" : ""), text: x.role })),
-              h("td", { class: "k-num k-small", title: localTime(x.createdAt), text: "Added " + ago(x.createdAt) }),
+              h("td", { class: "k-num k-small", "data-label": "Added", title: localTime(x.createdAt), text: ago(x.createdAt) }),
               h(
                 "td",
                 { class: "k-act" },

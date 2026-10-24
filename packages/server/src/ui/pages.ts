@@ -22,18 +22,45 @@ function block(opts: { id?: string; title: string; titleId?: string; tools?: str
 
 const NOSCRIPT = `<noscript><p class="k-pad k-small">The dashboard loads its data with JavaScript.</p></noscript>`;
 
+/** Inline code that never breaks inside itself: a query, a scope, a secret's name (short tokens). */
+const tok = (t: string) => `<code class="k-tok">${e(t)}</code>`;
+
+/**
+ * A URL or command as inline code that may wrap only after "/", before "." and at spaces (<wbr>), never inside a
+ * name such as "kofra-sites", and never after a "?".
+ */
+export function urlCode(t: string): string {
+  const html = t
+    .split(/(\s+)/)
+    .map((word) => {
+      if (!word || /^\s+$/.test(word)) return word;
+      const segs: string[] = [];
+      let from = 0;
+      for (let i = 1; i < word.length; i++) {
+        if (word[i - 1] === "/" ? word[i] !== "/" : word[i] === "." && word[i - 1] !== ".") {
+          segs.push(word.slice(from, i));
+          from = i;
+        }
+      }
+      segs.push(word.slice(from));
+      return segs.map((s) => `<span>${e(s)}</span>`).join("<wbr>");
+    })
+    .join("");
+  return `<code class="k-brk">${html}</code>`;
+}
+
 /** Where sites are served, in words. */
 function sitesWhere(dw: DropwayContext): string {
   const c = dw.config;
   const example = siteUrl(dw, "SITE");
-  if (c.sitesMode === "subdomain") return `Each site on its own origin: <code>${e(example)}</code>`;
-  if (c.sitesOrigin) return `On a separate sites origin, one folder per site: <code>${e(example)}</code>`;
-  return `On this origin under <code>${e(c.sitesPathPrefix)}/</code>, sandboxed: <code>${e(example)}</code>`;
+  if (c.sitesMode === "subdomain") return `Each site on its own origin: ${urlCode(example)}`;
+  if (c.sitesOrigin) return `On a separate sites origin, one folder per site: ${urlCode(example)}`;
+  return `On this origin under ${tok(`${c.sitesPathPrefix}/`)}, sandboxed: ${urlCode(example)}`;
 }
 
 /** A code block with a kicker and a Copy button (shown once the dashboard script runs). */
 function codeblock(id: string, label: string, text: string): string {
-  return `<div class="k-codeblock"><div class="k-codeblock-h"><span class="k-k">${e(label)}</span><button type="button" class="k-btn k-sm k-ghost" data-copy="#${id}" aria-label="Copy: ${e(label)}" hidden>Copy</button></div><pre id="${id}" tabindex="0" aria-label="${e(label)}">${e(text)}</pre></div>`;
+  return `<div class="k-codeblock"><div class="k-codeblock-h"><span class="k-k">${e(label)}</span><button type="button" class="k-btn k-sm k-ghost" data-copy="#${id}" aria-label="Copy: ${e(label)}" hidden>Copy</button></div><pre id="${id}" tabindex="0" role="region" aria-label="${e(label)}">${e(text)}</pre></div>`;
 }
 
 // ------------------------------------------------------------------ home
@@ -56,7 +83,7 @@ export async function homePage(c: Context<DropwayEnv>): Promise<Response> {
         "dw-s-zip",
         "Publish a zip",
         `cd dist && zip -qr ../site.zip . && cd ..\ncurl ${o}/api/v1/publish -H "Authorization: Bearer $KOFRA_API_KEY" \\\n  -H "Content-Type: application/zip" --data-binary @site.zip`,
-      )}<p class="k-small">Add <code>?slug=&lt;site&gt;</code> to publish a new version of the same site.</p>`,
+      )}<p class="k-small">Add ${tok("?slug=<site>")} to publish a new version of the same site.</p>`,
     ],
     [
       "cli",
@@ -83,7 +110,7 @@ export async function homePage(c: Context<DropwayEnv>): Promise<Response> {
     [
       "docs",
       "Agent docs",
-      `<p class="k-small">Point an agent at these; they describe this instance, not a generic one.</p><ul class="k-small"><li><a href="/llms.txt">/llms.txt</a>: how to publish, update and roll back</li><li><a href="/llms-full.txt">/llms-full.txt</a>: every endpoint, MCP tool and error code</li><li><a href="/skill.md">/skill.md</a>: Agent Skill (<code>npx skills add ${e(o)}</code>)</li><li><a href="/openapi.json">/openapi.json</a>: every REST operation</li><li><code>${e(o)}/mcp</code>: the MCP endpoint</li></ul>`,
+      `<p class="k-small">Point an agent at these; they describe this instance, not a generic one.</p><ul class="k-small"><li><a href="/llms.txt">/llms.txt</a>: how to publish, update and roll back</li><li><a href="/llms-full.txt">/llms-full.txt</a>: every endpoint, MCP tool and error code</li><li><a href="/skill.md">/skill.md</a>: Agent Skill (${urlCode(`npx skills add ${o}`)})</li><li><a href="/openapi.json">/openapi.json</a>: every REST operation</li><li>${urlCode(`${o}/mcp`)}: the MCP endpoint</li></ul>`,
     ],
   ];
   const tabList = tabs
@@ -94,7 +121,7 @@ export async function homePage(c: Context<DropwayEnv>): Promise<Response> {
   const points: Array<[string, string]> = [
     ["Versions, not overwrites", "Each publish is immutable. Restoring an old one is instant: only the live pointer moves."],
     ["Only new bytes travel", "Files are stored once by SHA-256. A republish uploads only what changed."],
-    ["Every file type viewable", "Add <code>?raw=1</code> for the stored bytes, <code>?view=source</code> for highlighted source."],
+    ["Every file type viewable", `Add ${tok("?raw=1")} for the stored bytes, ${tok("?view=source")} for highlighted source.`],
     ["Sites", `${sitesWhere(dw)}.`],
     [
       "Publishing",
@@ -104,7 +131,7 @@ export async function homePage(c: Context<DropwayEnv>): Promise<Response> {
   ];
   const setup = setUp
     ? ""
-    : `<div class="k-banner k-warn" role="status"><div><strong>This instance is not set up yet.</strong> Create the owner with the <code>ADMIN_BOOTSTRAP_KEY</code> secret you configured: <a href="/login#setup">set it up in the browser</a>, or with curl:${codeblock(
+    : `<div class="k-banner k-warn" role="status"><div><strong>This instance is not set up yet.</strong> Create the owner with the ${tok("ADMIN_BOOTSTRAP_KEY")} secret you configured: <a href="/login#setup">set it up in the browser</a>, or with curl:${codeblock(
         "dw-s-setup",
         "Set up with curl",
         `curl -X POST ${o}/api/v1/setup \\\n  -H "Authorization: Bearer $ADMIN_BOOTSTRAP_KEY" \\\n  -H "Content-Type: application/json" -d '{"email":"you@example.com"}'`,
@@ -161,7 +188,7 @@ ${sessionNote}${setup}
 <div class="k-btnrow"><button type="submit" class="k-btn">Sign in</button></div>
 <div id="dw-signin-out" aria-live="polite"></div>
 </form>
-<p class="k-small k-panel-note">Keys come from the instance owner: the owner key is created at setup, and anyone with the <code>keys:write</code> scope can create more under API keys.</p></section>
+<p class="k-small k-panel-note">Keys come from the instance owner: the owner key is created at setup, and anyone with the ${tok("keys:write")} scope can create more under API keys.</p></section>
 ${
   setUp
     ? `<details class="k-how"><summary>Lost the owner key?</summary><form class="k-panel" id="dw-recover" method="post" action="/login">${bootstrapField.replaceAll("%ID%", "dw-recover-secret")}<button type="submit" class="k-btn k-ghost">Create a new owner key</button><div data-out aria-live="polite"></div></form></details>`
@@ -222,7 +249,7 @@ export async function settingsPage(c: Context<DropwayEnv>, slots: UiSlots): Prom
   const lim = cfg.limits;
   const rows: Array<[string, string]> = [
     ["Instance name", e(cfg.instanceName)],
-    ["App and API", `<code>${e(appOrigin(dw))}</code>`],
+    ["App and API", urlCode(appOrigin(dw))],
     ["Sites", sitesWhere(dw)],
     [
       "Sandbox on sites",

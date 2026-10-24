@@ -89,7 +89,8 @@ describe("app pages", () => {
     // Settings shows the instance configuration, server-rendered.
     const settings = await (await dw.call("/dashboard/settings")).text();
     expect(settings).toContain("Anonymous publishing");
-    expect(settings).toContain("/s/SITE/");
+    // The example address is inline code that wraps only between its parts (<wbr>); its text is unchanged.
+    expect(settings.replace(/<[^>]+>/g, "")).toContain("/s/SITE/");
   });
 
   it("escapes boot data so it cannot close its script tag", () => {

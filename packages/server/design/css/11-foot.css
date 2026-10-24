@@ -10,4 +10,7 @@
 .sitehead{border-bottom:1px solid var(--rule-soft);background:var(--paper)}
 .sitehead>.wrap{display:flex;align-items:center;min-height:44px}
 .sitehead .wm{font-size:16px}
-@media (max-width:720px){.foot .end{margin-left:0;flex-basis:100%}}
+/* Site-origin pages are full-bleed, on the viewer bar's gutter: the wordmark and footer sit on the same left
+   edge on every site page (system pages, listings, viewers). */
+.sitehead>.wrap,.sitefoot>.wrap{max-width:none;padding:0 18px}
+@media (max-width:720px){.foot .end{margin-left:0;flex-basis:100%}.sitehead>.wrap,.sitefoot>.wrap{padding:0 12px}}

@@ -1,6 +1,6 @@
 import { appOrigin, type DropwayContext } from "@dropway/core";
 import { escapeHtml } from "./escape";
-import { siteFooter, siteHeader } from "./ui/chrome";
+import { SKIP_LINK, siteFooter, siteHeader } from "./ui/chrome";
 import { renderDocument } from "./ui/document";
 import { themeOf, type ThemePref } from "./ui/theme";
 
@@ -62,7 +62,7 @@ export function systemPage(opts: {
   extra?: string;
   stamp?: { text: string; grey?: boolean };
   /** "panel" for a form page (the password gate): an accent-framed panel instead of an end state. */
-  variant?: "state" | "panel" | "empty";
+  variant?: "state" | "panel";
   /** The instance (for the wordmark, fonts and the colour mode). Omitted: a bare page with system fonts. */
   dw?: DropwayContext;
   theme?: ThemePref;
@@ -81,10 +81,10 @@ export function systemPage(opts: {
   const state =
     opts.variant === "panel"
       ? `<div class="k-panel">${inner}</div>`
-      : `<div class="k-state${stamp ? "" : " k-nostamp"}${opts.variant === "empty" ? " k-empty" : ""}">${stamp}<div>${inner}</div></div>`;
+      : `<div class="k-state${stamp ? "" : " k-nostamp"}">${stamp}<div>${inner}</div></div>`;
   const body = opts.embed
     ? `<div class="k-sys"><main id="dw-main">${state}</main></div>`
-    : `<div class="k-sys">${origin ? siteHeader(name, origin) : ""}<main id="dw-main">${state}</main><div class="k-guilloche-band" aria-hidden="true"></div>${
+    : `${SKIP_LINK}<div class="k-sys">${origin ? siteHeader(name, origin) : ""}<main id="dw-main">${state}</main><div class="k-guilloche-band" aria-hidden="true"></div>${
         origin && dw ? siteFooter({ name, appOrigin: origin, domains: domainsLine(dw), trust: opts.trust }) : ""
       }</div>`;
   return htmlPage({

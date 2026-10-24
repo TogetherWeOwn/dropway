@@ -46,7 +46,8 @@ h4{font-size:25px}
 p{margin:0 0 var(--s3)}
 /* Martian Mono has a .7em character width. Match that on any monospace fallback, not a local font name. */
 code,kbd,samp,pre{font-family:var(--mono);font-size:.86em;font-size-adjust:ch-width .7}
-:not(pre)>code{background:var(--paper-3);color:var(--ink);padding:2px 6px;overflow-wrap:anywhere;border-radius:2px}
+/* Inline code wraps only when a token is longer than the line, and a wrapped fragment keeps its padding. */
+:not(pre)>code{background:var(--paper-3);color:var(--ink);padding:2px 6px;overflow-wrap:break-word;border-radius:2px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 kbd{border:1px solid var(--edge);border-bottom-width:2px;border-radius:3px;padding:1px 5px;background:var(--surface)}
 summary{cursor:pointer;color:var(--accent)}
 input[type=checkbox],input[type=radio]{accent-color:var(--accent)}

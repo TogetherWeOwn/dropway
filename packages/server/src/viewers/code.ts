@@ -79,10 +79,10 @@ export async function codePage(vc: ViewerContext, opts: { text: string; truncate
   const { html, lines, cache } = await renderCodeLines(vc, opts.text, opts.lang, opts.truncated ? `first${opts.shown}` : "full");
   const name = hljsLanguage(opts.lang);
   const plainNote = opts.text.length > HIGHLIGHT_MAX_BYTES && name ? `<p class="k-banner k-notebar" role="note">This file is too large to highlight; it is shown as plain text.</p>` : "";
-  const body = `${opts.note ?? ""}${opts.truncated ? truncatedNote(vc, opts.shown) : ""}${plainNote}<main class="dw-codewrap${opts.truncated ? " dw-truncated" : ""}">
+  const body = `${opts.note ?? ""}${opts.truncated ? truncatedNote(vc, opts.shown) : ""}${plainNote}<div class="dw-codewrap${opts.truncated ? " dw-truncated" : ""}">
 <input type="checkbox" id="dw-wrap" class="k-toggle">
 <div class="dw-codehead"><span class="dw-lang">${escapeHtml(vc.file.kind === "html" ? "HTML" : vc.file.kind === "svg" ? "SVG" : name ?? "plain text")} · ${lines.toLocaleString("en-US")} line${lines === 1 ? "" : "s"}</span><label for="dw-wrap" class="k-btn k-sm k-ghost k-togglebtn">Wrap</label><button type="button" id="dw-copy" class="k-btn k-sm k-ghost" hidden>Copy</button></div>
-<div class="dw-src" tabindex="0" role="region" aria-label="${escapeHtml(vc.file.path)}">${html}</div></main>`;
+<div class="dw-src" tabindex="0" role="region" aria-label="${escapeHtml(vc.file.path)}">${html}</div></div>`;
   return viewerPage(vc, {
     tabs: opts.tabs,
     body,

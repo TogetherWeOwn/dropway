@@ -163,10 +163,11 @@ export function systemResponse(
           code,
           title,
           message: message.replace("{app}", `<a href="${escapeHtml(origin)}"${out}>${escapeHtml(dw.config.instanceName)}</a>`),
-          extra: extra + (code === "PASSWORD" ? "" : `<div class="k-acts"><a class="k-btn k-ghost" href="${escapeHtml(origin)}"${out}>Home</a>${code === "EMPTY" && live ? `<a class="k-btn" href="${escapeHtml(origin)}/dashboard/publish?site=${escapeHtml(encodeURIComponent(live.slug))}"${out}>Publish files</a>` : status === 502 ? `<a class="k-btn" href="${escapeHtml(req.url)}">Try again</a>` : ""}</div>`),
+          // One order on every end state: the primary action first, then Home.
+          extra: extra + (code === "PASSWORD" ? "" : `<div class="k-acts">${code === "EMPTY" && live ? `<a class="k-btn" href="${escapeHtml(origin)}/dashboard/publish?site=${escapeHtml(encodeURIComponent(live.slug))}"${out}>Publish files</a>` : status === 502 ? `<a class="k-btn" href="${escapeHtml(req.url)}">Try again</a>` : ""}<a class="k-btn k-ghost" href="${escapeHtml(origin)}"${out}>Home</a></div>`),
           // Only terminal lifecycle states get a stamp.
           stamp: status === 410 ? { text: "Expired" } : undefined,
-          variant: code === "PASSWORD" ? "panel" : code === "EMPTY" ? "empty" : "state",
+          variant: code === "PASSWORD" ? "panel" : "state",
           embed,
         });
   return new Response(body, { status, headers: h });

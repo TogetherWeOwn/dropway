@@ -1,6 +1,6 @@
 import { appOrigin, encodePath, KIND_LABELS } from "@dropway/core";
 import { escapeHtml, formatBytes, htmlPage } from "../html";
-import { TRUST_LINE } from "../ui/chrome";
+import { SKIP_LINK, TRUST_LINE } from "../ui/chrome";
 import { SITE_CSS_HASH } from "../ui/design.generated";
 import { fileSeal } from "../ui/motifs";
 import { themeOf } from "../ui/theme";
@@ -12,7 +12,7 @@ import { carryLink, type LinkCarry } from "./links";
  * every viewer ETag, so a redesign (or any change to the site CSS, through its hash) turns over the
  * validators of every viewer at once, not only of viewers whose own version was bumped.
  */
-export const VIEWER_PAGE_VERSION = `sp1.${SITE_CSS_HASH}`;
+export const VIEWER_PAGE_VERSION = `sp2.${SITE_CSS_HASH}`;
 
 /**
  * The shared frame of every viewer page: one slim bar (kind, path, size, type;
@@ -128,21 +128,28 @@ export const VIEWER_CSS = `
 .k-toggle:focus-visible~* .k-togglebtn,.k-toggle:focus-visible~.k-togglebtn{outline:2px solid var(--focus);outline-offset:2px}
 `;
 
-/** A complete viewer page response. `body` is trusted HTML (escape user content before passing it). */
+/**
+ * A complete viewer page response. `body` is trusted HTML (escape user content before passing it); it is the
+ * page's one <main id="dw-main"> (viewers never add their own), after a "Skip to content" link that passes the
+ * bar. `srHeading`: viewers with no visible heading (PDF, an HTML page in the frame) get the file name as a
+ * visually hidden h1, so the page still has one.
+ */
 export function viewerPage(
   vc: ViewerContext,
-  opts: { title?: string; body: string; css?: string; tabs: ViewerTab[]; barExtra?: string; csp?: string; script?: string; headers?: Record<string, string> },
+  opts: { title?: string; body: string; css?: string; tabs: ViewerTab[]; barExtra?: string; csp?: string; script?: string; headers?: Record<string, string>; srHeading?: boolean },
 ): Response {
+  const name = vc.file.path.split("/").pop() ?? vc.file.path;
   const page = htmlPage({
-    title: opts.title ?? `${vc.file.path.split("/").pop()} · ${vc.live.slug}`,
+    title: opts.title ?? `${name} · ${vc.live.slug}`,
     css: VIEWER_CSS + (opts.css ?? ""),
     robots: "noindex",
     delivery: "site",
     theme: themeOf(vc.dw),
     appOrigin: appOrigin(vc.dw),
     body:
+      (vc.embed ? "" : SKIP_LINK) +
       viewerBar(vc, opts.tabs, opts.barExtra) +
-      `<div class="k-vbody">${opts.body}</div>` +
+      `<main id="dw-main" class="k-vbody">${opts.srHeading ? `<h1 class="k-sr">${escapeHtml(name)}</h1>` : ""}${opts.body}</main>` +
       (vc.embed ? "" : `<p class="k-trust k-vtrust k-hide-lg">${TRUST_LINE}</p>`) +
       (opts.script ? `<script>${opts.script}</script>` : ""),
   });

@@ -26,10 +26,17 @@
 //   identity (G6) auto with the OS light is pixel-identical to light, and auto with the OS dark to dark
 //            (the mode switch, whose pressed state differs, and per-screen secrets are masked; channel
 //            deltas of 2/255 or less, rasteriser rounding on anti-aliased edges, are reported as noise)
-// Extra passes: every screen in Light at 320 px (reflow), forced colours (G12: axe and focus) on J15, J16,
-// J53 and J57, and the switch itself (G13: no-script POST, in-place switch with the script, keyboard,
-// persistence across a reload, and an explicit mode kept when someone follows a link inside the app viewer's
-// frame).
+//   copy     no ledger fact (a phone card cell) starts or ends with a dangling "·" separator
+// Console capture stays on while axe runs (only axe's own cross-frame postMessage warning is ignored), and
+// every form field is asked checkValidity() first, so an invalid pattern attribute shows up as a console error.
+// axe "incomplete" (needs review) results, colour contrast included, are listed per cell in matrix.json
+// (axeReview); they do not fail a cell.
+// Extra passes: every screen in Light at 320 px (reflow), every screen in Light at 1440 px with normal motion
+// (motion: the other cells run with reduced motion), forced colours (G12: axe and focus) on J15, J16, J53 and
+// J57, the switch itself (G13: no-script POST, in-place switch with the script, keyboard, persistence across a
+// reload, and an explicit mode kept when someone follows a link inside the app viewer's frame), and a
+// filmstrip (G7b): explicit modes loaded with the stylesheet and fonts held back, every painted frame captured
+// from the compositor (CDP screencast) and its dominant colour checked against the mode.
 // Explicit modes use the __Host-dw_theme cookie on the app origin and ?theme= on site origins; Auto uses
 // the emulated prefers-color-scheme and no cookie.
 //
@@ -603,7 +610,7 @@ async function main() {
     // Every screen: the 12 matrix cells, then (extra passes) Light at 320 px and, for FORCED, forced colours.
     const jobsFor = (sc) => [
       ...MODES.flatMap((mode) => WIDTHS.map((width) => [sc, mode, width, "matrix"])),
-      ...(EXTRA ? [[sc, "light", 320, "reflow"]] : []),
+      ...(EXTRA ? [[sc, "light", 320, "reflow"], [sc, "light", 1440, "motion"]] : []),
       ...(EXTRA && FORCED.has(sc.id) ? [390, 1440].map((width) => [sc, "light", width, "forced"]) : []),
     ];
     const runOn = (worker, ctx) => async ([sc, mode, width, pass]) =>
@@ -621,6 +628,7 @@ async function main() {
     );
     for (const job of main.filter((x) => x.mutates).flatMap(jobsFor)) await runOne(job);
     if ((EXTRA && !ONLY) || args.includes("--switch")) checks.themeSwitch = await themeSwitchChecks(browser, mf, fx);
+    if ((EXTRA && !ONLY) || args.includes("--filmstrip")) checks.filmstrip = await filmstripChecks(browser, mf, fx);
     if (separate.length) {
       pathWorker = await startFreshWorker((dir) => startWorker(dir, { SITES_MODE: "path", SITES_DOMAIN: "", SITES_ORIGIN: SEPARATE }));
       const pathFx = await seed(pathWorker.mf, pathWorker.db);
@@ -689,7 +697,7 @@ async function main() {
 export function failures(matrix, checks = {}) {
   return {
     failed: matrix.filter((c) => Object.values(c.gates).some((g) => !g.pass)),
-    switchFailed: Object.entries(checks.themeSwitch ?? {}).filter(([, v]) => !v.pass).map(([k]) => k),
+    switchFailed: [...Object.entries(checks.themeSwitch ?? {}), ...Object.entries(checks.filmstrip ?? {})].filter(([, v]) => !v.pass).map(([k]) => k),
   };
 }
 
@@ -699,7 +707,7 @@ export function exitCodeFor(matrix, checks = {}) {
   return matrix.length && !failed.length && !switchFailed.length ? 0 : 1;
 }
 
-const PASSES = ["matrix", "reflow", "forced"];
+const PASSES = ["matrix", "reflow", "motion", "forced"];
 
 /**
  * G13 in the browser: the switch works with no script (form POST, 303 back, mode rendered by the server),
@@ -995,7 +1003,23 @@ const FOCUS_PROBE = () => {
 };
 
 /** G4: Tab from the top of the page (or of an open dialog) through every focusable element, then Shift+Tab back. */
-async function focusWalk(page) {
+/** Until the page stops scrolling (a smooth scroll to the focused element, with normal motion), at most ~1 s. */
+const SETTLE = () =>
+  new Promise((done) => {
+    let last = null;
+    let still = 0;
+    let n = 0;
+    const tick = () => {
+      const now = `${scrollX},${scrollY}`;
+      still = now === last ? still + 1 : 0;
+      last = now;
+      if (still >= 3 || ++n > 60) done();
+      else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+
+async function focusWalk(page, opts = {}) {
   await page.evaluate(() => {
     const host = document.querySelector("dialog[open]") ?? document.body;
     const start = document.createElement("span");
@@ -1010,6 +1034,8 @@ async function focusWalk(page) {
   let frames = 0;
   for (let i = 0; i < 160; i++) {
     await page.keyboard.press("Tab");
+    // Normal motion: focus scrolls smoothly (html{scroll-behavior:smooth}); measure where it comes to rest.
+    if (opts.settle) await page.evaluate(SETTLE);
     const st = await page.evaluate(FOCUS_PROBE);
     if (st.end) break;
     if (st.frame) {
@@ -1167,7 +1193,7 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
   const os = explicit ? (explicit === "dark" ? "light" : "dark") : mode.replace("auto-", "");
   const expected = explicit ?? os;
   const pass = opts.pass ?? "matrix";
-  const contextOptions = { ...VIEWPORTS[width], colorScheme: os, timezoneId: "Europe/London", locale: "en-GB", ignoreHTTPSErrors: true, reducedMotion: "reduce", forcedColors: pass === "forced" ? "active" : "none" };
+  const contextOptions = { ...VIEWPORTS[width], colorScheme: os, timezoneId: "Europe/London", locale: "en-GB", ignoreHTTPSErrors: true, reducedMotion: pass === "motion" ? "no-preference" : "reduce", forcedColors: pass === "forced" ? "active" : "none" };
   const context = await browser.newContext(contextOptions);
   const failed = [];
   const consoleMsgs = [];
@@ -1241,7 +1267,8 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
   await page.clock.setFixedTime(FROZEN);
   let collecting = true;
   page.on("console", (m) => {
-    if (collecting && (m.type() === "error" || m.type() === "warning")) consoleMsgs.push(`${m.type()}: ${m.text()}`);
+    // axe messages the page's frames to audit them; Chrome warns when a frame is cross-origin. Not the page's own.
+    if (collecting && (m.type() === "error" || m.type() === "warning") && !/Failed to execute 'postMessage'/.test(m.text())) consoleMsgs.push(`${m.type()}: ${m.text()}`);
   });
   page.on("response", (r) => {
     if (r.status() >= 400) failed.push(`${r.request().method()} ${new URL(r.url()).pathname} ${r.status()}`);
@@ -1289,7 +1316,7 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
   }
   // Full-page captures (and their masks) are taken from the top of the page.
   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
-  const tag = pass === "forced" ? `forced-${width}` : `${mode}-${width}`;
+  const tag = pass === "forced" ? `forced-${width}` : pass === "motion" ? `motion-${width}` : `${mode}-${width}`;
   const file = `${sc.id}-${tag}.png`;
   // Capture the complete document, including the truncation note and trust footer.
   const shot = (o = {}) => page.screenshot({ fullPage: !sc.viewportOnly, ...o }).catch(() => page.screenshot(o));
@@ -1345,6 +1372,8 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
         const d = document.querySelector("dialog[open]");
         return d ? getComputedStyle(d, "::backdrop").backgroundColor : null;
       })(),
+      // Ledger facts on phones: a cell that starts or ends with the "·" separator has a part missing.
+      danglers: [...document.querySelectorAll(".k-table td, .k-table th")].map((e) => e.innerText.replace(/\s+/g, " ").trim()).filter((t) => /^·|·$/.test(t)).slice(0, 5),
       motion: {
         buttons: dur(".k-btn, .k-mode-switch button"),
         skel: [...document.querySelectorAll(".k-skel")].map((e) => getComputedStyle(e).animationName).filter((n) => n !== "none"),
@@ -1352,19 +1381,22 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
       },
     };
   }, width);
-  let axe = { violations: [] };
-  collecting = false; // axe messages its frames; Chrome warns about cross-origin ones. Not the page's own output.
+  let axe = { violations: [], incomplete: [] };
+  // Every field validates its constraints once: a pattern the browser cannot compile logs a console error here.
+  await page.evaluate(() => document.querySelectorAll("input, select, textarea").forEach((el) => el.checkValidity())).catch(() => {});
   try {
     await page.evaluate(axeSource);
     // Forced colours: the user's system palette sets every colour, and axe reads the author colours, so its
     // colour-contrast rule says nothing there (G12 checks the rest of axe and the focus rings).
     const rules = pass === "forced" ? { "color-contrast": { enabled: false } } : {};
-    axe = await page.evaluate((rules) => window.axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"] }, rules, resultTypes: ["violations"] }), rules);
+    axe = await page.evaluate((rules) => window.axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"] }, rules, resultTypes: ["violations", "incomplete"] }), rules);
   } catch (e) {
-    axe = { violations: [{ id: "axe-error", help: String(e).slice(0, 200), nodes: [] }] };
+    axe = { violations: [{ id: "axe-error", help: String(e).slice(0, 200), nodes: [] }], incomplete: [] };
   }
+  await page.waitForTimeout(50);
+  collecting = false; // the focus walk below moves focus and scrolls; its output is its own gate
   // G4 runs last: it moves focus and scrolls.
-  const walk = sc.userPage || pass === "reflow" ? null : await focusWalk(page).catch((e) => ({ error: String(e).slice(0, 200), stops: [] }));
+  const walk = sc.userPage || pass === "reflow" ? null : await focusWalk(page, { settle: pass === "motion" }).catch((e) => ({ error: String(e).slice(0, 200), stops: [] }));
   await context.close();
   const g9 = sc.userPage ? { cls: 0, shifts: [] } : await fontShift(browser, mf, fx, sc, contextOptions, url, explicit).catch((e) => ({ cls: 1, shifts: [`harness: ${String(e).slice(0, 160)}`] }));
   if (sc.after) {
@@ -1417,7 +1449,9 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
     // G9: the shift measured on a load with the API held (fonts and CSS only); the cell's own load is
     // reported too (pageLoad), including what the dashboard does once its data arrives.
     fontload: { pass: badFont.length === 0 && g9.cls <= 0.02, detail: { cls: g9.cls, shifts: g9.shifts, pageLoad: { cls: probe.cls, clsAfterLoad: probe.clsAfterLoad, shifts: probe.shifts }, fonts: fontHeaders.length, bad: badFont.slice(0, 3) } },
-    motion: { pass: sc.userPage || (probe.motion.buttons.length === 0 && probe.motion.skel.length === 0 && probe.motion.scroll === "auto"), detail: probe.motion },
+    // G11 is a reduced-motion check; the motion pass is the normal-motion capture of the same screen.
+    motion: { pass: pass === "motion" || sc.userPage || (probe.motion.buttons.length === 0 && probe.motion.skel.length === 0 && probe.motion.scroll === "auto"), detail: probe.motion },
+    copy: { pass: sc.userPage || probe.danglers.length === 0, detail: probe.danglers },
   };
   if (explicit && !sc.userPage && !sc.staticTheme && !forced) {
     gates.flash = { pass: firstHtml.includes(`data-theme="${explicit}"`) && frames.length === 0, detail: { inHtml: firstHtml.includes(`data-theme="${explicit}"`), frames: probe.frames.length, other: [...new Set(frames)] } };
@@ -1430,12 +1464,116 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
       detail: { error: walk.error, focusable: walk.focusable, stops: stops.length, first: stops[0]?.name ?? null, back: walk.back, bad: badStops.slice(0, 4) },
     };
   }
-  return { screen: sc.id, title: sc.title, pass, mode, width, file, sha256: createHash("sha256").update(png).digest("hex"), masked, ms: Date.now() - t0, gates };
+  // Needs review (not failures): axe could not decide, e.g. contrast over an image or a gradient.
+  const axeReview = (axe.incomplete ?? []).map((v) => `${v.id}: ${v.nodes.length} ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")}`);
+  return { screen: sc.id, title: sc.title, pass, mode, width, file, sha256: createHash("sha256").update(png).digest("hex"), masked, ms: Date.now() - t0, gates, axeReview };
+}
+
+/**
+ * G7b filmstrip: in each explicit mode, load a few screens with the app stylesheet held back (1.2 s) and the fonts
+ * held back (0.6 s), record every frame the compositor paints (CDP screencast, PNG) until load + 400 ms, and check
+ * each frame's dominant colour: dark in Dark, light in Light. A white frame in Dark (or a dark one in Light) is a
+ * flash of the wrong mode, whatever the computed styles said.
+ */
+async function filmstripChecks(browser, mf, fx) {
+  const out = {};
+  const targets = [
+    ["J10", `${APP}/login`, "app"],
+    ["J15", `${APP}/dashboard`, "app"],
+    ["J46", site("nosuch"), "site"],
+    ["J57", site("fx-site", "README.md"), "site"],
+  ];
+  for (const [id, url0, origin] of targets) {
+    for (const mode of ["light", "dark"]) {
+      const os = mode === "dark" ? "light" : "dark"; // the OS says the opposite, so only the explicit choice can paint the mode
+      const context = await browser.newContext({ ...VIEWPORTS[1440], colorScheme: os, ignoreHTTPSErrors: true, reducedMotion: "reduce" });
+      try {
+        await context.route("**/*", async (route) => {
+          const req = route.request();
+          const u = req.url();
+          if (!/^https:\/\/([a-z0-9-]+\.)?kofra(-sites|-separate)?\.test\//.test(u)) return route.abort();
+          const body = req.postDataBuffer();
+          const res = await mf.dispatchFetch(u, { method: req.method(), headers: await req.allHeaders(), body: body && req.method() !== "GET" && req.method() !== "HEAD" ? body : undefined, redirect: "manual" });
+          const headers = {};
+          res.headers.forEach((v, k) => {
+            headers[k] = v;
+          });
+          const bytes = Buffer.from(await res.arrayBuffer());
+          const path = new URL(u).pathname;
+          if (path.startsWith("/__dropway/ui/") && path.endsWith(".css")) await new Promise((r) => setTimeout(r, 1200));
+          if (path.startsWith("/__dropway/fonts/")) await new Promise((r) => setTimeout(r, 600));
+          await route.fulfill({ status: res.status, headers, body: bytes });
+        });
+        if (origin === "app") await context.addCookies([{ name: "__Host-dw_theme", value: mode, url: `${APP}/`, secure: true, sameSite: "Lax" }]);
+        await context.addInitScript(({ key }) => {
+          if (location.hostname === "kofra.test") sessionStorage.setItem("dropway.key", key);
+        }, { key: fx.owner });
+        const page = await context.newPage();
+        const cdp = await context.newCDPSession(page);
+        const url = origin === "site" ? `${url0}${url0.includes("?") ? "&" : "?"}theme=${mode}` : url0;
+        // The tab first shows the page once, so the frames recorded below start from it: a fresh tab's about:blank
+        // is painted in the OS scheme (the browser's frame, not ours) and the compositor can hand one over after
+        // the new document commits. Routing turns the HTTP cache off, so the second load is held back again.
+        await page.goto(url, { waitUntil: "load", timeout: 30000 });
+        const frames = [];
+        cdp.on("Page.screencastFrame", (f) => {
+          if (process.env.FILMSTRIP_DEBUG) writeFileSync(join(OUT, `film-${id}-${mode}-${String(f.metadata.timestamp).replace(".", "_")}.png`), Buffer.from(f.data, "base64"));
+          frames.push(f.data);
+          cdp.send("Page.screencastFrameAck", { sessionId: f.sessionId }).catch(() => {});
+        });
+        await cdp.send("Page.startScreencast", { format: "png", everyNthFrame: 1, maxWidth: 360, maxHeight: 225 });
+        await page.goto(url, { waitUntil: "load", timeout: 30000 });
+        await page.waitForTimeout(400);
+        await cdp.send("Page.stopScreencast").catch(() => {});
+        const colours = await dominantColours(browser, frames);
+        const lum = ([r, g, b]) => (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+        const wrong = colours.filter((c) => (mode === "dark" ? lum(c) > 0.25 : lum(c) < 0.6));
+        out[`filmstrip ${id} ${mode}`] = { pass: frames.length > 0 && wrong.length === 0, detail: { frames: frames.length, colours: [...new Set(colours.map((c) => `rgb(${c.join(",")})`))].slice(0, 6), wrong: wrong.length } };
+      } catch (e) {
+        out[`filmstrip ${id} ${mode}`] = { pass: false, detail: String(e).slice(0, 200) };
+      } finally {
+        await context.close();
+      }
+    }
+  }
+  for (const [k, v] of Object.entries(out)) console.log(`${k}: ${v.pass ? "ok" : `FAIL ${JSON.stringify(v.detail)}`}`);
+  return out;
+}
+
+/** The most common colour of each base64 PNG frame (decoded on a canvas, 4-bit buckets), as [r, g, b]. */
+async function dominantColours(browser, frames) {
+  if (!frames.length) return [];
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  try {
+    return await page.evaluate(async (list) => {
+      const out = [];
+      for (const b64 of list) {
+        const img = new Image();
+        img.src = `data:image/png;base64,${b64}`;
+        await img.decode();
+        const c = new OffscreenCanvas(img.width, img.height);
+        const g = c.getContext("2d", { willReadFrequently: true });
+        g.drawImage(img, 0, 0);
+        const d = g.getImageData(0, 0, img.width, img.height).data;
+        const counts = new Map();
+        for (let i = 0; i < d.length; i += 4) {
+          const k = ((d[i] >> 4) << 8) | ((d[i + 1] >> 4) << 4) | (d[i + 2] >> 4);
+          counts.set(k, (counts.get(k) ?? 0) + 1);
+        }
+        const [k] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+        out.push([((k >> 8) & 15) * 17, ((k >> 4) & 15) * 17, (k & 15) * 17]);
+      }
+      return out;
+    }, frames);
+  } finally {
+    await context.close();
+  }
 }
 
 function gallery(list, matrix, checks = {}, source = {}) {
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-  const label = (c) => (c.pass === "forced" ? `forced colours · ${c.width}px` : `${c.mode} · ${c.width}px${c.pass === "reflow" ? " (reflow)" : ""}`);
+  const label = (c) => (c.pass === "forced" ? `forced colours · ${c.width}px` : `${c.mode} · ${c.width}px${c.pass === "reflow" ? " (reflow)" : c.pass === "motion" ? " (normal motion)" : ""}`);
   const rows = list
     .map((sc) => {
       const cells = matrix.filter((c) => c.screen === sc.id);
@@ -1447,10 +1585,10 @@ function gallery(list, matrix, checks = {}, source = {}) {
         .join("")}</div></section>`;
     })
     .join("");
-  const sw = Object.entries(checks.themeSwitch ?? {})
+  const sw = [...Object.entries(checks.themeSwitch ?? {}), ...Object.entries(checks.filmstrip ?? {})]
     .map(([k, v]) => `<li>${esc(k)}: ${v.pass ? "ok" : `<b>fail</b> ${esc(JSON.stringify(v.detail))}`}</li>`)
     .join("");
-  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kofra Security Print port: core screenshots</title><style>body{font:14px/1.5 system-ui,sans-serif;margin:24px;background:#f4efe2;color:#141414}h1{font-weight:600}section{margin:0 0 40px}.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}figure{margin:0}img{width:100%;height:260px;object-fit:cover;object-position:top;border:1px solid #b08d3c;background:#fff}b{color:#a8321f}</style><h1>Kofra Security Print port: core screens (${matrix.length} cells)</h1><p>Source commit: <code>${esc(source.commit ?? "unknown")}</code>${source.dirty ? " (working-tree changes; not exact-head evidence)" : ""}. Images are the PNG bytes hashed in matrix.json.</p>${sw ? `<h2>Theme switch (G13)</h2><ul>${sw}</ul>` : ""}${rows}`;
+  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kofra Security Print port: core screenshots</title><style>body{font:14px/1.5 system-ui,sans-serif;margin:24px;background:#f4efe2;color:#141414}h1{font-weight:600}section{margin:0 0 40px}.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}figure{margin:0}img{width:100%;height:260px;object-fit:cover;object-position:top;border:1px solid #b08d3c;background:#fff}b{color:#a8321f}</style><h1>Kofra Security Print port: core screens (${matrix.length} cells)</h1><p>Source commit: <code>${esc(source.commit ?? "unknown")}</code>${source.dirty ? " (working-tree changes; not exact-head evidence)" : ""}. Images are the PNG bytes hashed in matrix.json.</p>${sw ? `<h2>Theme switch (G13) and filmstrip (G7b)</h2><ul>${sw}</ul>` : ""}${rows}`;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

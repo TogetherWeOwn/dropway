@@ -9,6 +9,7 @@ export interface Cell {
 }
 export interface Checks {
   themeSwitch?: Record<string, Gate>;
+  filmstrip?: Record<string, Gate>;
 }
 export function failures(matrix: Cell[], checks?: Checks): { failed: Cell[]; switchFailed: string[] };
 export function exitCodeFor(matrix: Cell[], checks?: Checks): 0 | 1;

@@ -104,19 +104,19 @@ export const jsonViewer: Viewer = {
       return viewerPage(vc, {
         tabs,
         css: CODE_CSS + HIGHLIGHT_CSS + JSON_CSS,
-        body: `<p class="dw-jerr" role="alert">This file is not valid JSON: ${escapeHtml(error)}</p><main class="dw-codewrap"><div class="dw-src" tabindex="0" role="region" aria-label="${escapeHtml(vc.file.path)}">${html}</div></main>`,
+        body: `<p class="dw-jerr" role="alert">This file is not valid JSON: ${escapeHtml(error)}</p><div class="dw-codewrap"><div class="dw-src" tabindex="0" role="region" aria-label="${escapeHtml(vc.file.path)}">${html}</div></div>`,
         headers: { "X-Kofra-Render-Cache": cache },
       });
     }
     const tree = await cachedRender(vc.dw, `json@${JSON_VERSION}/tree/${vc.file.sha256}`, async () => renderJsonTree(parsed));
     const prettyText = JSON.stringify(parsed, null, 2);
     const pretty = prettyText.length <= MAX_PRETTY ? (await renderCodeLines(vc, prettyText, "json", "pretty")).html : null;
-    const body = `<main class="dw-json">
+    const body = `<div class="dw-json">
 <input type="radio" name="dw-jt" id="dw-jt-tree" class="k-toggle" checked><input type="radio" name="dw-jt" id="dw-jt-pretty" class="k-toggle">
 <div class="dw-jtabs k-seg" role="group" aria-label="Tree view or pretty-printed"><label for="dw-jt-tree">Tree</label>${pretty ? '<label for="dw-jt-pretty">Pretty</label>' : ""}</div>
 <div class="dw-jpane dw-jtree">${tree.html}</div>
 ${pretty ? `<div class="dw-jpane dw-jpretty"><div class="dw-src" tabindex="0" role="region" aria-label="Pretty-printed JSON">${pretty}</div></div>` : ""}
-</main>`;
+</div>`;
     return viewerPage(vc, { tabs, css: CODE_CSS + HIGHLIGHT_CSS + JSON_CSS, body, headers: { "X-Kofra-Render-Cache": tree.cache } });
   },
 };

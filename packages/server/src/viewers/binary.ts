@@ -86,13 +86,13 @@ export const binaryViewer: Viewer = {
       ...(magic ? ([["Looks like", magic]] as Array<[string, string]>) : []),
       ["SHA-256", vc.file.sha256],
     ];
-    const body = `<main class="k-listing">
+    const body = `<div class="k-listing">
 <div class="k-empty"><h1 class="k-binh">${escapeHtml(vc.file.path.split("/").pop() ?? vc.file.path)}</h1><p>No preview for this type yet. Download it to open it with an app you trust.</p><a class="k-btn" href="${escapeHtml(vc.downloadUrl)}" rel="nofollow" download>Download</a></div>
 <div class="k-table-wrap k-bintable"><table class="k-table">${rows
       .map(([k, v]) => `<tr><th scope="row">${escapeHtml(k)}</th><td class="k-break">${k === "SHA-256" ? `<code class="k-sha">${escapeHtml(v)}</code>` : escapeHtml(v)}</td></tr>`)
       .join("")}</table></div>
 <h2 class="k-binh2">First ${Math.min(256, head.byteLength)} bytes</h2>
-<pre class="k-hex" tabindex="0" aria-label="First bytes, hexadecimal">${escapeHtml(hexDump(head.subarray(0, 256)))}</pre></main>`;
+<pre class="k-hex" tabindex="0" role="region" aria-label="First bytes, hexadecimal">${escapeHtml(hexDump(head.subarray(0, 256)))}</pre></div>`;
     return viewerPage(vc, {
       tabs: standardTabs(vc, { rendered: "Info", raw: false }),
       body,

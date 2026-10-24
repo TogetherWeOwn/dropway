@@ -99,7 +99,7 @@ export const notebookViewer: Viewer = {
     return viewerPage(vc, {
       tabs: standardTabs(vc, { rendered: "Notebook", source: true }),
       css: MD_CSS + NB_CSS + HIGHLIGHT_CSS,
-      body: `<main class="k-doc nb">${await carryDocLinks(r.html, vc.url.pathname, vc.siteBase, viewerCarry(vc))}</main>`,
+      body: `<div class="k-doc nb">${await carryDocLinks(r.html, vc.url.pathname, vc.siteBase, viewerCarry(vc))}</div>`,
       headers: { "X-Kofra-Render-Cache": r.cache },
     });
   },

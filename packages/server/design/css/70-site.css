@@ -29,7 +29,8 @@ p.notebar{display:block;margin:14px 18px 0;overflow-wrap:anywhere}
 .toggle:focus-visible+*{outline:2px solid var(--focus);outline-offset:2px}
 .toggle:focus-visible~* .togglebtn,.toggle:focus-visible~.togglebtn{outline:2px solid var(--focus);outline-offset:2px}
 .checker{background-color:var(--paper-2);background-image:linear-gradient(45deg,var(--paper-3) 25%,transparent 25%),linear-gradient(-45deg,var(--paper-3) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,var(--paper-3) 75%),linear-gradient(-45deg,transparent 75%,var(--paper-3) 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0}
-.listing{max-width:60rem;margin:0 auto;padding:var(--s7) var(--s5) var(--s9)}
+/* On the site header's left edge (18px), at most 60rem of content. */
+.listing{max-width:calc(60rem + 36px);padding:var(--s7) 18px var(--s9)}
 .vhead{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:flex-end;justify-content:space-between;padding-bottom:16px;margin-bottom:6px}
 .vhead h1{font-size:clamp(28px,3.4vw,40px);overflow-wrap:anywhere}
 .listing .frow{grid-template-columns:40px minmax(0,1fr) auto auto}
@@ -42,7 +43,7 @@ p.notebar{display:block;margin:14px 18px 0;overflow-wrap:anywhere}
 @media (max-width:720px){
   .sys>main{padding:6vh var(--s4) var(--s8)}
   .vbar{padding:8px 12px}
-  .listing{padding:var(--s6) var(--s4) var(--s8)}
+  .listing{padding:var(--s6) 12px var(--s8)}
   .listing .frow{grid-template-columns:40px minmax(0,1fr) auto}
   .listing .frow .fkind{display:none}
 }

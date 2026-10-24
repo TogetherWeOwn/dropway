@@ -152,7 +152,7 @@ export const csvViewer: Viewer = {
     return viewerPage(vc, {
       tabs: standardTabs(vc, { rendered: "Table", source: true }),
       css: CSV_CSS,
-      body: `<main class="dw-csv"><p class="dw-csvmeta">${meta}</p>${m ? r.html.slice(m[0].length) : r.html}</main>`,
+      body: `<div class="dw-csv"><p class="dw-csvmeta">${meta}</p>${m ? r.html.slice(m[0].length) : r.html}</div>`,
       headers: { "X-Kofra-Render-Cache": r.cache },
     });
   },

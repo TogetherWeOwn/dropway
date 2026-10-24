@@ -1,6 +1,6 @@
 import { appOrigin, detectFileKind, encodePath, KIND_LABELS, type DropwayContext, type FileKind, type LiveSite } from "@dropway/core";
 import { domainsLine, escapeHtml, formatBytes, htmlPage } from "../html";
-import { siteFooter, siteHeader, TRUST_LINE } from "../ui/chrome";
+import { SKIP_LINK, siteFooter, siteHeader, TRUST_LINE } from "../ui/chrome";
 import type { ThemePref } from "../ui/theme";
 import type { ServeMode } from "../serve";
 import { carryLink, type LinkCarry } from "./links";
@@ -83,7 +83,7 @@ export function renderListing(live: LiveSite, dir: string, mode: ServeMode, appV
     theme: opts.theme,
     appOrigin: origin,
     robots: "noindex",
-    body: `${origin && !carry.embed ? siteHeader(name, origin) : ""}<main class="k-listing" id="dw-main"><div class="k-vhead"><div><nav class="k-crumbs" aria-label="Path">${crumb}<span class="k-sep" aria-hidden="true">/</span></nav><h1>${escapeHtml(segs.length ? `${segs[segs.length - 1]}/` : live.slug)}</h1><p class="k-small">${summary}</p></div>${appViewerUrl && !carry.embed ? `<a class="k-btn k-sm k-ghost" href="${escapeHtml(appViewerUrl)}" rel="nofollow">Browse files</a>` : ""}</div><ul class="k-frows" aria-label="Files">${items.join("")}</ul>${gallery}</main>${
+    body: `${origin && !carry.embed ? SKIP_LINK + siteHeader(name, origin) : ""}<main class="k-listing" id="dw-main"><div class="k-vhead"><div><nav class="k-crumbs" aria-label="Path">${crumb}<span class="k-sep" aria-hidden="true">/</span></nav><h1>${escapeHtml(segs.length ? `${segs[segs.length - 1]}/` : live.slug)}</h1><p class="k-small">${summary}</p></div>${appViewerUrl && !carry.embed ? `<a class="k-btn k-sm k-ghost" href="${escapeHtml(appViewerUrl)}" rel="nofollow">Browse files</a>` : ""}</div><ul class="k-frows" aria-label="Files">${items.join("")}</ul>${gallery}</main>${
       carry.embed ? "" : origin && dw ? siteFooter({ name, appOrigin: origin, domains: domainsLine(dw), trust: true }) : `<p class="k-trust k-vtrust">${TRUST_LINE}</p>`
     }`,
   });

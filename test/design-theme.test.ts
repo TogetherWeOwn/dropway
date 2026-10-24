@@ -21,7 +21,8 @@ describe("theme cookie route (POST /__dropway/theme)", () => {
     for (const theme of ["light", "dark"]) {
       const res = await themePost(dw, { theme, next: "/dashboard/keys?x=1" });
       expect(res.status).toBe(303);
-      expect(res.headers.get("location")).toBe("/dashboard/keys?x=1");
+      // Back to the switch (#dw-mode), so keyboard focus resumes there after the reload.
+      expect(res.headers.get("location")).toBe("/dashboard/keys?x=1#dw-mode");
       expect(res.headers.get("cache-control")).toBe("no-store");
       expect(res.headers.get("set-cookie")).toBe(`${THEME_COOKIE}=${theme}; Path=/; Secure; SameSite=Lax; Max-Age=31536000`);
     }
@@ -143,7 +144,7 @@ describe("server-rendered colour mode (no flash, no script)", () => {
   it("the switch is a no-script form on every app page, posting back to the current path without ?theme", async () => {
     const dw = await freshInstance();
     const html = await (await dw.call("/dashboard/keys?x=1&theme=dark")).text();
-    expect(html).toContain('<form class="k-mode-switch" method="post" action="/__dropway/theme"><input type="hidden" name="next" value="/dashboard/keys?x=1">');
+    expect(html).toContain('<form class="k-mode-switch" id="dw-mode" method="post" action="/__dropway/theme"><input type="hidden" name="next" value="/dashboard/keys?x=1">');
     expect(html).toContain('<div role="group" aria-label="Colour theme">');
     for (const v of ["auto", "light", "dark"]) expect(html).toContain(`name="theme" value="${v}"`);
   });
