@@ -6,6 +6,7 @@ import { newId, sha256Hex, SHA256_RE } from "../lib/crypto";
 import { extname, normaliseContentType } from "../lib/mime";
 import { encodePath, normaliseFilePath } from "../lib/paths";
 import { detectFileKind } from "../lib/filetypes";
+import { stringField } from "../lib/input";
 import { hasScope, type Principal } from "../principal";
 import { blobScope, putVerifiedBlob } from "./blobs";
 import { emit, meter } from "./events";
@@ -42,6 +43,15 @@ export interface DeployOptions {
   client?: string | null;
   /** Optimistic concurrency: fail with 409 version_conflict if the live version is no longer this one. */
   baseVersionId?: unknown;
+}
+
+/** Validate metadata before a transport applies settings or a service starts a deploy. */
+export function parseDeployOptions(opts: DeployOptions = {}) {
+  return {
+    ...opts,
+    baseVersionId: opts.baseVersionId == null || opts.baseVersionId === "" ? null : stringField(opts.baseVersionId, "baseVersionId"),
+    message: opts.message == null ? null : stringField(opts.message, "message").slice(0, 500),
+  };
 }
 
 /** Validate and normalise a manifest against size/count limits. */
@@ -165,9 +175,9 @@ export async function createDeploy(dc: DropwayContext, p: Principal, site: SiteR
   if (site.mode === "transfer" && !opts.transferCreate) throw conflict("transfer_immutable", "Transfer files cannot be replaced.", "Create a new transfer instead.");
   const lim = await dc.adapters.policy.limits(p, siteOwner(site), dc);
   const { entries, totalBytes } = validateManifest(files, lim);
+  const { baseVersionId, message } = parseDeployOptions(opts);
   await dc.adapters.policy.beforeDeploy?.(p, { siteId: site.id, tenantId: site.tenant_id, fileCount: entries.length, totalBytes }, dc);
 
-  const baseVersionId = opts.baseVersionId == null || opts.baseVersionId === "" ? null : String(opts.baseVersionId);
   if (baseVersionId && baseVersionId !== site.current_version_id) throw await versionConflict(dc, site);
 
   const hash = await manifestHash(entries);
@@ -198,7 +208,7 @@ export async function createDeploy(dc: DropwayContext, p: Principal, site: SiteR
     base_version_id: baseVersionId,
     source: opts.source ?? "api",
     client: opts.client ? String(opts.client).slice(0, 120) : null,
-    message: opts.message == null ? null : String(opts.message).slice(0, 500),
+    message,
     created_by: p.kind === "member" ? p.memberId : p.kind,
     created_at: now,
     finalized_at: null,
@@ -273,6 +283,7 @@ export async function createSiteWithDeploy(
   opts: DeployOptions = {},
 ) {
   const withFiles = files !== undefined;
+  if (withFiles) opts = parseDeployOptions(opts);
   const { site, claimToken } = await createSite(dc, p, input, {
     beforeInsert: withFiles ? (owner) => precheckManifest(dc, p, owner.tenantId, files) : undefined,
   });

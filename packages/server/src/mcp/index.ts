@@ -142,13 +142,13 @@ function validationFields(errors: OutputUnit[], schema: Schema, lookup: ReturnTy
     const missing: typeof field[] = [];
     if (issue.keyword === "required" && Array.isArray(constraint)) {
       for (const name of constraint as string[]) {
-        if (!(name in instance)) missing.push({ ...field, path: [...path, name], message: `Instance does not have required property "${name}".` });
+        if (!Object.hasOwn(instance, name)) missing.push({ ...field, path: [...path, name], message: `Instance does not have required property "${name}".` });
       }
     } else if (constraint && typeof constraint === "object") {
       for (const [trigger, names] of Object.entries(constraint)) {
-        if (!(trigger in instance) || !Array.isArray(names)) continue;
+        if (!Object.hasOwn(instance, trigger) || !Array.isArray(names)) continue;
         for (const name of names as string[]) {
-          if (!(name in instance)) missing.push({ ...field, path: [...path, name], message: `Instance has "${trigger}" but does not have "${name}".` });
+          if (!Object.hasOwn(instance, name)) missing.push({ ...field, path: [...path, name], message: `Instance has "${trigger}" but does not have "${name}".` });
         }
       }
     }
