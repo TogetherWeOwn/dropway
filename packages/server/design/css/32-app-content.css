@@ -1,4 +1,8 @@
 /* App-only content: cards, three-column notes, code blocks with a header, one-line file warnings. */
+.table td.act{text-align:right;white-space:nowrap}
+.table td.act .btn+.btn{margin-left:6px}
+.banner.danger{background:var(--danger-wash);border-color:var(--danger);border-left-width:3px}
+.banner.danger b,.banner.danger strong,.banner.danger svg{color:var(--danger)}
 /* Inline code: a short token never wraps (pages.ts tok); a URL or command wraps only between its parts (urlCode). */
 code.tok,code.brk>span{white-space:nowrap}
 .card{background:var(--paper-2);border:1px solid var(--rule);padding:var(--s6);position:relative}

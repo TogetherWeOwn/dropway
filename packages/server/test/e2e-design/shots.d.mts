@@ -16,3 +16,4 @@ export function exitCodeFor(matrix: Cell[], checks?: Checks): 0 | 1;
 export function checkSelection(only?: Set<string> | null, widths?: number[], modes?: string[]): void;
 export function startFreshWorker<T extends object>(start: (dir: string) => Promise<T>): Promise<T & { dir: string }>;
 export function unexpectedFailures(failed: string[], screen: { url: string; status?: number; expectFailed?: string[] }): string[];
+export const SETTLE: () => Promise<void>;

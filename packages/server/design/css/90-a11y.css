@@ -7,7 +7,7 @@
 }
 @media (forced-colors:active){
   :focus-visible{outline:2px solid CanvasText}
-  .seg>[aria-pressed=true],.seg>[aria-selected=true],.seg>[aria-current=page],.chip.solid{forced-color-adjust:none;background:Highlight;color:HighlightText}
+  .seg>[aria-pressed=true],.seg>[aria-selected=true],.seg>[aria-current=page]{forced-color-adjust:none;background:Highlight;color:HighlightText}
   .sp-svg{forced-color-adjust:none}
   .sp-svg .e1,.sp-svg .e2,.sp-svg .em,.sp-svg .ef{stroke:CanvasText}
   .sp-svg .e3{stroke:GrayText}

@@ -248,8 +248,10 @@ export function buildDesign() {
           return `@font-face{font-family:'${f.family}';font-style:${f.style};font-weight:${f.weight};font-display:swap;src:url(${base}/__dropway/fonts/${ff.name}.${ff.hash}.woff2) format('woff2');unicode-range:${f.unicodeRange}}`;
         })
         .join("");
+    // Each family's fallback faces in order: "<Family> Fallback", then " B", " C" (fonts.json fallbacksAbout).
     const fallbackCss = Object.entries(fonts.fallbacks)
-      .map(([family, m]) => `@font-face{font-family:'${family} Fallback';src:local('${m.local}');size-adjust:${m.sizeAdjust};ascent-override:${m.ascentOverride};descent-override:${m.descentOverride};line-gap-override:${m.lineGapOverride}}`)
+      .flatMap(([family, list]) => (Array.isArray(list) ? list : [list]).map((m, i) => ({ name: `${family} Fallback${i ? ` ${"BCDEFG"[i - 1]}` : ""}`, m })))
+      .map(({ name, m }) => `@font-face{font-family:'${name}';src:${[m.local].flat().map((l) => `local('${l}')`).join(",")};size-adjust:${m.sizeAdjust};ascent-override:${m.ascentOverride};descent-override:${m.descentOverride};line-gap-override:${m.lineGapOverride}}`)
       .join("");
     const licences = fonts.licences.map((l) => `${l.family}\n${"=".repeat(l.family.length)}\n\n${readFileSync(join(DESIGN, "fonts", l.file), "utf8").trim()}\n`).join("\n\n");
 

@@ -1,5 +1,8 @@
 /* App page frame and the dashboard extensions (PORT-SPEC 8.1): main column, page head, blocks, groups,
    loading rows, key-value lists, URLs with copy, secrets shown once, toasts. */
+/* Text tones only app pages use (kept out of the inlined site bundle). */
+.muted{color:var(--muted)}
+.ok{color:var(--success);font-weight:600}
 .page{min-height:100vh;display:flex;flex-direction:column}
 .page>main{flex:1 0 auto}
 /* Dashboard pages draw their content after fetching it: the footer starts below the fold, so it is never

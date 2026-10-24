@@ -183,3 +183,26 @@ describe("markdown tables", () => {
     expect(MD_CSS).toMatch(/\.k-doc table\{[^}]*width:max-content[^}]*max-width:100%/);
   });
 });
+
+describe("fallback faces are metric-matched on systems without Arial, Georgia or Courier New (G9 everywhere)", () => {
+  it("each family lists its fallback faces in order, the DejaVu ones after the Arial, Georgia and Courier New ones", () => {
+    for (const css of [APP_CSS, SITE_CSS]) {
+      expect(css).toContain("--sans:'Public Sans','Public Sans Fallback','Public Sans Fallback B','Public Sans Fallback C',system-ui");
+      expect(css).toContain("--serif:'Newsreader','Newsreader Fallback','Newsreader Fallback B',Georgia");
+      expect(css).toContain("--mono:'Martian Mono','Martian Mono Fallback','Martian Mono Fallback B',ui-monospace");
+      expect(css).toContain("@font-face{font-family:'Public Sans Fallback';src:local('Arial'),local('Arimo'),local('Liberation Sans');size-adjust:102.18%");
+      expect(css).toContain("@font-face{font-family:'Public Sans Fallback B';src:local('DejaVu Sans');size-adjust:90.89%");
+      expect(css).toContain("@font-face{font-family:'Public Sans Fallback C';src:local('DejaVu Serif');size-adjust:89.23%");
+      expect(css).toContain("@font-face{font-family:'Newsreader Fallback B';src:local('DejaVu Serif');size-adjust:88.44%");
+      expect(css).toContain("@font-face{font-family:'Martian Mono Fallback B';src:local('DejaVu Sans Mono');size-adjust:116.27%");
+    }
+  });
+
+  it("app-only rules stay out of the inlined site bundle, which stays under its budget", () => {
+    for (const sel of [".k-btn.k-danger{", ".k-hint{", ".k-chip.k-solid{", ".k-table td.k-act{", ".k-banner.k-danger{", ".k-muted{", ".k-guilloche-band.k-thin{"]) {
+      expect(SITE_CSS, sel).not.toContain(sel);
+      expect(APP_CSS, sel).toContain(sel);
+    }
+    expect(SITE_CSS.length).toBeLessThanOrEqual(24576);
+  });
+});

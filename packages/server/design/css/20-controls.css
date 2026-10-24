@@ -4,8 +4,6 @@
 .btn:active{transform:translateY(1px)}
 .btn.ghost{background:transparent;color:var(--accent)}
 .btn.ghost:hover{background:var(--accent-wash);color:var(--accent)}
-.btn.danger{background:transparent;color:var(--danger);border-color:var(--danger)}
-.btn.danger:hover{background:var(--danger-wash);color:var(--danger)}
 .btn.sm{padding:6px 11px;font-size:13.5px}
 .btn[disabled],.btn[aria-disabled=true]{opacity:.45;cursor:not-allowed;transform:none}
 .btn[aria-busy=true]{cursor:progress}
@@ -19,7 +17,6 @@
 .input.mono{font-family:var(--mono);font-size:14px}
 .field{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
 .field input,.field .input{flex:1 1 180px;width:auto}
-.hint{font-size:13px;color:var(--muted);margin:6px 0 0}
 .msgline{font-size:14px;min-height:1.5em;margin:10px 0 0;color:var(--ink-2)}
 .msgline.err{color:var(--danger);font-weight:600}
 .seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--accent);border-radius:var(--r-ctl);overflow:hidden}
@@ -32,5 +29,3 @@
 .chip.accent{border-color:var(--accent);color:var(--accent)}
 .chip.ok{border-color:var(--success);color:var(--success)}
 .chip.warn{border-color:var(--warning);color:var(--warning);background:var(--warning-wash)}
-.chip.danger{border-color:var(--danger);color:var(--danger)}
-.chip.solid{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}

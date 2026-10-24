@@ -11,8 +11,6 @@
 .table th[scope=row]{font:600 14px/1.4 var(--sans);text-transform:none;letter-spacing:0;color:var(--ink-2);vertical-align:top}
 .table td{padding:12px 14px 12px 0;border-bottom:1px solid var(--rule-soft);vertical-align:top}
 .table td.num,.table th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.table td.act{text-align:right;white-space:nowrap}
-.table td.act .btn+.btn{margin-left:6px}
 .table tbody tr:hover{background:var(--accent-wash)}
 .table tr[aria-selected=true]{background:var(--accent-tint)}
 .table .mono{font-size:12px}
@@ -26,8 +24,6 @@
 .banner p{margin:4px 0 0}
 .banner.warn{background:var(--warning-wash);border-color:var(--warning);border-left-color:var(--warning)}
 .banner.warn b,.banner.warn strong,.banner.warn svg{color:var(--warning)}
-.banner.danger{background:var(--danger-wash);border-color:var(--danger);border-left-width:3px}
-.banner.danger b,.banner.danger strong,.banner.danger svg{color:var(--danger)}
 .banner .small{display:block}
 .state{display:grid;grid-template-columns:150px minmax(0,1fr);gap:30px;align-items:start;padding:28px;border:1px solid var(--accent);background:var(--surface)}
 .state.nostamp{grid-template-columns:minmax(0,1fr)}

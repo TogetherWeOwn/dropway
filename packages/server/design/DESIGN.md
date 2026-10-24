@@ -114,6 +114,8 @@ Three families, as in k03. Newsreader is the engraved display serif, Public Sans
 | Microtext (`.micro`) | Martian Mono 500, 4px. Decorative, `aria-hidden` |
 | Wordmark (`.wm`) | Newsreader 600, tracking 0.05em, embossed with a 1px light and a 1px accent text-shadow |
 
+Each family falls back to metric-matched faces (`design/fonts/fonts.json`), so nothing moves when the web fonts arrive: `<Family> Fallback` over Arial, Georgia and Courier New (and their metric twins Arimo and Liberation Sans, Gelasio, Cousine and Liberation Mono), then ` Fallback B` over DejaVu Sans, DejaVu Serif and DejaVu Sans Mono for systems that only have DejaVu (Linux containers, headless browsers), and `Public Sans Fallback C` over DejaVu Serif for systems with no sans-serif at all. The screenshot harness records which of them the capture machine resolved (`matrix.json` `source.fontEnv`).
+
 Numbers in tables use `font-variant-numeric: tabular-nums`. Write sentence case everywhere. Mono uppercase is only for kickers, serials and stamps.
 
 ## 5. Space, radii, borders

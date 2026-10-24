@@ -3,9 +3,9 @@
    Colour comes ONLY from the custom properties generated from design/themes.json (light, dark via
    prefers-color-scheme, and the [data-theme] overrides), plus system colours inside forced-colors. */
 :root{
-  --serif:'Newsreader','Newsreader Fallback',Georgia,'Times New Roman',serif;
-  --sans:'Public Sans','Public Sans Fallback',system-ui,-apple-system,'Segoe UI',sans-serif;
-  --mono:'Martian Mono','Martian Mono Fallback',ui-monospace,'SFMono-Regular',Menlo,monospace;
+  --serif:'Newsreader','Newsreader Fallback','Newsreader Fallback B',Georgia,'Times New Roman',serif;
+  --sans:'Public Sans','Public Sans Fallback','Public Sans Fallback B','Public Sans Fallback C',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'Martian Mono','Martian Mono Fallback','Martian Mono Fallback B',ui-monospace,'SFMono-Regular',Menlo,monospace;
   --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:20px;--s6:24px;--s7:32px;--s8:44px;--s9:56px;--s10:64px;--s11:72px;
   --r-doc:0;--r-stamp:3px;--r-ctl:4px;--r-card:10px;--r-chrome:12px;
   --ease:cubic-bezier(.4,0,.2,1);--t-fast:.15s;--t-med:.2s;--t-draw:.6s;
@@ -56,8 +56,6 @@ input[type=checkbox],input[type=radio]{accent-color:var(--accent)}
 .mono{font-family:var(--mono);font-size:.84em;letter-spacing:.01em}
 .k{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.11em;color:var(--accent-2);font-weight:500}
 .small{font-size:13.5px;color:var(--ink-2)}
-.muted{color:var(--muted)}
-.ok{color:var(--success);font-weight:600}
 .num{font-variant-numeric:tabular-nums}
 .wm{font-family:var(--serif);font-weight:600;color:var(--accent);letter-spacing:.05em;text-shadow:0 1px 0 var(--emboss-hi),0 -1px 0 var(--emboss-lo);text-decoration:none;text-transform:lowercase}
 a.wm:hover{color:var(--accent)}

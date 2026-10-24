@@ -76,27 +76,80 @@
     }
   ],
   "fallbacks": {
-    "Public Sans": {
-      "local": "Arial",
-      "sizeAdjust": "102.18%",
-      "ascentOverride": "92.98%",
-      "descentOverride": "22.02%",
-      "lineGapOverride": "0.00%"
-    },
-    "Newsreader": {
-      "local": "Georgia",
-      "sizeAdjust": "91.75%",
-      "ascentOverride": "80.11%",
-      "descentOverride": "28.88%",
-      "lineGapOverride": "0.00%"
-    },
-    "Martian Mono": {
-      "local": "Courier New",
-      "sizeAdjust": "116.65%",
-      "ascentOverride": "85.73%",
-      "descentOverride": "17.15%",
-      "lineGapOverride": "0.00%"
-    }
+    "Public Sans": [
+      {
+        "local": [
+          "Arial",
+          "Arimo",
+          "Liberation Sans"
+        ],
+        "sizeAdjust": "102.18%",
+        "ascentOverride": "92.98%",
+        "descentOverride": "22.02%",
+        "lineGapOverride": "0%"
+      },
+      {
+        "local": [
+          "DejaVu Sans"
+        ],
+        "sizeAdjust": "90.89%",
+        "ascentOverride": "104.52%",
+        "descentOverride": "24.76%",
+        "lineGapOverride": "0%"
+      },
+      {
+        "local": [
+          "DejaVu Serif"
+        ],
+        "sizeAdjust": "89.23%",
+        "ascentOverride": "106.47%",
+        "descentOverride": "25.22%",
+        "lineGapOverride": "0%"
+      }
+    ],
+    "Newsreader": [
+      {
+        "local": [
+          "Georgia",
+          "Gelasio"
+        ],
+        "sizeAdjust": "91.75%",
+        "ascentOverride": "80.11%",
+        "descentOverride": "28.88%",
+        "lineGapOverride": "0%"
+      },
+      {
+        "local": [
+          "DejaVu Serif"
+        ],
+        "sizeAdjust": "88.44%",
+        "ascentOverride": "83.11%",
+        "descentOverride": "29.96%",
+        "lineGapOverride": "0%"
+      }
+    ],
+    "Martian Mono": [
+      {
+        "local": [
+          "Courier New",
+          "Cousine",
+          "Liberation Mono"
+        ],
+        "sizeAdjust": "116.65%",
+        "ascentOverride": "85.73%",
+        "descentOverride": "17.15%",
+        "lineGapOverride": "0%"
+      },
+      {
+        "local": [
+          "DejaVu Sans Mono"
+        ],
+        "sizeAdjust": "116.27%",
+        "ascentOverride": "86.01%",
+        "descentOverride": "17.21%",
+        "lineGapOverride": "0%"
+      }
+    ]
   },
   "licences": [
     {
@@ -111,5 +164,6 @@
       "family": "Martian Mono",
       "file": "OFL-martian-mono.txt"
     }
-  ]
+  ],
+  "fallbacksAbout": "Metric-matched fallback faces, in order: each is the family name '<Family> Fallback' (then ' B', ' C') over local() fonts with the same metrics (Arimo and Liberation Sans match Arial, Gelasio matches Georgia, Cousine and Liberation Mono match Courier New). The B and C faces cover systems with only DejaVu (Linux containers, headless browsers): size-adjust is the ratio of the web font's to the local font's average advance on English text, measured in Chromium; ascent and descent are the web font's (Public Sans 0.950/0.225 em, Newsreader 0.735/0.265 em, Martian Mono 1.000/0.200 em) divided by size-adjust. Public Sans C (DejaVu Serif) is for systems with no sans-serif font at all, where the browser would fall back to a serif anyway."
 }

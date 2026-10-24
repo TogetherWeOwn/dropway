@@ -1,4 +1,9 @@
 /* App-only controls: button variants, checkbox labels, tabs, key-value lists. */
+.btn.danger{background:transparent;color:var(--danger);border-color:var(--danger)}
+.btn.danger:hover{background:var(--danger-wash);color:var(--danger)}
+.hint{font-size:13px;color:var(--muted);margin:6px 0 0}
+.chip.danger{border-color:var(--danger);color:var(--danger)}
+.chip.solid{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .btn.quiet{background:transparent;border-color:transparent;color:var(--accent);text-decoration:underline;text-underline-offset:3px;padding-inline:4px}
 .btn.quiet:hover{background:var(--accent-wash);color:var(--accent-hover)}
 .btn.lg{padding:14px 22px;font-size:16px}

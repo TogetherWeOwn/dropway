@@ -462,6 +462,8 @@ function screens(fx) {
         await page.fill("#dw-k-name", "harness key");
         await page.click("text=Create key");
         await page.waitForSelector("#dw-keys .k-keyout");
+        // The list reloads after the receipt shows: capture once the new key has its row.
+        await page.waitForSelector("#dw-keys tbody tr:has-text('harness key')", { timeout: 15000 });
       },
       // The secret and its prefix differ per cell; each cell revokes its key afterwards.
       mask: [".k-keyout code", "#dw-keys .k-codeblock pre", "#dw-keys tbody tr:has-text('harness key') .k-mono"],
@@ -666,6 +668,9 @@ async function main() {
       }
     }
     for (const c of matrix) delete c.masked;
+    // G9 depends on the machine's fonts: record which fallback faces resolved (from the first app cell that saw them all).
+    source.fontEnv = matrix.map((c) => c.fontEnv ?? []).sort((a, b) => b.length - a.length)[0] ?? [];
+    for (const c of matrix) delete c.fontEnv;
     matrix.sort((a, b) => list.findIndex((s) => s.id === a.screen) - list.findIndex((s) => s.id === b.screen) || PASSES.indexOf(a.pass) - PASSES.indexOf(b.pass) || MODES.indexOf(a.mode) - MODES.indexOf(b.mode) || a.width - b.width);
   } finally {
     await browser.close();
@@ -1047,8 +1052,11 @@ const FOCUS_PROBE = () => {
 };
 
 /** G4: Tab from the top of the page (or of an open dialog) through every focusable element, then Shift+Tab back. */
-/** Until the page stops scrolling (a smooth scroll to the focused element, with normal motion), at most ~3 s. */
-const SETTLE = () =>
+/**
+ * Until the page stops scrolling (a smooth scroll to the focused element, with normal motion), at most ~3 s. Run it
+ * in the page (page.evaluate(SETTLE)). Exported for the hosted harness, which walks focus the same way.
+ */
+export const SETTLE = () =>
   new Promise((done) => {
     let last = null;
     let still = 0;
@@ -1425,6 +1433,15 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
       },
     };
   }, width);
+  // The font environment G9 ran in: which metric-matched fallback faces this machine can resolve (local fonts).
+  const fontEnv = await page
+    .evaluate(async () => {
+      const names = [...new Set([...document.fonts].map((f) => f.family.replace(/^["']|["']$/g, "")).filter((f) => / Fallback( [A-Z])?$/.test(f)))];
+      const out = [];
+      for (const n of names) out.push(`${n}: ${(await document.fonts.load(`16px "${n}"`).catch(() => [])).length ? "resolved" : "missing"}`);
+      return out;
+    })
+    .catch(() => []);
   let axe = { violations: [], incomplete: [] };
   // Every field validates its constraints once: a pattern the browser cannot compile logs a console error here.
   await page.evaluate(() => document.querySelectorAll("input, select, textarea").forEach((el) => el.checkValidity())).catch(() => {});
@@ -1510,7 +1527,7 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
   }
   // Needs review (not failures): axe could not decide, e.g. contrast over an image or a gradient.
   const axeReview = (axe.incomplete ?? []).map((v) => `${v.id}: ${v.nodes.length} ${v.nodes.slice(0, 3).map((n) => n.target.join(" ")).join(" | ")}`);
-  return { screen: sc.id, title: sc.title, pass, mode, width, file, sha256: createHash("sha256").update(png).digest("hex"), masked, ms: Date.now() - t0, gates, axeReview };
+  return { screen: sc.id, title: sc.title, pass, mode, width, file, sha256: createHash("sha256").update(png).digest("hex"), masked, ms: Date.now() - t0, gates, axeReview, fontEnv };
 }
 
 /**
@@ -1632,7 +1649,7 @@ function gallery(list, matrix, checks = {}, source = {}) {
   const sw = [...Object.entries(checks.themeSwitch ?? {}), ...Object.entries(checks.filmstrip ?? {})]
     .map(([k, v]) => `<li>${esc(k)}: ${v.pass ? "ok" : `<b>fail</b> ${esc(JSON.stringify(v.detail))}`}</li>`)
     .join("");
-  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kofra Security Print port: core screenshots</title><style>body{font:14px/1.5 system-ui,sans-serif;margin:24px;background:#f4efe2;color:#141414}h1{font-weight:600}section{margin:0 0 40px}.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}figure{margin:0}img{width:100%;height:260px;object-fit:cover;object-position:top;border:1px solid #b08d3c;background:#fff}b{color:#a8321f}</style><h1>Kofra Security Print port: core screens (${matrix.length} cells)</h1><p>Source commit: <code>${esc(source.commit ?? "unknown")}</code>${source.dirty ? " (working-tree changes; not exact-head evidence)" : ""}. Images are the PNG bytes hashed in matrix.json.</p>${sw ? `<h2>Theme switch (G13) and filmstrip (G7b)</h2><ul>${sw}</ul>` : ""}${rows}`;
+  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kofra Security Print port: core screenshots</title><style>body{font:14px/1.5 system-ui,sans-serif;margin:24px;background:#f4efe2;color:#141414}h1{font-weight:600}section{margin:0 0 40px}.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}figure{margin:0}img{width:100%;height:260px;object-fit:cover;object-position:top;border:1px solid #b08d3c;background:#fff}b{color:#a8321f}</style><h1>Kofra Security Print port: core screens (${matrix.length} cells)</h1><p>Source commit: <code>${esc(source.commit ?? "unknown")}</code>${source.dirty ? " (working-tree changes; not exact-head evidence)" : ""}. Images are the PNG bytes hashed in matrix.json.</p>${source.fontEnv?.length ? `<p>Metric-matched fallback faces on the capture machine (G9 depends on them): ${esc(source.fontEnv.join(", "))}.</p>` : ""}${sw ? `<h2>Theme switch (G13) and filmstrip (G7b)</h2><ul>${sw}</ul>` : ""}${rows}`;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
