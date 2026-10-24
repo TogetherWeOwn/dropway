@@ -33,10 +33,11 @@ construction.
 ## Non-goals
 
 - No change to resolver behavior. `readCredentials` and `readLink` keep
-  collapsing malformed input exactly as today; a corrupt file looking
-  "absent" to the resolver is existing compatibility, and this spec must
-  not be read as permission to change it. The diagnostic is a separate
-  read path that classifies what the resolver collapses.
+  their existing permissive reads and fallbacks. Invalid JSON and read
+  failures collapse to absent, but some wrong-shaped JSON still supplies
+  usable fields. Diagnostic classification must not discard those fields
+  or change the effective result. The diagnostic is a separate read path,
+  not permission to tighten validation in the resolver.
 - No repair, no writes, no network, no token validation, no login, no
   rotation, no telemetry, no probes. See "Offline and read-only".
 - No new server API, no scope or policy change, no hosted concepts.
@@ -70,7 +71,7 @@ API origin, highest precedence first:
 | # | Kind | Detail (closed set) |
 |---|------|---------------------|
 | 1 | `flag` | `--api` |
-| 2 | `env` | `KOFRA_API`, `KOFRA_URL` (each possibly filled from its `DROPWAY_*` legacy twin; see below) |
+| 2 | `env` | `KOFRA_API` or `DROPWAY_API`, then `KOFRA_URL` or `DROPWAY_URL` (literal winning name; see below) <!-- rebrand:keep --> |
 | 3 | `project` | `./dropway.json` field `api` |
 | 4 | `default` | saved default instance in `credentials.json` |
 
@@ -79,7 +80,7 @@ Key, highest precedence first:
 | # | Kind | Detail (closed set) |
 |---|------|---------------------|
 | 1 | `flag` | `--key` |
-| 2 | `env` | `KOFRA_API_KEY` (possibly filled from `DROPWAY_API_KEY`) <!-- rebrand:keep --> |
+| 2 | `env` | `KOFRA_API_KEY` or `DROPWAY_API_KEY` (literal winning name) <!-- rebrand:keep --> |
 | 3 | `saved` | `credentials.json` entry for the effective API origin |
 
 Rules:
@@ -108,9 +109,12 @@ Rules:
   names the literal winning variable and sets `viaLegacyName: true`
   when the value arrived through a `DROPWAY_*` twin. When both twins
   are set, `KOFRA_*` wins and the legacy twin is reported shadowed.
-- Saved-key lookup is keyed by the effective API origin. A malformed or
-  unreadable credentials file therefore yields "no saved key", exactly
-  as the resolver behaves; the file's own state is reported separately.
+- Saved-key lookup is keyed by the effective API origin. Invalid JSON or
+  an unreadable credentials file yields "no saved key". A file diagnosed
+  as `invalid_shape` may still supply an API or key through the existing
+  permissive resolver; its health must not veto that result. For example,
+  a valid saved default and key still work when an unrelated instance
+  entry is `null`, although that file's diagnostic state is `malformed`.
 
 ### States
 
@@ -121,10 +125,10 @@ position: a shadowed file is still classified):
 - `absent`: the file does not exist.
 - `valid`: readable, parses, and has the expected shape (see File
   shapes below).
-- `malformed`: parses as the wrong thing (`invalid_json`, or valid JSON
-  whose top-level value or known fields have the wrong type:
-  `invalid_shape`). Classification only; the resolver keeps treating
-  these as absent.
+- `malformed`: invalid JSON (`invalid_json`), or valid JSON whose
+  top-level value or known fields have the wrong type (`invalid_shape`).
+  Classification only; the resolver's existing coercions still apply.
+  In particular, `invalid_shape` does not mean every field is unusable.
 - `unreadable`: exists but cannot be read (`permission` for
   `EACCES`/`EPERM`, `not_a_file` for `EISDIR` and friends, `io_error`
   otherwise). Closed enum; no `strerror` text is emitted.
@@ -145,10 +149,13 @@ is `malformed` with `invalid_shape`:
   `empty` API value state downstream when it wins).
 - `instances`, when present, is a non-`null`, non-array object. Any
   other type is `invalid_shape`.
-- Every `instances` entry is a non-`null`, non-array object. A
-  non-object entry is `invalid_shape`. Entry fields are not policed
-  further: `hasEntryForEffectiveApi` mirrors the resolver's truthiness
-  test (`creds.instances[api]?.key`), without retaining the value.
+- Every `instances` entry is a non-`null`, non-array object. An array,
+  `null` or primitive entry is `invalid_shape`. No entry field is
+  required or type-checked: `key`, `email`, `tenantId` and `savedAt`
+  may be absent or have any JSON type. Thus `{}` and `{"key": 42}`
+  are valid entry shapes; this is file health, not key validation.
+  `hasEntryForEffectiveApi` reports the resolver's key truthiness
+  (`Boolean(creds.instances[api]?.key)`), not merely entry existence.
 - Unknown top-level and entry fields are ignored (see Compatibility
   notes).
 
@@ -183,10 +190,11 @@ read past presence or validated:
 
 With `--json` the command prints exactly one JSON object on stdout (the
 usual CLI envelope rules apply) and nothing else there. The data
-envelope is used for every parsed invocation, including unconfigured
-and missing-key outcomes; only argument-parsing failures keep the
-standard error envelope. The JSON shape is normative; the human text is
-illustrative but bound by the same redaction rules.
+envelope is used for every diagnosed outcome, including unconfigured
+and missing-key outcomes; argument-parsing failures and unexpected internal
+failures use the error envelopes specified under Exit semantics. The JSON
+shape is normative; the human text is illustrative but bound by the same
+redaction rules.
 
 ```jsonc
 {
@@ -200,7 +208,7 @@ illustrative but bound by the same redaction rules.
   },
   "key": {
     "present": true,
-    "source": { "kind": "saved" },    // flag | env | saved | null
+    "source": { "kind": "saved", "detail": null, "viaLegacyName": false }, // or flag | env | null
     "kind": "api_key"                 // api_key (dw_…) | claim_token (dwc_…) | other | null
   },
   "configDir": { "selector": "default", "viaLegacyName": false, "path": "~/.config/dropway" },
@@ -216,7 +224,8 @@ illustrative but bound by the same redaction rules.
   },
   "checks": [
     { "id": "api.selected", "severity": "info", "code": "source_selected",
-      "hint": "…", "nextAction": null, "source": { "kind": "env", "detail": "KOFRA_API" } }
+      "hint": "…", "nextAction": null,
+      "source": { "kind": "env", "detail": "KOFRA_API", "viaLegacyName": false } }
   ]
 }
 ```
@@ -227,8 +236,28 @@ Field rules:
   check IDs and new nullable fields; consumers must ignore unknown
   check IDs. Any breaking change ships as a new schema string.
 - `source.detail` for flags is the literal flag (`--api`, `--key`); for
-  env it is the literal variable name from the closed set above; for
-  `project`, `default` and `saved` it is `null`.
+  env it is the literal variable name from the tables above, never a
+  canonicalized twin. `viaLegacyName` is `true` exactly for a literal
+  `DROPWAY_*` name, and `false` otherwise. For `project`, `default` and
+  `saved`, `detail` is `null`. These rules also apply to check source
+  references (including shadowed sources).
+- `credentialsFile.defaultPresent`, `instanceCount` and
+  `hasEntryForEffectiveApi` are always present, with these values:
+
+  | File state | `defaultPresent` | `instanceCount` | `hasEntryForEffectiveApi` |
+  |------------|------------------|-----------------|---------------------------|
+  | `valid` | `true` for a string default, including `""`; otherwise `false` | number of own `instances` entries, or `0` when omitted | boolean key truthiness for the effective origin; `null` if no origin resolved |
+  | `absent` | `false` | `0` | `false` if an origin resolved; otherwise `null` |
+  | `malformed` (`invalid_json` or `invalid_shape`) | `null` | `null` | `null` |
+  | `unreadable` (any detail) | `null` | `null` | `null` |
+
+  `null` means the fact is unavailable, not absent. Invalid-shape files
+  expose no partial file summaries even when the permissive resolver can
+  still select a key from them. For a valid file with no resolved origin
+  (missing, empty or invalid winning API), only
+  `hasEntryForEffectiveApi` becomes `null`; the other two facts retain
+  their file-derived values. A truthy saved key counts even when a flag
+  or env key shadows it; no value or length is emitted.
 - `removed` appears only on the `api.value_trimmed` check. It is an
   array of distinct strings drawn from `userinfo`, `path`, `query`
   and `fragment`, in that order, listing each part normalization
@@ -434,16 +463,16 @@ config dir via `KOFRA_CONFIG_DIR`, synthetic cwd, controlled env):
 |---|------|--------|
 | 1 | `--api` set plus env, link and default | exit per key state; `api.selected` source `flag`; one `api.source_shadowed` per lower set source |
 | 2 | `KOFRA_API` plus `KOFRA_URL` | `KOFRA_API` wins; `KOFRA_URL` shadowed |
-| 3 | only `DROPWAY_API` set | wins with `viaLegacyName: true` <!-- rebrand:keep --> |
+| 3 | only `DROPWAY_API` set | `api.source.detail: DROPWAY_API`, `viaLegacyName: true`; `api.selected` names the same literal source <!-- rebrand:keep --> |
 | 4 | `KOFRA_API` plus `DROPWAY_API` | `KOFRA_API` wins; `env.legacy_shadowed` info <!-- rebrand:keep --> |
 | 5 | empty-string env values | treated as absent |
 | 6 | link `api` plus saved default | link wins; default shadowed |
 | 7 | valid link `api` differing from effective origin | `project_link.foreign_instance` warning; mappings ignored |
 | 8 | nothing set anywhere | exit 2, `status: unconfigured`, `api.unconfigured` error; unknown flags also exit 2 but keep the error envelope with no `status` |
 | 9 | winning `--api` invalid, valid env present | exit 2 `invalid_api_url` on the flag; env shadowed, not consulted |
-| 10 | `credentials.json` with invalid JSON | `credentials_file.malformed` (`invalid_json`); key falls through; exit follows the effective outcome |
-| 11 | `credentials.json` valid JSON, wrong shape | `malformed` with `invalid_shape` (resolver behavior unchanged) |
-| 12 | credentials path is a directory | `unreadable` with `not_a_file` |
+| 10 | `credentials.json` with invalid JSON | `credentials_file.malformed` (`invalid_json`); all three credential summary fields are `null`; no saved key; exit follows the effective outcome |
+| 11 | `credentials.json` valid JSON, wrong shape: top-level array/null/primitive, wrong `default` type, wrong `instances` type or array/null/primitive entry | `malformed` with `invalid_shape`; all three credential summary fields are `null`; existing resolver coercions still determine the effective outcome |
+| 12 | credentials path is a directory; separately force `EACCES`/`EPERM` and another read error | `unreadable` with `not_a_file`, `permission` or `io_error` respectively; all three credential summary fields are `null` |
 | 13 | `dropway.json` malformed / unreadable | matching `project_link.*` error checks |
 | 14 | key precedence flag over env over saved; kinds `dw_` / `dwc_` / other | `key.selected` with the right source and kind; `key.kind_noted` for non-`dw_` |
 | 15 | API resolved, no key anywhere | exit 3, `status: needs_key`, `key.absent` error |
@@ -458,12 +487,16 @@ config dir via `KOFRA_CONFIG_DIR`, synthetic cwd, controlled env):
 | 24 | determinism: two consecutive runs | byte-identical stdout; no `savedAt`, no timestamps |
 | 25 | no-prompt: stdin closed, stdout piped | exits promptly; stderr carries no prompt |
 | 26 | JSON conformance | parses; `schema` exact; `checks` within bounds and ID set; unknown IDs ignored by the consumer test |
-| 27 | empty `--api ""` with valid env present | exit 2 `no_instance` on the flag plus `api.empty_value`; env shadowed, not consulted |
+| 27 | empty `--api ""` with valid env present and valid credentials containing a string default and two entries | exit 2 `no_instance` on the flag plus `api.empty_value`; env shadowed, not consulted; credential summary is `defaultPresent: true`, `instanceCount: 2`, `hasEntryForEffectiveApi: null` |
 | 28 | empty `--key ""` with valid env key present | flag falls through (truthiness); env key selected |
 | 29 | link `api` with trimmable suffix normalizing to the effective origin | `apiMatchesEffective: false`, mappings ignored, `foreign_instance` warning (mirrors `publish` string equality) |
 | 30 | only `DROPWAY_CONFIG_DIR` set | `configDir.selector` is `DROPWAY_CONFIG_DIR` with `viaLegacyName: true` <!-- rebrand:keep --> |
 | 31 | forced internal failure with `--json` | exit 1, byte-exact fixed error envelope, no `status`, no caller bytes |
 | 32 | `KOFRA_CONFIG_DIR` outside the home directory | `configDir.path` is `null` in JSON; human output names the selector only; no path component in either output |
+| 33 | resolved API, only `DROPWAY_API_KEY` set; separately only `DROPWAY_URL` for API | literal `source.detail` is `DROPWAY_API_KEY` for the key / `DROPWAY_URL` for API, `viaLegacyName: true`; selected checks use the same source <!-- rebrand:keep --> |
+| 34 | credentials absent, with and without an API flag | credential summary is `false`, `0`, `false` with an origin; `false`, `0`, `null` without one |
+| 35 | credentials `{}`; then optional default `null`/`""`, arbitrary `version`, entries `{}` / `{"key": 42}` | file `valid`; missing/null default gives `defaultPresent: false`, empty gives `true`; own-entry count exact; resolved origin's absent/falsy key gives `false`, truthy key gives `true`; no origin gives `null` |
+| 36 | credentials with valid default and saved key plus an unrelated `null` instance entry | file `malformed` / `invalid_shape`, summary fields all `null`, but saved default/key still resolve exactly as today; exit 0, no resolver validation added |
 
 ## Security-review questions
 
@@ -500,7 +533,9 @@ implementation:
   trimming happened (`api.value_trimmed`); the resolver itself is
   untouched.
 - State classification for files is new logic beside the resolver, not
-  a refactor of it. `readCredentials` / `readLink` keep their
-  collapse-to-absent behavior so every existing caller is unaffected.
+  a refactor of it. `readCredentials` / `readLink` keep their permissive
+  coercions and read/parse-error fallbacks so every existing caller is
+  unaffected. A diagnostic `invalid_shape` label must not veto fields
+  the resolver currently uses.
 - Consuming a credential file with unknown extra fields is `valid`:
   unknown fields are ignored, matching the resolver's coercion.
