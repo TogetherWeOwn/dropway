@@ -230,8 +230,8 @@ async function handlePassword(dw: DropwayContext, req: Request, live: LiveSite, 
  */
 function openInFrame(dw: DropwayContext, req: Request, url: URL, live: LiveSite, mode: ServeMode, viewers: readonly Viewer[]): Response {
   const asked = url.searchParams.get("next") ?? "";
-  const next = safeNext(asked) === asked && asked.startsWith(mode.base) ? asked : mode.base;
-  const target = new URL(next, url);
+  const candidate = safeNext(asked) === asked ? new URL(asked, url) : null;
+  const target = candidate && candidate.pathname.startsWith(mode.base) && !candidate.pathname.startsWith("//") ? candidate : new URL(mode.base, url);
   target.searchParams.delete("theme"); // only this route decides whether the mode goes along
   const theme = themeOf(dw);
   if (theme !== "auto") {
