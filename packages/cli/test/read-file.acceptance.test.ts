@@ -13,7 +13,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { createServer, type Server } from "node:http";
+import { createServer, request as httpRequest, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,10 +49,23 @@ let bundle: string;
 let observed: Wire[] = [];
 let violations: string[] = [];
 
+function fixtureUrl(path: string, origin: string) {
+  if (!path.startsWith("/") || path.startsWith("//") || /[\\\x00-\x20\x7f#]/.test(path)) {
+    throw new Error("fixture requires an origin-relative path and query");
+  }
+  // Assign only path/query: request input can never replace the fixture authority.
+  const url = new URL(origin);
+  const query = path.indexOf("?");
+  url.pathname = query < 0 ? path : path.slice(0, query);
+  url.search = query < 0 ? "" : path.slice(query);
+  return url;
+}
+
 async function request(path: string, init: RequestInit = {}, key = ownerKey) {
+  const url = fixtureUrl(path, api);
   const headers = new Headers(init.headers);
   if (key) headers.set("Authorization", `Bearer ${key}`);
-  return fetch(new URL(path, api), { ...init, headers });
+  return fetch(url, { ...init, headers, redirect: "error" });
 }
 
 async function publish(content: string) {
@@ -123,14 +136,18 @@ beforeAll(async () => {
   // Even the process smoke test can reach only GETs on the disposable Worker.
   // Seed/setup above deliberately bypass this read-only invocation transport.
   proxy = createServer(async (incoming, outgoing) => {
-    const url = new URL(incoming.url!, cliApi);
-    const wire: Wire = { method: incoming.method!, url };
-    observed.push(wire);
-    if (wire.method !== "GET") {
+    if (incoming.method !== "GET") {
       violations.push("non-GET request");
       outgoing.writeHead(405).end();
       return;
     }
+    let url: URL;
+    try { url = fixtureUrl(incoming.url ?? "", cliApi); } catch {
+      outgoing.writeHead(400).end();
+      return;
+    }
+    const wire: Wire = { method: incoming.method, url };
+    observed.push(wire);
     try {
       const res = await request(url.pathname + url.search, { headers: incoming.headers as Record<string, string> }, "");
       const bytes = Buffer.from(await res.arrayBuffer());
@@ -230,6 +247,50 @@ function page(r: Ran, expected: Record<string, unknown>) {
   expect(result, "JSON must retain every API page field without re-encoding content").toMatchObject(request.body);
   return result;
 }
+
+describe("bounded read fixture origin boundary", () => {
+  it("rejects unsafe URL references before the fixture helper can contact another origin", async () => {
+    let contacts = 0;
+    const trap = createServer((_incoming, outgoing) => { contacts++; outgoing.end("escaped"); });
+    await new Promise<void>(resolve => trap.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = trap.address();
+      if (!address || typeof address === "string") throw new Error("local trap has no port");
+      const authority = `127.0.0.1:${address.port}`;
+      for (const path of [
+        `http://${authority}/escape`, `//${authority}/escape`, `/\\${authority}/escape`,
+        `${api}/api/v1/read-file`, "relative", "", "?path=bytes.bin", "/#fragment", "/\t/read-file",
+      ]) {
+        await expect(request(path, {}, "")).rejects.toThrow("origin-relative");
+      }
+      expect(contacts, "unsafe references must not reach even a loopback trap").toBe(0);
+    } finally {
+      await new Promise<void>((resolve, reject) => trap.close(error => error ? reject(error) : resolve()));
+    }
+  });
+
+  it("rejects unsafe raw proxy targets instead of normalizing them into forwarded requests", async () => {
+    observed = [];
+    violations = [];
+    const port = new URL(cliApi).port;
+    for (const path of [
+      `${cliApi}/api/v1/read-file`, `//127.0.0.1:${port}/api/v1/read-file`,
+      `/\\127.0.0.1:${port}/api/v1/read-file`, "/#fragment",
+    ]) {
+      const status = await new Promise<number | undefined>((resolve, reject) => {
+        const req = httpRequest({ hostname: "127.0.0.1", port, path, method: "GET" }, res => {
+          res.resume();
+          res.on("end", () => resolve(res.statusCode));
+        });
+        req.on("error", reject);
+        req.end();
+      });
+      expect(status, "unsafe request target must be refused before forwarding").toBe(400);
+    }
+    expect(observed, "no unsafe target enters the CLI request log").toEqual([]);
+    expect(violations).toEqual([]);
+  });
+});
 
 describe("bounded read-file CLI acceptance", () => {
   it("keeps the legacy files command a listing, not a content reader", async () => {
