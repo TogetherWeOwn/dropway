@@ -2,11 +2,13 @@ import { Hono, type Context } from "hono";
 import { appOrigin, type DropwayContext } from "@dropway/core";
 import type { DropwayEnv } from "./env";
 import type { McpHandlerFactory, McpToolDefinition, UiSlots } from "./extensions";
-import { APP_PAGE_CSP, escapeHtml, htmlPage } from "./html";
+import { APP_PAGE_CSP, escapeHtml } from "./html";
 import { buildOpenApi } from "./openapi";
 import type { OperationDefinition } from "./operations";
 import { agentSkillsIndex, legacySkillsIndex, llmsFullTxt, llmsTxt, skillInstance, skillMarkdown, SKILL_NAME } from "./discovery";
 import { homePage, installUi } from "./ui";
+import { nameCode, tok } from "./ui/code";
+import { appStatePage, uiSlotsOf } from "./ui/shell";
 import { installTransferPages } from "./transfers";
 import { installEncrypted } from "./encrypted";
 import { LEGACY_SKILL_NAME } from "./legacy-brand";
@@ -19,7 +21,7 @@ import { LEGACY_SKILL_NAME } from "./legacy-brand";
  */
 
 function pageHeaders(): Record<string, string> {
-  return { "Content-Security-Policy": APP_PAGE_CSP, "X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin" };
+  return { "Content-Security-Policy": APP_PAGE_CSP, "X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin", Vary: "Cookie" };
 }
 
 /** /llms.txt lives in ./discovery; re-exported here for compatibility. */
@@ -65,13 +67,23 @@ export function createAppRouter(opts: { app: Hono<DropwayEnv>; uiSlots: UiSlots;
   app.get("/.well-known/skills/index.json", (c) => c.json(legacySkillsIndex(c.get("dw").config.instanceName), 200, { "Cache-Control": "public, max-age=300", "Access-Control-Allow-Origin": "*" }));
   app.get("/claim", (c) => {
     const slug = c.req.query("slug") ?? "";
-    const o = appOrigin(c.get("dw"));
-    const body = `<main class="dw-system"><div class="dw-code">CLAIM</div><h1>Keep this site</h1>
-<p>Anonymous sites expire. To keep <code>${escapeHtml(slug)}</code>, call the API with an API key of this instance and the claim token (the part of this link after <code>#token=</code>):</p>
-<pre style="white-space:pre-wrap;word-break:break-all;background:var(--code);padding:1rem;border-radius:8px">curl -X POST ${escapeHtml(o)}/api/v1/sites/${escapeHtml(slug)}/claim \\
+    const dw = c.get("dw");
+    const o = appOrigin(dw);
+    const curl = `curl -X POST ${o}/api/v1/sites/${slug}/claim \\
   -H "Authorization: Bearer $KOFRA_API_KEY" -H "Content-Type: application/json" \\
-  -d '{"claimToken":"dwc_..."}'</pre></main>`;
-    return c.html(htmlPage({ title: "Claim a site", body }), 200, pageHeaders());
+  -d '{"claimToken":"dwc_..."}'`;
+    const html = appStatePage(dw, c.req.url, {
+      title: "Claim a site",
+      code: "CLAIM",
+      heading: "Keep this site",
+      // The site name and "#token=" are code.k-tok: each moves to the next line whole, never split at a hyphen.
+      message: `Anonymous sites expire. To keep ${nameCode(slug)}, call the API with an API key of this instance and the claim token (the part of this link after ${tok("#token=")}):`,
+      // No script on this page, so no Copy button: the command wraps (all of it shows) and one click selects it.
+      extra: `<div class="k-codeblock"><div class="k-codeblock-h"><span class="k-k">Claim with curl</span><span class="k-small">One click selects the command</span></div><pre class="k-wrapped k-pick" tabindex="0" role="region" aria-label="Claim with curl">${escapeHtml(curl)}</pre></div>`,
+      signIn: uiSlotsOf(c).session?.signInPath,
+      footerLinks: uiSlotsOf(c).footerLinks,
+    });
+    return c.html(html, 200, pageHeaders());
   });
 
   const mcpHandler = opts.mcp?.(opts.mcpTools);

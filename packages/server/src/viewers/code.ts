@@ -15,7 +15,7 @@ import type { Viewer, ViewerContext } from "./index";
 /** At most this much text is shown; the rest is one click away (Raw, Download). */
 export const SHOW_MAX_BYTES = 1024 * 1024;
 
-const CODE_VERSION = 1;
+const CODE_VERSION = 2;
 
 /** The highlighting language for a file of this kind, or null for plain text. */
 export function codeLanguage(path: string, kind: FileKind): string | null {
@@ -27,17 +27,21 @@ export function codeLanguage(path: string, kind: FileKind): string | null {
 
 export const CODE_CSS = `
 .dw-codewrap{position:relative}
-.dw-codehead{display:flex;gap:.6rem;align-items:center;justify-content:flex-end;padding:.5rem .9rem 0;font-size:.8rem;color:var(--muted)}
-.dw-codehead .dw-lang{margin-right:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.dw-src{margin:.5rem .9rem 2rem;border:1px solid var(--line);border-radius:9px;background:var(--card);overflow:auto;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;tab-size:4}
-.dw-lines{display:table;min-width:100%;border-collapse:collapse;padding:.4rem 0}
+.dw-codehead{display:flex;gap:.6rem;align-items:center;justify-content:flex-end;padding:.5rem 18px 0;font-size:.8rem;color:var(--muted)}
+.dw-codehead .dw-lang{margin-right:auto;font-family:var(--mono);font-size-adjust:ch-width .7}
+.dw-src{margin:8px 18px 32px;border:1px solid var(--rule-soft);background:var(--paper-3);color:var(--ink);overflow:auto;font:13px/24px var(--mono);font-size-adjust:ch-width .7;tab-size:4}
+.dw-truncated .dw-src{max-height:70vh}
+@media (max-width:720px){.dw-codehead{flex-wrap:wrap}.dw-codehead .dw-lang{flex-basis:100%}}
+.dw-lines{display:table;width:max-content;min-width:100%;border-collapse:collapse;padding:.4rem 0}
 .dw-ln{display:table-row}
-.dw-ln>a{display:table-cell;width:1%;min-width:3.2em;padding:0 .9em 0 .8em;text-align:right;color:var(--muted);opacity:.6;text-decoration:none;user-select:none;-webkit-user-select:none;border-right:1px solid var(--line);vertical-align:top}
+.dw-ln>a{display:table-cell;width:3em;box-sizing:content-box;padding:0 .9em 0 .8em;text-align:right;color:var(--muted);opacity:.6;text-decoration:none;user-select:none;-webkit-user-select:none;border-right:1px solid var(--rule-soft);vertical-align:top}
 .dw-ln>a::before{content:attr(data-n)}
+.dw-lines[data-nd="4"] .dw-ln>a{width:4em}.dw-lines[data-nd="5"] .dw-ln>a{width:5em}.dw-lines[data-nd="6"] .dw-ln>a{width:6em}.dw-lines[data-nd="7"] .dw-ln>a{width:7em}
 .dw-ln>a:hover{opacity:1;color:var(--accent)}
 .dw-ln>.c{display:table-cell;padding:0 1em;white-space:pre}
 .dw-ln:target,.dw-ln.dw-hl{background:color-mix(in srgb,var(--accent) 14%,transparent)}
 .dw-ln:target>a,.dw-ln.dw-hl>a{opacity:1;color:var(--accent)}
+#dw-wrap:checked~.dw-src .dw-lines{width:100%}
 #dw-wrap:checked~.dw-src .c{white-space:pre-wrap;overflow-wrap:anywhere}
 #dw-wrap:checked~.dw-codehead label{border-color:var(--accent);color:var(--accent)}
 #dw-wrap:focus-visible~.dw-codehead label{outline:2px solid var(--accent);outline-offset:2px}
@@ -55,7 +59,9 @@ export async function renderCodeLines(vc: ViewerContext, text: string, lang: str
     const html = highlight(src, name);
     const rows = splitHighlightedLines(html);
     if (rows.length > 1 && rows[rows.length - 1] === "") rows.pop();
-    return `<div class="dw-lines">${rows.map((row, i) => `<div class="dw-ln" id="L${i + 1}"><a href="#L${i + 1}" data-n="${i + 1}" aria-label="Line ${i + 1}"></a><span class="c">${row}</span></div>`).join("")}</div>`;
+    // The gutter is as wide as the largest line number from the first row on (a fixed em width per digit
+    // count, set before any row renders), so the code never moves sideways while a long file streams in.
+    return `<div class="dw-lines" data-nd="${String(rows.length).length}">${rows.map((row, i) => `<div class="dw-ln" id="L${i + 1}"><a href="#L${i + 1}" data-n="${i + 1}" aria-label="Line ${i + 1}" tabindex="-1"></a><span class="c">${row}</span></div>`).join("")}</div>`;
   });
   const lines = (r.html.match(/class="dw-ln"/g) ?? []).length;
   return { html: r.html, lines, cache: r.cache };
@@ -72,11 +78,11 @@ export async function readShownText(vc: ViewerContext): Promise<{ text: string; 
 export async function codePage(vc: ViewerContext, opts: { text: string; truncated: boolean; shown: number; lang: string | null; note?: string; tabs: ReturnType<typeof standardTabs> }) {
   const { html, lines, cache } = await renderCodeLines(vc, opts.text, opts.lang, opts.truncated ? `first${opts.shown}` : "full");
   const name = hljsLanguage(opts.lang);
-  const plainNote = opts.text.length > HIGHLIGHT_MAX_BYTES && name ? `<p class="dw-note">This file is too large to highlight; it is shown as plain text.</p>` : "";
-  const body = `${opts.note ?? ""}${opts.truncated ? truncatedNote(vc, opts.shown) : ""}${plainNote}<main class="dw-codewrap">
-<input type="checkbox" id="dw-wrap" class="dw-toggle">
-<div class="dw-codehead"><span class="dw-lang">${escapeHtml(name ?? "plain text")} · ${lines.toLocaleString("en-US")} line${lines === 1 ? "" : "s"}</span><label for="dw-wrap" class="dw-btn">Wrap</label><button type="button" id="dw-copy" class="dw-btn" hidden>Copy</button></div>
-<div class="dw-src">${html}</div></main>`;
+  const plainNote = opts.text.length > HIGHLIGHT_MAX_BYTES && name ? `<p class="k-banner k-notebar" role="note">This file is too large to highlight; it is shown as plain text.</p>` : "";
+  const body = `${opts.note ?? ""}${opts.truncated ? truncatedNote(vc, opts.shown) : ""}${plainNote}<div class="dw-codewrap${opts.truncated ? " dw-truncated" : ""}">
+<input type="checkbox" id="dw-wrap" class="k-toggle">
+<div class="dw-codehead"><span class="dw-lang">${escapeHtml(vc.file.kind === "html" ? "HTML" : vc.file.kind === "svg" ? "SVG" : name ?? "plain text")} · ${lines.toLocaleString("en-US")} line${lines === 1 ? "" : "s"}</span><label for="dw-wrap" class="k-btn k-sm k-ghost k-togglebtn">Wrap</label><button type="button" id="dw-copy" class="k-btn k-sm k-ghost" hidden>Copy</button></div>
+<div class="dw-src" tabindex="0" role="region" aria-label="${escapeHtml(vc.file.path)}">${html}</div></div>`;
   return viewerPage(vc, {
     tabs: opts.tabs,
     body,

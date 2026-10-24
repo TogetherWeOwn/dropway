@@ -147,7 +147,7 @@ export async function fetchUrlSource(
   for (let hop = 0; ; hop++) {
     let res: Response;
     try {
-      res = await doFetch(current.href, { headers: { "User-Agent": "Kofra-Fetch/1 (+https://github.com/TogetherWeOwn/dropway)", ...opts.headers }, redirect: "manual", signal });
+      res = await doFetch(current.href, { headers: { "User-Agent": "Kofra-Fetch/1 (+https://github.com/TogetherWeOwn/kofra)", ...opts.headers }, redirect: "manual", signal });
     } catch (e) {
       const timedOut = signal.aborted;
       throw new ApiError(422, "fetch_failed", `Could not fetch ${current.href}: ${timedOut ? "timed out" : String((e as Error)?.message ?? e)}.`, "Check the URL is reachable from the public internet, or send the bytes another way.", {

@@ -9,6 +9,7 @@ import type { Viewer } from "./index";
  */
 export const htmlFrameViewer: Viewer = {
   id: "html-frame",
+  version: 3,
   maxBytes: Number.MAX_SAFE_INTEGER,
   matches: (file, _live, mode) => file.kind === "html" && mode === "view",
   async render(vc) {
@@ -16,10 +17,11 @@ export const htmlFrameViewer: Viewer = {
     tabs[0] = { label: "Page", href: vc.viewUrl, current: true };
     return viewerPage(vc, {
       tabs,
-      barExtra: `<a href="${escapeHtml(vc.fileUrl)}" rel="nofollow" title="Open the page without the bar">Open</a>`,
-      css: `html,body{height:100%}body{display:flex;flex-direction:column}.dw-frame{flex:1;width:100%;border:0;background:#fff}`,
-      body: `<iframe class="dw-frame" src="${escapeHtml(vc.fileUrl)}" title="${escapeHtml(vc.file.path)}"></iframe>`,
+      barExtra: `<a class="k-btn k-sm k-ghost" href="${escapeHtml(vc.fileUrl)}" rel="nofollow" title="Open the page without the bar">Open</a>`,
+      css: `html,body{height:100%}body{display:flex;flex-direction:column}.k-vbody{flex:1;display:flex;min-height:0}.k-frame{flex:1;width:100%;border:0;background:#fff;display:block}`,
+      body: `<iframe class="k-frame" src="${escapeHtml(vc.fileUrl)}" title="${escapeHtml(vc.file.path)}"></iframe>`,
       csp: viewerCsp({ frameSrc: [vc.url.origin] }),
+      srHeading: true,
     });
   },
 };
