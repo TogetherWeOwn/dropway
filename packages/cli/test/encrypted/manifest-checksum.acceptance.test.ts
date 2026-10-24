@@ -344,7 +344,7 @@ it("copies only the requested full digest by keyboard, keeps focus and announces
     await copy.focus();
     await view.page.keyboard.press("Enter");
     await expect.poll(async () => (await state(view.page)).writes).toEqual([expected[0]![0]!.sha256]);
-    await expect.poll(() => announcements(view.page).allTextContents()).toEqual(expect.arrayContaining(expect.stringMatching(/copied/i)));
+    await expect.poll(() => announcements(view.page).allTextContents()).toEqual(expect.arrayContaining([expect.stringMatching(/copied/i)]));
     expect(await fileRow(view.page, "left/report.txt").evaluate(row => {
       const active = (globalThis as any).document.activeElement;
       return row.contains(active) && active?.tagName === "BUTTON" && /copy|copied|sha.?256/i.test(active.getAttribute("aria-label") ?? active.textContent ?? "");
