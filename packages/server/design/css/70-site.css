@@ -21,7 +21,7 @@ html:has(.vbar){scroll-padding-top:8.5rem}
 .vbar .trust{font-size:12px;margin:0;flex-basis:100%;order:3;text-align:right}
 .vtrust{max-width:60rem;margin:var(--s7) auto var(--s5);padding:12px var(--s5) 0;border-top:1px solid var(--rule-soft)}
 .show-lg{display:none}
-.notebar{max-width:60rem;margin:14px auto}
+p.notebar{display:block;max-width:60rem;margin:14px auto;overflow-wrap:anywhere}
 .toggle{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px}
 .toggle:focus-visible+*{outline:2px solid var(--focus);outline-offset:2px}
 .toggle:focus-visible~* .togglebtn,.toggle:focus-visible~.togglebtn{outline:2px solid var(--focus);outline-offset:2px}
@@ -46,13 +46,12 @@ html:has(.vbar){scroll-padding-top:8.5rem}
 @media (max-width:999.98px){
   /* Two fixed rows, whatever the fonts: the file (path cut with an ellipsis) above the view and buttons, so
      nothing below jumps when the web fonts replace the fallbacks. */
-  .vfile{flex:1 1 100%}
-  .vmeta{white-space:nowrap}
+  .vfile{flex:1 1 100%;display:grid;grid-template-columns:auto minmax(0,1fr);row-gap:6px}
+  .vfile .crumbs,.vfile .vmeta,.vfile .sum{grid-column:1/-1}
+  .vfile .crumbs{width:100%}
+  .vfile .crumbs>*{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis}
+  .vfile .crumbs>:last-child{flex:none;max-width:65%}
+  .vmeta{white-space:normal;overflow-wrap:anywhere}
 }
-@media (max-width:640px){
-  .vmeta{display:none}
-  /* Phones: the path gets a line of its own (always, so the rows still do not depend on the fonts). */
-  .vfile{flex-wrap:wrap;row-gap:4px}
-  .vfile .crumbs{flex:1 1 100%}
-}
+@media (max-width:720px){.vbar{position:static}}
 @media (min-width:1000px){.show-lg{display:block}.hide-lg{display:none}}

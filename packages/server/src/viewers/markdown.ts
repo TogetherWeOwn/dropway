@@ -8,7 +8,7 @@ import { RESERVED_NAME, sanitizeHtml } from "./sanitize";
 
 const MD_VERSION = 3;
 
-const MD_CSS = `
+export const MD_CSS = `
 .k-doc{max-width:46em;margin:0 auto;padding:var(--s7) var(--s5) var(--s10);font-size:17px;line-height:1.6;color:var(--ink);overflow-wrap:break-word}
 .k-doc h1,.k-doc h2,.k-doc h3,.k-doc h4,.k-doc h5,.k-doc h6{font-family:var(--serif);font-weight:500;color:var(--accent);line-height:1.2;margin:1.8em 0 .6em;scroll-margin-top:4.5rem}
 .k-doc h1{font-size:clamp(32px,4vw,52px);margin-top:0;letter-spacing:-.01em}

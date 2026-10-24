@@ -184,9 +184,17 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
     } catch (e) {
       console.error(JSON.stringify({ event: "serve_error", ...requestErrorDetails(request, e) }));
       if (isNavigation(request)) {
-        return new Response(PLATFORM_ERROR_HTML, {
+        // Rendering uses only the already-resolved request/config, never the failing database.
+        const html = systemPage({
+          dw,
+          code: "500",
+          title: "Something went wrong on our side",
+          message: "This page could not be served. Try again in a moment.",
+          extra: `<div class="k-acts"><a class="k-btn" href="${escapeHtml(url.origin + url.pathname)}">Try again</a><a class="k-btn k-ghost" href="${escapeHtml(appOrigin(dw))}">Home</a></div>`,
+        });
+        return new Response(html, {
           status: 500,
-          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'", "X-Content-Type-Options": "nosniff" },
+          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Content-Security-Policy": `default-src 'none'; style-src 'unsafe-inline'; font-src ${appOrigin(dw)}; img-src data:; base-uri 'none'; form-action 'none'`, "X-Content-Type-Options": "nosniff" },
         });
       }
       return new Response("Internal error", { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
@@ -201,18 +209,6 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
 
   return { fetch, scheduled, app, operations, mcpTools, uiSlots, viewers, adapters, context };
 }
-
-/**
- * The page for any request that failed before a response could be built. A static string made at
- * module load: the site bundle with no fonts and no instance data, so it depends on nothing that may
- * be failing.
- */
-const PLATFORM_ERROR_HTML = systemPage({
-  code: "500",
-  title: "Something went wrong on our side",
-  message: "This page could not be served. Try again in a moment.",
-  fonts: false,
-});
 
 function sitesHome(dw: DropwayContext, request: Request): Response {
   const o = appOrigin(dw);

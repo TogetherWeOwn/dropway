@@ -10,6 +10,8 @@
 .toolbar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between;padding:10px 18px;border-bottom:1px solid var(--rule-soft);background:var(--paper)}
 .toolbar .vfile{display:flex;align-items:center;gap:10px;min-width:0;flex:1 1 16rem;flex-wrap:wrap}
 .toolbar .tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.toolbar .vfile .sum{flex:1 1 100%}
+.toolbar .vfile .crumbs{overflow-wrap:anywhere;min-width:0}
 .vcenter>.trust{padding:6px 18px;border-bottom:1px solid var(--rule-soft);background:var(--paper-2)}
 .frame{flex:1;width:100%;min-height:0;border:0;background:#fff;display:block}
 .tree{font-size:14px;line-height:1.35}
@@ -26,9 +28,10 @@
 @media (max-width:760px){
   .page.wide{height:auto;min-height:100vh;overflow:visible}
   .vapp{flex-direction:column}
-  /* A fixed height: the preview below does not move when the tree fills in. */
-  .vside{width:auto;height:34vh;flex:none;border-right:0;border-bottom:1px solid var(--rule)}
+  /* Let page scrolling reach both the complete tree and a usable, separately scrolling preview. */
+  .vside{width:auto;overflow:visible;flex:none;border-right:0;border-bottom:1px solid var(--rule)}
   .vcenter{min-height:70vh}
+  .frame{flex:none;height:80vh;min-height:30rem}
   .toolbar{padding:10px 14px}
   .vcenter>.trust{padding:6px 14px}
 }

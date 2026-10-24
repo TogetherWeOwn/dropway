@@ -275,7 +275,9 @@ export function dropwayClient(motifsFactory) {
       svg.setAttribute("aria-label", "Checksum seal for " + path + ", SHA-256 " + sha.slice(0, 12));
       box.appendChild(svg);
     }
-    if (!opts.noText) add(box, h("span", {}, h("code", { title: "SHA-256 " + sha, text: sha.slice(0, 12) + "…" }), opts.caption ? h("span", { class: "k-small", text: opts.caption }) : null));
+    if (!opts.noText) add(box, opts.full
+      ? h("details", { class: "k-checksum" }, h("summary", { text: "SHA-256 " + sha.slice(0, 12) + "…" }), h("code", { text: sha }))
+      : h("span", {}, h("code", { title: "SHA-256 " + sha, text: sha.slice(0, 12) + "…" }), opts.caption ? h("span", { class: "k-small", text: opts.caption }) : null));
     return box;
   }
 
@@ -1074,7 +1076,7 @@ export function dropwayClient(motifsFactory) {
       ),
       h(
         "td",
-        { class: "k-hide-sm" },
+        {},
         h("span", { class: "k-url" }, h("a", { href: s.url, target: "_blank", rel: "noopener", class: "k-small", text: s.url.replace(/^https?:\/\//, "") }), copyButton(s.url, "Copy URL of " + s.slug)),
       ),
       h("td", { class: "k-num k-small" }, v ? "v" + v.number : "–", h("span", { class: "k-sub", text: v ? plural(v.fileCount, "file") + " · " + bytes(v.totalBytes) : "" })),
@@ -1333,15 +1335,29 @@ export function dropwayClient(motifsFactory) {
           s.passwordProtected ? h("button", { type: "button", class: "k-btn k-ghost", text: "Remove password", onclick: async function () { await saveSettings({ password: null }, "Password removed."); } }) : null),
         h("p", { class: "k-hint", id: "dw-s-pw-hint", text: "Visitors must enter it. Changing it signs everyone out." }),
       ),
+      h("p", { class: "k-msgline k-err", id: "dw-s-error", role: "alert", hidden: true }),
       h("div", { class: "k-btnrow" }, h("button", { type: "submit", class: "k-btn", text: "Save settings" })),
     );
     async function saveSettings(body, msg) {
+      var error = form.querySelector("#dw-s-error");
+      error.hidden = true;
+      $$("[aria-invalid]", form).forEach(function (field) { field.removeAttribute("aria-invalid"); field.removeAttribute("aria-errormessage"); });
       try {
         await api("/sites/" + encodeURIComponent(slug), { method: "PATCH", body: body });
         toast(msg || "Saved.");
         pages.site();
       } catch (e) {
-        toast(e.message + (e.hint ? " " + e.hint : ""), true);
+        var message = e.message + (e.hint ? " " + e.hint : "");
+        error.textContent = message;
+        error.hidden = false;
+        var fieldName = { invalid_title: "title", invalid_description: "description", invalid_password: "password" }[e.code];
+        var field = fieldName && form.elements[fieldName];
+        if (field) {
+          field.setAttribute("aria-invalid", "true");
+          field.setAttribute("aria-errormessage", "dw-s-error");
+          field.focus();
+        }
+        toast(message, true);
       }
     }
     form.addEventListener("submit", function (e) {
@@ -1743,7 +1759,7 @@ export function dropwayClient(motifsFactory) {
         f ? h("span", { class: "k-chip k-accent", text: f.kind }) : null,
         h("span", { class: "k-crumbs" }, h("span", { "aria-current": "page", text: p || "/" })),
         f ? h("span", { class: "k-vmeta", text: bytes(f.size) + " · " + f.contentType.split(";")[0] }) : null,
-        f ? sealFor(p, f.sha256, { mini: true, hideSm: true }) : null,
+        f ? sealFor(p, f.sha256, { mini: true, full: true }) : null,
       );
     }
 

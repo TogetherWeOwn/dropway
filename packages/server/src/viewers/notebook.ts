@@ -3,7 +3,7 @@ import { cachedRender } from "./cache";
 import { standardTabs, viewerPage } from "./chrome";
 import { HIGHLIGHT_CSS, highlight, hljsLanguage } from "./highlight";
 import type { Viewer } from "./index";
-import { renderMarkdown } from "./markdown";
+import { MD_CSS, renderMarkdown } from "./markdown";
 import { sanitizeHtml } from "./sanitize";
 
 /**
@@ -11,7 +11,7 @@ import { sanitizeHtml } from "./sanitize";
  * with their execution count, outputs shown (text, errors, PNG/JPEG/GIF/SVG
  * images, HTML and Markdown through the sanitizer). Nothing executes.
  */
-const NB_VERSION = 2;
+const NB_VERSION = 3;
 const MAX_OUTPUT_TEXT = 100_000;
 
 const NB_CSS = `
@@ -96,7 +96,7 @@ export const notebookViewer: Viewer = {
     });
     return viewerPage(vc, {
       tabs: standardTabs(vc, { rendered: "Notebook", source: true }),
-      css: NB_CSS + HIGHLIGHT_CSS,
+      css: MD_CSS + NB_CSS + HIGHLIGHT_CSS,
       body: `<main class="k-doc nb">${r.html}</main>`,
       headers: { "X-Kofra-Render-Cache": r.cache },
     });

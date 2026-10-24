@@ -28,7 +28,7 @@
 .inline{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:flex-end}
 .inline>.group{flex:1 1 13rem;margin:0}
 .inline>.btn{flex:none}
-.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(16rem,1fr));gap:0 20px}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:0 20px}
 fieldset.plain{border:0;padding:0;margin:0 0 16px;min-width:0}
 fieldset.plain>legend{padding:0}
 .toggles{display:flex;flex-wrap:wrap;gap:8px 22px}
@@ -61,6 +61,17 @@ html:has(.toast){scroll-padding-bottom:7rem}
   .blk .table th:last-child,.blk .table td:last-child{padding-right:14px}
   .skel{margin:10px 14px}
   .find{width:100%}
+  /* Keep row identity, facts and actions together instead of clipping a desktop ledger. */
+  .table{display:block}
+  .table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .table tbody{display:block}
+  .table tr{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;padding:14px;border-bottom:1px solid var(--rule-soft)}
+  .blk .table td{display:block;padding:0;border:0;white-space:normal;text-align:left;overflow-wrap:anywhere;min-width:0}
+  .table td.act{display:flex;flex-wrap:wrap;gap:8px}
+  .table td.act .btn+.btn{margin:0}
+  .table .chip{white-space:normal;overflow-wrap:anywhere}
+  .table .url{display:flex}
+  .table .url a{white-space:normal;overflow-wrap:anywhere}
 }
 @media print{.toasts{display:none}}
 .stack>*+*{margin-top:var(--s5)}

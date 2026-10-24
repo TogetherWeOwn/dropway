@@ -158,10 +158,10 @@ export function systemResponse(
           code,
           title,
           message: message.replace("{app}", `<a href="${escapeHtml(origin)}">${escapeHtml(dw.config.instanceName)}</a>`),
-          extra,
+          extra: extra + (code === "PASSWORD" ? "" : `<div class="k-acts"><a class="k-btn k-ghost" href="${escapeHtml(origin)}">Home</a>${code === "EMPTY" && live ? `<a class="k-btn" href="${escapeHtml(origin)}/dashboard/publish?site=${escapeHtml(encodeURIComponent(live.slug))}">Publish files</a>` : status === 502 ? `<a class="k-btn" href="${escapeHtml(req.url)}">Try again</a>` : ""}</div>`),
           // Only terminal lifecycle states get a stamp.
           stamp: status === 410 ? { text: "Expired" } : undefined,
-          variant: code === "PASSWORD" ? "panel" : "state",
+          variant: code === "PASSWORD" ? "panel" : code === "EMPTY" ? "empty" : "state",
         });
   return new Response(body, { status, headers: h });
 }

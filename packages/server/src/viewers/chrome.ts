@@ -106,7 +106,7 @@ export function viewerBar(vc: ViewerContext, tabs: ViewerTab[], extra = ""): str
   const type = vc.file.contentType.split(";")[0]!;
   const origin = appOrigin(vc.dw);
   return `<header class="k-vbar">
-<div class="k-vfile"><a class="k-wm" href="${escapeHtml(origin)}" rel="nofollow">${escapeHtml(vc.dw.config.instanceName)}</a><span class="k-chip k-accent">${escapeHtml(kind)}</span><nav class="k-crumbs" aria-label="Path" title="${escapeHtml(vc.file.path)}">${crumbs(vc)}</nav><span class="k-vmeta">${formatBytes(vc.file.size)} · ${escapeHtml(type)}</span><span class="k-sum k-mini k-hide-sm">${fileSeal(vc.file.path, vc.file.sha256)}<span><code title="SHA-256 ${escapeHtml(vc.file.sha256)}">${escapeHtml(vc.file.sha256.slice(0, 12))}…</code></span></span></div>
+<div class="k-vfile"><a class="k-wm" href="${escapeHtml(origin)}" rel="nofollow">${escapeHtml(vc.dw.config.instanceName)}</a><span class="k-chip k-accent">${escapeHtml(kind)}</span><nav class="k-crumbs" aria-label="Path" title="${escapeHtml(vc.file.path)}">${crumbs(vc)}</nav><span class="k-vmeta">${formatBytes(vc.file.size)} · ${escapeHtml(type)}</span><span class="k-sum k-mini">${fileSeal(vc.file.path, vc.file.sha256)}<details class="k-checksum"><summary>SHA-256 ${escapeHtml(vc.file.sha256.slice(0, 12))}…</summary><code>${escapeHtml(vc.file.sha256)}</code></details></span></div>
 <nav class="k-seg" aria-label="View">${tabs
     .map((t) => `<a href="${escapeHtml(t.raw ? t.href : withTheme(vc, t.href))}"${t.current ? ' aria-current="page"' : ""} rel="nofollow">${escapeHtml(t.label)}</a>`)
     .join("")}</nav>
@@ -146,7 +146,7 @@ export function viewerPage(
 
 /** Note shown when only the first part of a large file is displayed. */
 export function truncatedNote(vc: ViewerContext, shownBytes: number): string {
-  return `<p class="k-banner k-notebar" role="note">Showing the first ${formatBytes(shownBytes)} of ${formatBytes(vc.file.size)}.&nbsp;<a href="${escapeHtml(vc.rawUrl)}" rel="nofollow">Raw</a>&nbsp;or&nbsp;<a href="${escapeHtml(vc.downloadUrl)}" rel="nofollow">download</a>&nbsp;the whole file.</p>`;
+  return `<p class="k-banner k-notebar" role="note">Showing the first ${formatBytes(shownBytes)} of ${formatBytes(vc.file.size)}. <a href="${escapeHtml(vc.rawUrl)}" rel="nofollow">Raw</a> or <a href="${escapeHtml(vc.downloadUrl)}" rel="nofollow">download</a> the whole file.</p>`;
 }
 
 /** Decode UTF-8 (BOM stripped, invalid sequences replaced). */

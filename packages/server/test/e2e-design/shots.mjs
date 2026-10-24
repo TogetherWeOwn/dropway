@@ -62,6 +62,7 @@ const CHROME =
 
 const APP = "https://kofra.test";
 const SITES = "kofra-sites.test";
+const SEPARATE = "https://kofra-separate.test";
 const site = (slug, path = "") => `https://${slug}.${SITES}/${path}`;
 const BOOT = "harness-bootstrap-secret-0123456789abcdef";
 const FROZEN = new Date("2026-10-23T12:00:00Z");
@@ -231,11 +232,16 @@ function sqlStatements(sql) {
 }
 
 function bundle(dir) {
-  execFileSync(join(ROOT, "node_modules/.bin/wrangler"), ["deploy", "--dry-run", "--outdir", dir, "--config", join(ROOT, "wrangler.jsonc")], { cwd: ROOT, stdio: "pipe" });
+  // Local-only fault route exercises the real app error handler; it is never part of the deployable entry.
+  const entry = join(dirname(dir), "index.ts");
+  writeFileSync(entry, `import { createDropway } from ${JSON.stringify(join(ROOT, "packages/server/src/create.ts"))};
+const worker = createDropway({ routes: [({ app }) => app.get("/__harness/server-error", () => { throw new Error("Local screenshot fixture"); })] });
+export default { fetch: worker.fetch, scheduled: worker.scheduled };`);
+  execFileSync(join(ROOT, "node_modules/.bin/wrangler"), ["deploy", entry, "--dry-run", "--outdir", dir, "--config", join(ROOT, "wrangler.jsonc")], { cwd: ROOT, stdio: "pipe" });
   return join(dir, "index.js");
 }
 
-async function startWorker(tmp) {
+async function startWorker(tmp, bindings = {}) {
   const script = bundle(join(tmp, "bundle"));
   // Miniflare 5 takes the new options shape; the v4 shape (one worker) converts.
   const mf = new Miniflare(
@@ -245,7 +251,7 @@ async function startWorker(tmp) {
       modulesRoot: dirname(script),
       compatibilityDate: "2026-10-01",
       compatibilityFlags: ["nodejs_compat"],
-      bindings: { APP_ORIGIN: APP, SITES_MODE: "subdomain", SITES_DOMAIN: SITES, SITES_ORIGIN: "", ANONYMOUS_PUBLISH: "true", ADMIN_BOOTSTRAP_KEY: BOOT, SIGNING_SECRET: "harness-signing-secret" },
+      bindings: { APP_ORIGIN: APP, SITES_MODE: "subdomain", SITES_DOMAIN: SITES, SITES_ORIGIN: "", ANONYMOUS_PUBLISH: "true", ADMIN_BOOTSTRAP_KEY: BOOT, SIGNING_SECRET: "harness-signing-secret", ...bindings },
       d1Databases: ["DB"],
       r2Buckets: ["FILES"],
       kvNamespaces: ["CACHE"],
@@ -320,7 +326,7 @@ async function seed(mf, db) {
   // Anonymous sites: one expired, one live (the report link).
   const anon = await publish(null, { "index.html": Buffer.from("<h1>Temp</h1>") }, null, null);
   await db.prepare("UPDATE sites SET expires_at = ? WHERE slug = ?").bind(Date.parse("2026-10-20T00:00:00Z"), anon.slug).run();
-  const anonLive = await publish(null, { "index.html": Buffer.from('<!doctype html><title>Hello</title><h1 style="font-family:sans-serif">Hello from an anonymous page</h1>') }, null, null);
+  const anonLive = await publish(null, { "index.html": Buffer.from('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hello</title><h1 style="font-family:sans-serif">Hello from an anonymous page</h1>') }, null, null);
   // Keys and members.
   for (const [name, scopes] of [["claude-code on laptop", ["sites:read", "sites:write"]], ["ci deploys", ["sites:write"]], ["read-only dashboard", ["sites:read"]]]) {
     await call(`${APP}/api/v1/keys`, json(owner, "POST", { name, scopes }));
@@ -466,12 +472,14 @@ function screens(fx) {
     app("J42", "A24 Claim a site", `/claim?slug=${fx.anonLive}`, { auth: false }),
     app("J43", "A25 Encrypted site wrapper", "/__dropway/encrypted/fx-site", { auth: false, expectConsole: true, expectFailed: ["GET /encrypted.bin"], noSkip: true }), // minimal chrome (A25): wordmark, warning, frame
     app("J44", "A26 Not found", "/nope", { auth: false, status: 404 }),
+    // Each response gets a new request ID; only that field is masked for the Auto identity comparison.
+    app("J45", "A27 Server error", "/__harness/server-error", { auth: false, status: 500, mask: [".k-state .k-small .k-mono"] }),
+    s("J73", "S07 Separate-origin path-mode viewer", `${SEPARATE}/fx-site/README.md`, { worker: "separate" }),
     // A second, empty instance: not set up yet, then set up with no sites, then a broken database.
     app("J04", "A02 Self-host home, not set up", "/", { auth: false, worker: "fresh" }),
     app("J11", "A07 API-key sign-in, not set up", "/login", { auth: false, worker: "fresh" }),
     app("J14", "A08 Sites, empty", "/dashboard", { worker: "fresh", needsOwner: true, wait: ".k-empty" }),
-    // Built once at module load with no request data, so it follows the device only (no ?theme).
-    s("J74", "S08 Platform error 500", site("anything"), { worker: "fresh", breakDb: true, status: 500, staticTheme: true }),
+    s("J74", "S08 Platform error 500", site("anything"), { worker: "fresh", breakDb: true, status: 500 }),
     s("J46", "S01 Unknown site", site("nosuch"), { status: 404 }),
     s("J47", "S01 Reserved host", site("files", "x"), { status: 404 }),
     s("J48", "S01 Page not found", site("fx-site", "missing.html"), { status: 404 }),
@@ -496,7 +504,7 @@ function screens(fx) {
     s("J60", "S05 CSV", site("fx-site", "data/table.csv")),
     s("J61", "S05 SVG", site("fx-site", "media/logo.svg")),
     s("J62", "S05 Image", site("fx-site", "media/photo.png")),
-    s("J63", "S05 PDF", site("fx-site", "docs/report.pdf"), { viewportOnly: true }), // a full-height layout
+    s("J63", "S05 PDF", site("fx-site", "docs/report.pdf")),
     // The browser's own video control animates while it gives up on the (invalid) clip: masked for G6.
     s("J64", "S05 Video", site("fx-site", "media/clip.webm"), { expectConsole: true, mask: ["video"] }),
     s("J65", "S05 Audio", site("fx-site", "media/tone.wav")),
@@ -505,7 +513,7 @@ function screens(fx) {
     s("J68", "S05 Source", site("fx-site", "index.html?view=source")),
     s("J69", "S05 Binary", site("fx-site", "bin/blob.bin?view=1")),
     s("J70", "S05 HTML page in the viewer frame", site("fx-site", "page.html?view=1")),
-    s("J71", "S05 Truncated note", site("fx-site", "logs/big.log"), { viewportOnly: true }),
+    s("J71", "S05 Truncated note", site("fx-site", "logs/big.log")),
     s("J72", "S06 Report link on an anonymous page", site(fx.anonLive), { userPage: true }),
   ];
 }
@@ -559,6 +567,10 @@ async function main() {
   checkSelection();
   if (!CHROME) throw new Error("No Chrome: set CHROME_PATH");
   mkdirSync(OUT, { recursive: true });
+  const source = {
+    commit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim(),
+    dirty: execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { cwd: ROOT, encoding: "utf8" }).trim().length > 0,
+  };
   const tmp = mkdtempSync(join(tmpdir(), "kofra-shots-"));
   const maskDir = join(tmp, "masked");
   mkdirSync(maskDir, { recursive: true });
@@ -571,12 +583,14 @@ async function main() {
   const list = screens(fx).filter((s) => !ONLY || ONLY.has(s.id));
   // Fresh-instance screens run last, in order: not set up, then set up (no sites), then a broken database.
   const fresh = list.filter((s) => s.worker === "fresh").sort((a, b) => (a.needsOwner ? 1 : 0) + (a.breakDb ? 2 : 0) - ((b.needsOwner ? 1 : 0) + (b.breakDb ? 2 : 0)));
-  const main = list.filter((s) => s.worker !== "fresh");
+  const main = list.filter((s) => !s.worker);
+  const separate = list.filter((s) => s.worker === "separate");
   const axeSource = readFileSync(join(ROOT, "node_modules/axe-core/axe.min.js"), "utf8");
   const browser = await chromium.launch({ executablePath: CHROME, args: ["--no-sandbox", "--font-render-hinting=none", "--disable-gpu", "--disable-lcd-text"] });
   const matrix = [];
   const checks = {};
   let second = null;
+  let pathWorker = null;
   try {
     const record = (sc, mode, width, cell) => {
       matrix.push(cell);
@@ -605,6 +619,12 @@ async function main() {
     );
     for (const job of main.filter((x) => x.mutates).flatMap(jobsFor)) await runOne(job);
     if (EXTRA && !ONLY) checks.themeSwitch = await themeSwitchChecks(browser, mf, fx);
+    if (separate.length) {
+      pathWorker = await startFreshWorker((dir) => startWorker(dir, { SITES_MODE: "path", SITES_DOMAIN: "", SITES_ORIGIN: SEPARATE }));
+      const pathFx = await seed(pathWorker.mf, pathWorker.db);
+      const run = runOn(pathWorker.mf, pathFx);
+      for (const job of separate.flatMap(jobsFor)) await run(job);
+    }
     for (const sc of fresh) {
       if (!second) second = await startFreshWorker();
       if (sc.needsOwner && !second.owner) {
@@ -645,9 +665,18 @@ async function main() {
       await second.mf.dispose();
       rmSync(second.dir, { recursive: true, force: true });
     }
+    if (pathWorker) {
+      await pathWorker.mf.dispose();
+      rmSync(pathWorker.dir, { recursive: true, force: true });
+    }
   }
-  writeFileSync(join(OUT, "matrix.json"), JSON.stringify({ generatedAt: new Date().toISOString(), target: "core", checks, cells: matrix }, null, 1));
-  writeFileSync(join(OUT, "index.html"), gallery(list, matrix, checks));
+  // The gallery references these exact PNG bytes, never transcoded thumbnails with unrelated hashes.
+  for (const cell of matrix.filter((c) => c.file)) {
+    const hash = createHash("sha256").update(readFileSync(join(OUT, cell.file))).digest("hex");
+    if (hash !== cell.sha256) throw new Error(`Screenshot hash mismatch: ${cell.file}`);
+  }
+  writeFileSync(join(OUT, "matrix.json"), JSON.stringify({ generatedAt: new Date().toISOString(), target: "core", source, checks, cells: matrix }, null, 1));
+  writeFileSync(join(OUT, "index.html"), gallery(list, matrix, checks, source));
   const { failed, switchFailed } = failures(matrix, checks);
   console.log(`${matrix.length} cells, ${failed.length} with a failing check.${switchFailed.length ? ` Theme switch FAIL: ${switchFailed.join(", ")}.` : checks.themeSwitch ? " Theme switch ok." : ""} ${OUT}`);
   // The matrix and gallery are written either way; the exit status says whether the run passed.
@@ -683,7 +712,7 @@ async function themeSwitchChecks(browser, mf, fx) {
     const context = await browser.newContext(ctxOpts);
     await context.route("**/*", async (route) => {
       const req = route.request();
-      if (!/^https:\/\/([a-z0-9-]+\.)?kofra(-sites)?\.test\//.test(req.url())) return route.abort();
+      if (!/^https:\/\/([a-z0-9-]+\.)?kofra(-sites|-separate)?\.test\//.test(req.url())) return route.abort();
       const body = req.postDataBuffer();
       const sent = await req.allHeaders();
       let res = await mf.dispatchFetch(req.url(), { method: req.method(), headers: sent, body: body && req.method() !== "GET" && req.method() !== "HEAD" ? body : undefined, redirect: "manual" });
@@ -968,7 +997,7 @@ async function fontShift(browser, mf, fx, sc, contextOptions, url, explicit) {
     await context.route("**/*", async (route) => {
       const req = route.request();
       const u = req.url();
-      if (!/^https:\/\/([a-z0-9-]+\.)?kofra(-sites)?\.test\//.test(u)) return route.abort();
+      if (!/^https:\/\/([a-z0-9-]+\.)?kofra(-sites|-separate)?\.test\//.test(u)) return route.abort();
       if (u.startsWith(`${APP}/api/`)) return; // held: no data, so no data-driven shifts
       const body = req.postDataBuffer();
       const res = await mf.dispatchFetch(u, { method: req.method(), headers: await req.allHeaders(), body: body && req.method() !== "GET" && req.method() !== "HEAD" ? body : undefined, redirect: "manual" });
@@ -981,7 +1010,10 @@ async function fontShift(browser, mf, fx, sc, contextOptions, url, explicit) {
         const to = new URL(location, u).href.replace(/[&"<>]/g, (c) => ({ "&": "&amp;", '"': "&quot;", "<": "&lt;", ">": "&gt;" })[c]);
         return route.fulfill({ status: 200, headers: { "content-type": "text/html; charset=utf-8" }, body: `<!doctype html><meta http-equiv="refresh" content="0;url=${to}">` });
       }
-      await route.fulfill({ status: res.status, headers, body: Buffer.from(await res.arrayBuffer()) });
+      const responseBytes = Buffer.from(await res.arrayBuffer());
+      // Let fallback text paint even when local font responses would otherwise beat the first frame.
+      if (new URL(u).pathname.startsWith("/__dropway/fonts/")) await new Promise((r) => setTimeout(r, 300));
+      await route.fulfill({ status: res.status, headers, body: responseBytes });
     });
     if (explicit && sc.origin === "app") await context.addCookies([{ name: "__Host-dw_theme", value: explicit, url: `${APP}/`, secure: true, sameSite: "Lax" }]);
     await context.addInitScript(({ key, auth }) => {
@@ -1028,7 +1060,7 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
   await context.route("**/*", async (route) => {
     const req = route.request();
     const url = req.url();
-    if (!/^https:\/\/([a-z0-9-]+\.)?kofra(-sites)?\.test\//.test(url)) return route.abort();
+    if (!/^https:\/\/([a-z0-9-]+\.)?kofra(-sites|-separate)?\.test\//.test(url)) return route.abort();
     const headers = await req.allHeaders();
     const body = req.postDataBuffer();
     const res = await mf.dispatchFetch(url, { method: req.method(), headers, body: body && req.method() !== "GET" && req.method() !== "HEAD" ? body : undefined, redirect: "manual" });
@@ -1142,7 +1174,7 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
   const tag = pass === "forced" ? `forced-${width}` : `${mode}-${width}`;
   const file = `${sc.id}-${tag}.png`;
-  // Very tall pages (the truncated log) are captured one viewport high.
+  // Capture the complete document, including the truncation note and trust footer.
   const shot = (o = {}) => page.screenshot({ fullPage: !sc.viewportOnly, ...o }).catch(() => page.screenshot(o));
   const png = await shot({ path: join(OUT, file) });
   // G6 compares this copy: the switch (its pressed state differs by design) and per-cell secrets masked.
@@ -1264,7 +1296,7 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
   return { screen: sc.id, title: sc.title, pass, mode, width, file, sha256: createHash("sha256").update(png).digest("hex"), masked, ms: Date.now() - t0, gates };
 }
 
-function gallery(list, matrix, checks = {}) {
+function gallery(list, matrix, checks = {}, source = {}) {
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const label = (c) => (c.pass === "forced" ? `forced colours · ${c.width}px` : `${c.mode} · ${c.width}px${c.pass === "reflow" ? " (reflow)" : ""}`);
   const rows = list
@@ -1281,7 +1313,7 @@ function gallery(list, matrix, checks = {}) {
   const sw = Object.entries(checks.themeSwitch ?? {})
     .map(([k, v]) => `<li>${esc(k)}: ${v.pass ? "ok" : `<b>fail</b> ${esc(JSON.stringify(v.detail))}`}</li>`)
     .join("");
-  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kofra Security Print port: core screenshots</title><style>body{font:14px/1.5 system-ui,sans-serif;margin:24px;background:#f4efe2;color:#141414}h1{font-weight:600}section{margin:0 0 40px}.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}figure{margin:0}img{width:100%;height:260px;object-fit:cover;object-position:top;border:1px solid #b08d3c;background:#fff}b{color:#a8321f}</style><h1>Kofra Security Print port: core screens (${matrix.length} cells)</h1>${sw ? `<h2>Theme switch (G13)</h2><ul>${sw}</ul>` : ""}${rows}`;
+  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kofra Security Print port: core screenshots</title><style>body{font:14px/1.5 system-ui,sans-serif;margin:24px;background:#f4efe2;color:#141414}h1{font-weight:600}section{margin:0 0 40px}.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}figure{margin:0}img{width:100%;height:260px;object-fit:cover;object-position:top;border:1px solid #b08d3c;background:#fff}b{color:#a8321f}</style><h1>Kofra Security Print port: core screens (${matrix.length} cells)</h1><p>Source commit: <code>${esc(source.commit ?? "unknown")}</code>${source.dirty ? " (working-tree changes; not exact-head evidence)" : ""}. Images are the PNG bytes hashed in matrix.json.</p>${sw ? `<h2>Theme switch (G13)</h2><ul>${sw}</ul>` : ""}${rows}`;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
