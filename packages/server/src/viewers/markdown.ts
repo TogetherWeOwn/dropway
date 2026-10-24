@@ -1,9 +1,10 @@
 import { Marked, type Tokens } from "marked";
 import { escapeHtml } from "../html";
 import { cachedRender } from "./cache";
-import { standardTabs, viewerPage } from "./chrome";
+import { standardTabs, viewerCarry, viewerPage } from "./chrome";
 import { HIGHLIGHT_CSS, highlight, hljsLanguage } from "./highlight";
 import type { Viewer } from "./index";
+import { carryDocLinks } from "./links";
 import { RESERVED_NAME, sanitizeHtml } from "./sanitize";
 
 const MD_VERSION = 3;
@@ -123,7 +124,7 @@ export const markdownViewer: Viewer = {
       title,
       tabs: standardTabs(vc, { source: true }),
       css: MD_CSS + HIGHLIGHT_CSS,
-      body: `<article class="k-doc">${m ? r.html.slice(m[0].length) : r.html}</article>`,
+      body: `<article class="k-doc">${await carryDocLinks(m ? r.html.slice(m[0].length) : r.html, vc.url.pathname, vc.siteBase, viewerCarry(vc))}</article>`,
       headers: { "X-Kofra-Render-Cache": r.cache },
     });
   },

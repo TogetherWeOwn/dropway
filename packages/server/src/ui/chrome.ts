@@ -43,13 +43,40 @@ export interface ChromeNavItem {
   href: string;
 }
 
+export interface AccountAreaOptions {
+  /** Signed in (pages with no script): Sign out posts to `signOut`. The person shows in the header tag (identityTag). */
+  user?: { signOut: string } | null;
+  /** Where "Sign in" goes (default /login). */
+  signIn?: string;
+  /** A filled call to action beside "Sign in" for people who are not signed in, e.g. "Start free" (hidden under 720px). */
+  start?: ChromeNavItem | null;
+}
+
+/**
+ * The header's account area, one markup for every app page (the core dashboard fills the same markup with its
+ * script): "Sign in" as a quiet button (plus an optional filled call to action), or "Sign out".
+ */
+export function accountArea(o: AccountAreaOptions = {}): string {
+  if (o.user) return `<form method="post" action="${e(o.user.signOut)}"><button class="k-btn k-sm k-quiet" type="submit">Sign out</button></form>`;
+  return `<a class="k-btn k-sm k-quiet" href="${e(o.signIn ?? "/login")}">Sign in</a>${o.start ? `<a class="k-btn k-sm k-hide-sm" href="${e(o.start.href)}">${e(o.start.label)}</a>` : ""}`;
+}
+
+/** The mono tag beside the wordmark when someone is signed in: "<account> · <email>" (plain text; hidden under 720px). */
+export function identityTag(account: string | null | undefined, email: string | null | undefined): string {
+  const parts = [account, email].map((x) => (x ?? "").trim()).filter(Boolean);
+  // A personal account is often named after the email: say it once.
+  return (parts.length === 2 && parts[0]!.toLowerCase() === parts[1]!.toLowerCase() ? [parts[1]!] : parts).join(" · ");
+}
+
 export interface AppHeaderOptions {
   /** The instance name (shown as the wordmark; styled lowercase by CSS, the text keeps its case). */
   name: string;
   /** Where the wordmark links (default "/"). */
   home?: string;
-  /** Small mono line after the wordmark, e.g. "@handle · email" (plain text). */
+  /** Small mono line after the wordmark, e.g. "Account · email" (plain text; identityTag). */
   tag?: string;
+  /** id for the tag, so the dashboard script can fill it in once it knows who is signed in. */
+  tagId?: string;
   nav?: ChromeNavItem[];
   /** href of the current nav item (aria-current="page"). */
   active?: string;
@@ -71,7 +98,7 @@ export function appHeader(o: AppHeaderOptions): string {
         .map((n) => `<a href="${e(n.href)}"${n.href === o.active ? ' aria-current="page"' : ""}>${e(n.label)}</a>`)
         .join("")}</nav>`
     : "";
-  return `<header class="k-top"><div class="k-wrap"><a class="k-wm" href="${e(o.home ?? "/")}">${e(o.name)}</a>${o.tag ? `<span class="k-tag">${e(o.tag)}</span>` : ""}${nav}<div class="k-acct"${o.accountId ? ` id="${e(o.accountId)}"` : ""}>${o.account ?? ""}</div>${o.modeSwitch === false ? "" : modeSwitch(o.theme, o.next)}</div></header>`;
+  return `<header class="k-top"><div class="k-wrap"><a class="k-wm" href="${e(o.home ?? "/")}">${e(o.name)}</a>${o.tag || o.tagId ? `<span class="k-tag"${o.tagId ? ` id="${e(o.tagId)}"` : ""}>${e(o.tag ?? "")}</span>` : ""}${nav}<div class="k-acct"${o.accountId ? ` id="${e(o.accountId)}"` : ""}>${o.account ?? ""}</div>${o.modeSwitch === false ? "" : modeSwitch(o.theme, o.next)}</div></header>`;
 }
 
 export interface AppFooterOptions {
@@ -103,10 +130,17 @@ export interface AppChromeOptions {
   after?: string;
 }
 
-/** Skip link + header + optional banner + <main id="dw-main"> + footer: the body of an app page. */
+/**
+ * Skip link + header + optional banner + <main id="dw-main"> + footer: the body of an app page. Every page
+ * with a footer draws the guilloche band right above it (PORT-SPEC 5), so the footer is the same everywhere;
+ * pages with a hero draw one more under it (at most two per page).
+ */
 export function appChrome(o: AppChromeOptions): string {
-  return `${SKIP_LINK}${appHeader(o.header)}${o.banner ? `<div class="k-slotbanner" role="status"><div class="k-wrap">${o.banner}</div></div>` : ""}<main id="dw-main" class="${e(o.mainClass ?? "k-main")}">${o.main}</main>${o.footer ? appFooter(o.footer) : ""}${o.after ?? ""}`;
+  return `${SKIP_LINK}${appHeader(o.header)}${o.banner ? `<div class="k-slotbanner" role="status"><div class="k-wrap">${o.banner}</div></div>` : ""}<main id="dw-main" class="${e(o.mainClass ?? "k-main")}">${o.main}</main>${o.footer ? `${GUILLOCHE_BAND}${appFooter(o.footer)}` : ""}${o.after ?? ""}`;
 }
+
+/** The guilloche band (a CSS mask, recoloured by the mode): under a hero and above every app footer. */
+export const GUILLOCHE_BAND = '<div class="k-guilloche-band" aria-hidden="true"></div>';
 
 /** Minimal header for site-origin pages: a small wordmark that links to the app. */
 export function siteHeader(name: string, appOrigin: string): string {

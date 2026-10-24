@@ -17,11 +17,14 @@ html:has(.vbar){scroll-padding-top:8.5rem}
 .vfile .crumbs{flex:0 1 auto;min-width:2.5rem;flex-wrap:nowrap;overflow:hidden;white-space:nowrap}
 .vfile .crumbs>*{flex:none}
 .vfile .crumbs>:last-child{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* The path clips its overflow, so its links draw the focus ring inside their own box. */
+.vfile .crumbs a:focus-visible{outline-offset:-2px}
 .vbar .btnrow{gap:6px;flex:none}
 .vbar .trust{font-size:12px;margin:0;flex-basis:100%;order:3;text-align:right}
 .vtrust{max-width:60rem;margin:var(--s7) auto var(--s5);padding:12px var(--s5) 0;border-top:1px solid var(--rule-soft)}
 .show-lg{display:none}
-p.notebar{display:block;max-width:60rem;margin:14px auto;overflow-wrap:anywhere}
+/* The note sits on the same left edge and width as the code or table under it. */
+p.notebar{display:block;margin:14px 18px 0;overflow-wrap:anywhere}
 .toggle{position:absolute;opacity:0;pointer-events:none;width:1px;height:1px}
 .toggle:focus-visible+*{outline:2px solid var(--focus);outline-offset:2px}
 .toggle:focus-visible~* .togglebtn,.toggle:focus-visible~.togglebtn{outline:2px solid var(--focus);outline-offset:2px}
@@ -48,6 +51,7 @@ p.notebar{display:block;max-width:60rem;margin:14px auto;overflow-wrap:anywhere}
      nothing below jumps when the web fonts replace the fallbacks. */
   .vfile{flex:1 1 100%;display:grid;grid-template-columns:auto minmax(0,1fr);row-gap:6px}
   .vfile .crumbs,.vfile .vmeta,.vfile .sum{grid-column:1/-1}
+  .vfile>.chip{justify-self:start}
   .vfile .crumbs{width:100%}
   .vfile .crumbs>*{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis}
   .vfile .crumbs>:last-child{flex:none;max-width:65%}

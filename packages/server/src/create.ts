@@ -22,7 +22,7 @@ import { apiErrorResponse, installApiMiddleware } from "./routes/api";
 import { legacyAppRedirect, legacyAppSuccessor, withDeprecationHeaders } from "./legacy";
 import { redirectResponse, routeSiteRequest } from "./route-sites";
 import { isNavigation, SITE_SANDBOX, serveSite, systemResponse } from "./serve";
-import { appStatePage, bindUiSlots } from "./ui/shell";
+import { appStatePage, bindUiSlots, uiSlotsOf } from "./ui/shell";
 import { bindRequestTheme } from "./ui/theme";
 import { VIEWERS, type Viewer } from "./viewers";
 import { createMcpEndpoint } from "./mcp";
@@ -130,7 +130,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
       );
     }
     // CORS-readable, so a sandboxed site (opaque origin) whose fetch() lands here sees a 404 instead of a network error.
-    const html = appStatePage(c.get("dw"), c.req.url, { title: "Not found", code: "404", heading: "Not found", message: "There is no page at this address.", actions: '<a class="k-btn" href="/">Home</a>' });
+    const html = appStatePage(c.get("dw"), c.req.url, { title: "Not found", code: "404", heading: "Not found", message: "There is no page at this address.", actions: '<a class="k-btn" href="/">Home</a>', signIn: uiSlotsOf(c).session?.signInPath });
     return c.html(html, 404, { "Access-Control-Allow-Origin": "*", "Content-Security-Policy": APP_PAGE_CSP, "X-Content-Type-Options": "nosniff", Vary: "Cookie" });
   });
   app.onError((err, c) => {
@@ -145,6 +145,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
       message: "The page could not be built. Try again in a moment; if it keeps happening, tell the people who run this instance.",
       extra: id ? `<p class="k-small">Request <span class="k-mono">${escapeHtml(id)}</span></p>` : "",
       actions: `<a class="k-btn" href="${escapeHtml(new URL(c.req.url).pathname)}">Try again</a><a class="k-btn k-ghost" href="/">Home</a>`,
+      signIn: uiSlotsOf(c).session?.signInPath,
     });
     return c.html(html, 500, { "Content-Security-Policy": APP_PAGE_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store", Vary: "Cookie" });
   });

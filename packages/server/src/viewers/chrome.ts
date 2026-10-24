@@ -5,6 +5,7 @@ import { SITE_CSS_HASH } from "../ui/design.generated";
 import { fileSeal } from "../ui/motifs";
 import { themeOf } from "../ui/theme";
 import type { ViewerContext } from "./index";
+import { carryLink, type LinkCarry } from "./links";
 
 /**
  * Version of what every viewer page shares: the bar, the document and the inlined site CSS. It is part of
@@ -73,16 +74,22 @@ export function standardTabs(vc: ViewerContext, opts: { rendered?: string | null
   return tabs;
 }
 
-/** Breadcrumb links: each folder links to its listing on this origin. */
+/** What links from this viewer page carry: its explicit mode (?theme=) and the embed (links.ts). */
+export function viewerCarry(vc: ViewerContext): LinkCarry {
+  return { theme: themeOf(vc.dw), embed: vc.embed };
+}
+
+/** Breadcrumb links: each folder links to its listing on this origin (in this page's mode). */
 function crumbs(vc: ViewerContext): string {
   const parts = vc.file.path.split("/");
-  const out: string[] = [`<a href="${escapeHtml(vc.siteBase)}">${escapeHtml(vc.live.slug)}</a>`];
+  const carry = viewerCarry(vc);
+  const out: string[] = [`<a href="${escapeHtml(carryLink(vc.siteBase, vc.siteBase, carry))}">${escapeHtml(vc.live.slug)}</a>`];
   let dir = "";
   parts.forEach((p, i) => {
     if (i === parts.length - 1) out.push(`<strong aria-current="page">${escapeHtml(p)}</strong>`);
     else {
       dir += `${p}/`;
-      out.push(`<a href="${escapeHtml(vc.siteBase + encodePath(dir))}">${escapeHtml(p)}</a>`);
+      out.push(`<a href="${escapeHtml(carryLink(vc.siteBase, vc.siteBase + encodePath(dir), carry))}">${escapeHtml(p)}</a>`);
     }
   });
   return out.join('<span class="k-sep" aria-hidden="true">/</span>');

@@ -1,28 +1,22 @@
-/* Reduced motion, forced colours and print (PORT-SPEC 3.5). */
+/* Reduced motion, forced colours and print (PORT-SPEC 3.5), for both bundles. App-only parts: 91-a11y-app.css. */
 @media (prefers-reduced-motion:reduce){
   html{scroll-behavior:auto}
   *,*::before,*::after{transition-duration:0s!important;transition-delay:0s!important;animation-duration:0s!important;animation-iteration-count:1!important}
   .seal.draw path{animation:none;stroke-dashoffset:0}
-  .skel,.toast{animation:none}
   .btn:active{transform:none}
 }
 @media (forced-colors:active){
   :focus-visible{outline:2px solid CanvasText}
-  .mode-switch button[aria-pressed=true],.seg>[aria-pressed=true],.seg>[aria-selected=true],.seg>[aria-current=page],.chip.solid,.nav a[aria-current=page],.tree a[aria-current]{forced-color-adjust:none;background:Highlight;color:HighlightText}
-  .tabs [role=tab][aria-selected=true]{border-bottom-color:Highlight}
-  .meter>i,.prog>i{forced-color-adjust:none;background:Highlight}
+  .seg>[aria-pressed=true],.seg>[aria-selected=true],.seg>[aria-current=page],.chip.solid{forced-color-adjust:none;background:Highlight;color:HighlightText}
   .sp-svg{forced-color-adjust:none}
   .sp-svg .e1,.sp-svg .e2,.sp-svg .em,.sp-svg .ef{stroke:CanvasText}
   .sp-svg .e3{stroke:GrayText}
   .sp-svg .fm,.sp-svg .ft{fill:CanvasText}
   .sp-svg .fp{fill:Canvas}
   .guilloche-band{forced-color-adjust:none;background:GrayText}
-  .plate-art{forced-color-adjust:none}
-  .toast{border:2px solid CanvasText}
-  .skel{forced-color-adjust:none;background:GrayText}
   ::selection{background:Highlight;color:HighlightText}
 }
 @media print{
   body{background:var(--paper)}
-  .mode-switch,.top .nav,.toasts,.skip,.vbar .btnrow{display:none}
+  .vbar .btnrow{display:none}
 }

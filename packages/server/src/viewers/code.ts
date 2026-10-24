@@ -27,7 +27,7 @@ export function codeLanguage(path: string, kind: FileKind): string | null {
 
 export const CODE_CSS = `
 .dw-codewrap{position:relative}
-.dw-codehead{display:flex;gap:.6rem;align-items:center;justify-content:flex-end;padding:.5rem .9rem 0;font-size:.8rem;color:var(--muted)}
+.dw-codehead{display:flex;gap:.6rem;align-items:center;justify-content:flex-end;padding:.5rem 18px 0;font-size:.8rem;color:var(--muted)}
 .dw-codehead .dw-lang{margin-right:auto;font-family:var(--mono);font-size-adjust:ch-width .7}
 .dw-src{margin:8px 18px 32px;border:1px solid var(--rule-soft);background:var(--paper-3);color:var(--ink);overflow:auto;font:13px/24px var(--mono);font-size-adjust:ch-width .7;tab-size:4}
 .dw-truncated .dw-src{max-height:70vh}

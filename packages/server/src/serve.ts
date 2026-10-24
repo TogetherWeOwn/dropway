@@ -21,6 +21,7 @@ import { escapeHtml, siteSystemCsp, systemPage } from "./html";
 import { safeNext, themeOf } from "./ui/theme";
 import { findViewer, toViewerFile, VIEWER_CSP, VIEWERS, type ViewMode, type Viewer } from "./viewers";
 import { VIEWER_PAGE_VERSION } from "./viewers/chrome";
+import { OPEN_PATH } from "./viewers/links";
 import { renderListing } from "./viewers/listing";
 import { MAX_CSS_REWRITE_BYTES, rewriteCss, rewriteHtml, type PathRewrite } from "./path-rewrite";
 import { PATH_SHIM_VERSION, pathShimScript } from "./path-shim";
@@ -50,7 +51,7 @@ export const SITE_SANDBOX =
 
 const PASSWORD_PATH = "__dropway/password";
 /** The app's file viewer opens folders and a site's own pages in its frame through this address (see openInFrame). */
-export const OPEN_PATH = "__dropway/open";
+export { OPEN_PATH };
 
 export type Resolved =
   | { kind: "file"; path: string; status: number }
@@ -150,6 +151,10 @@ export function systemResponse(
   h.set("Content-Security-Policy", siteSystemCsp(dw));
   securityHeaders(h, live, mode);
   const origin = appOrigin(dw);
+  // Inside the app's file viewer (&embed=1) the page has no header or footer of its own, and links to the
+  // app open a new tab: the app origin refuses to be framed, so they would leave a blank frame.
+  const embed = isEmbedded(req);
+  const out = embed ? ' target="_blank" rel="noopener"' : "";
   const body =
     req.method === "HEAD"
       ? null
@@ -157,13 +162,23 @@ export function systemResponse(
           dw,
           code,
           title,
-          message: message.replace("{app}", `<a href="${escapeHtml(origin)}">${escapeHtml(dw.config.instanceName)}</a>`),
-          extra: extra + (code === "PASSWORD" ? "" : `<div class="k-acts"><a class="k-btn k-ghost" href="${escapeHtml(origin)}">Home</a>${code === "EMPTY" && live ? `<a class="k-btn" href="${escapeHtml(origin)}/dashboard/publish?site=${escapeHtml(encodeURIComponent(live.slug))}">Publish files</a>` : status === 502 ? `<a class="k-btn" href="${escapeHtml(req.url)}">Try again</a>` : ""}</div>`),
+          message: message.replace("{app}", `<a href="${escapeHtml(origin)}"${out}>${escapeHtml(dw.config.instanceName)}</a>`),
+          extra: extra + (code === "PASSWORD" ? "" : `<div class="k-acts"><a class="k-btn k-ghost" href="${escapeHtml(origin)}"${out}>Home</a>${code === "EMPTY" && live ? `<a class="k-btn" href="${escapeHtml(origin)}/dashboard/publish?site=${escapeHtml(encodeURIComponent(live.slug))}"${out}>Publish files</a>` : status === 502 ? `<a class="k-btn" href="${escapeHtml(req.url)}">Try again</a>` : ""}</div>`),
           // Only terminal lifecycle states get a stamp.
           stamp: status === 410 ? { text: "Expired" } : undefined,
           variant: code === "PASSWORD" ? "panel" : code === "EMPTY" ? "empty" : "state",
+          embed,
         });
   return new Response(body, { status, headers: h });
+}
+
+/** `&embed=1` on the request: the page is drawn inside the app's file viewer frame. */
+function isEmbedded(req: Request): boolean {
+  try {
+    return flag(new URL(req.url).searchParams, "embed");
+  } catch {
+    return false;
+  }
 }
 
 async function passwordCookieValue(dw: DropwayContext, live: LiveSite): Promise<string> {
@@ -232,9 +247,11 @@ function openInFrame(dw: DropwayContext, req: Request, url: URL, live: LiveSite,
   const asked = url.searchParams.get("next") ?? "";
   const candidate = safeNext(asked) === asked ? new URL(asked, url) : null;
   const target = candidate && candidate.pathname.startsWith(mode.base) && !candidate.pathname.startsWith("//") ? candidate : new URL(mode.base, url);
-  target.searchParams.delete("theme"); // only this route decides whether the mode goes along
+  // Only this route decides whether the mode goes along (and adds the embed of a framed Kofra page).
+  target.searchParams.delete("theme");
   const theme = themeOf(dw);
-  if (theme !== "auto") {
+  const embed = flag(url.searchParams, "embed");
+  if (theme !== "auto" || embed) {
     // Resolve `next` the way a frame navigation to it would be served.
     const nav = new Request(target.href, { headers: { "Sec-Fetch-Dest": "iframe", Accept: "text/html" } });
     const filePath = requestPathToFilePath(`/${target.pathname.slice(mode.base.length)}`);
@@ -246,7 +263,8 @@ function openInFrame(dw: DropwayContext, req: Request, url: URL, live: LiveSite,
       const [sha256, size, contentType] = live.files[resolved.path]!;
       kofra = !!viewMode && !!findViewer(toViewerFile(resolved.path, sha256, size, contentType), live, viewers, viewMode);
     }
-    if (kofra) target.searchParams.set("theme", theme);
+    if (kofra && theme !== "auto") target.searchParams.set("theme", theme);
+    if (kofra && embed && !target.searchParams.has("embed")) target.searchParams.set("embed", "1");
   }
   return new Response(null, { status: 303, headers: { Location: target.pathname + target.search, "Cache-Control": "no-store" } });
 }
@@ -255,7 +273,8 @@ function passwordForm(dw: DropwayContext, req: Request, live: LiveSite, mode: Se
   // The form posts with the same ?theme= as the page, so a wrong-password answer keeps the mode. No
   // autofocus: browsers block it in the app's file viewer (a cross-origin frame) and it skips the page.
   const theme = themeOf(dw);
-  const extra = `<form method="post" action="${escapeHtml(mode.base + PASSWORD_PATH + (theme === "auto" ? "" : `?theme=${theme}`))}">
+  const query = [theme === "auto" ? "" : `theme=${theme}`, isEmbedded(req) ? "embed=1" : ""].filter(Boolean).join("&");
+  const extra = `<form method="post" action="${escapeHtml(mode.base + PASSWORD_PATH + (query ? `?${query}` : ""))}">
 <input type="hidden" name="next" value="${escapeHtml(next)}">
 <label class="k-label" for="dw-pw">Password</label>
 <div class="k-field"><input class="k-input" id="dw-pw" type="password" name="password" autocomplete="current-password" required${failed ? ' aria-invalid="true" aria-describedby="dw-pw-err"' : ""}><button class="k-btn" type="submit">Open</button></div>
@@ -377,7 +396,7 @@ export async function serveSite(
   } else if (resolved.kind === "not_found") {
     response = systemResponse(dw, req, mode, live, 404, "404", "Page not found", `There is no file at <code>/${escapeHtml(filePath)}</code> on this site.`);
   } else if (resolved.kind === "listing") {
-    response = renderListing(live, resolved.dir, mode, `${appOrigin(dw)}/v/${live.slug}/${encodePath(resolved.dir)}`, { dw, theme: themeOf(dw) });
+    response = renderListing(live, resolved.dir, mode, `${appOrigin(dw)}/v/${live.slug}/${encodePath(resolved.dir)}`, { dw, theme: themeOf(dw), embed: flag(url.searchParams, "embed") });
     securityHeaders(response.headers, live, mode);
   } else {
     response = await serveFile(req, dw, url, live, mode, resolved.path, resolved.status, viewers);

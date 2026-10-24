@@ -10,7 +10,7 @@ import type { Viewer } from "./index";
  * key counts and typed values, plus a pretty-printed, highlighted view.
  * Invalid JSON shows the parse error above the highlighted source.
  */
-const JSON_VERSION = 1;
+const JSON_VERSION = 2;
 /** Nodes rendered in the tree before the rest is summarised. */
 const MAX_NODES = 20_000;
 /** Strings longer than this are cut in the tree (the pretty view has them whole). */
@@ -20,10 +20,10 @@ const MAX_PRETTY = 1024 * 1024;
 
 const JSON_CSS = `
 .dw-json{padding:.5rem .9rem 3rem}
-.dw-jtabs{display:flex;gap:.4rem;margin:.4rem 0 .6rem}
-.dw-jtabs label{padding:.28rem .7rem;border:1px solid var(--rule-soft);cursor:pointer;font-size:.82rem;color:var(--muted);background:var(--paper-2)}
-#dw-jt-tree:checked~.dw-jtabs label[for=dw-jt-tree],#dw-jt-pretty:checked~.dw-jtabs label[for=dw-jt-pretty]{color:var(--ink);border-color:var(--accent);font-weight:600}
-#dw-jt-tree:focus-visible~.dw-jtabs label[for=dw-jt-tree],#dw-jt-pretty:focus-visible~.dw-jtabs label[for=dw-jt-pretty]{outline:2px solid var(--focus);outline-offset:2px}
+.dw-jtabs{margin:.4rem 0 .7rem}
+.dw-jtabs label{cursor:pointer}
+#dw-jt-tree:checked~.dw-jtabs label[for=dw-jt-tree],#dw-jt-pretty:checked~.dw-jtabs label[for=dw-jt-pretty]{background:var(--accent);color:var(--accent-ink);font-weight:600}
+#dw-jt-tree:focus-visible~.dw-jtabs label[for=dw-jt-tree],#dw-jt-pretty:focus-visible~.dw-jtabs label[for=dw-jt-pretty]{outline:2px solid currentColor;outline-offset:-4px}
 .dw-jpane{display:none}
 #dw-jt-tree:checked~.dw-jtree,#dw-jt-pretty:checked~.dw-jpretty{display:block}
 .dw-jpretty .dw-src{margin:0}
@@ -113,7 +113,7 @@ export const jsonViewer: Viewer = {
     const pretty = prettyText.length <= MAX_PRETTY ? (await renderCodeLines(vc, prettyText, "json", "pretty")).html : null;
     const body = `<main class="dw-json">
 <input type="radio" name="dw-jt" id="dw-jt-tree" class="k-toggle" checked><input type="radio" name="dw-jt" id="dw-jt-pretty" class="k-toggle">
-<div class="dw-jtabs"><label for="dw-jt-tree">Tree</label>${pretty ? '<label for="dw-jt-pretty">Pretty</label>' : ""}</div>
+<div class="dw-jtabs k-seg" role="group" aria-label="Tree view or pretty-printed"><label for="dw-jt-tree">Tree</label>${pretty ? '<label for="dw-jt-pretty">Pretty</label>' : ""}</div>
 <div class="dw-jpane dw-jtree">${tree.html}</div>
 ${pretty ? `<div class="dw-jpane dw-jpretty"><div class="dw-src" tabindex="0" role="region" aria-label="Pretty-printed JSON">${pretty}</div></div>` : ""}
 </main>`;

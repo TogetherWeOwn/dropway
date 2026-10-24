@@ -52,7 +52,6 @@ summary{cursor:pointer;color:var(--accent)}
 input[type=checkbox],input[type=radio]{accent-color:var(--accent)}
 [hidden]{display:none!important}
 .wrap{max-width:1200px;margin:0 auto;padding:0 var(--s7)}
-.lede{font-size:19px;max-width:33em;color:var(--ink-2);margin:0}
 .mono{font-family:var(--mono);font-size:.84em;letter-spacing:.01em}
 .k{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.11em;color:var(--accent-2);font-weight:500}
 .small{font-size:13.5px;color:var(--ink-2)}
@@ -66,5 +65,4 @@ a.wm:hover{color:var(--accent)}
 .skip:focus{left:8px;color:var(--accent-ink)}
 @media (max-width:720px){
   .wrap{padding:0 var(--s4)}
-  .hide-sm{display:none!important}
 }

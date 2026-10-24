@@ -7,7 +7,7 @@ import { buildOpenApi } from "./openapi";
 import type { OperationDefinition } from "./operations";
 import { agentSkillsIndex, legacySkillsIndex, llmsFullTxt, llmsTxt, skillInstance, skillMarkdown, SKILL_NAME } from "./discovery";
 import { homePage, installUi } from "./ui";
-import { appStatePage } from "./ui/shell";
+import { appStatePage, uiSlotsOf } from "./ui/shell";
 import { installTransferPages } from "./transfers";
 import { installEncrypted } from "./encrypted";
 import { LEGACY_SKILL_NAME } from "./legacy-brand";
@@ -77,6 +77,7 @@ export function createAppRouter(opts: { app: Hono<DropwayEnv>; uiSlots: UiSlots;
       heading: "Keep this site",
       message: `Anonymous sites expire. To keep <code>${escapeHtml(slug)}</code>, call the API with an API key of this instance and the claim token (the part of this link after <code>#token=</code>):`,
       extra: `<div class="k-codeblock"><div class="k-codeblock-h"><span class="k-k">Claim with curl</span></div><pre tabindex="0" aria-label="Claim with curl">${escapeHtml(curl)}</pre></div>`,
+      signIn: uiSlotsOf(c).session?.signInPath,
     });
     return c.html(html, 200, pageHeaders());
   });

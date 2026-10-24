@@ -19,10 +19,13 @@
 .blk-h .small{max-width:40em}
 .pad{padding:20px}
 .blk>.table-wrap{border-top:0}
-.blk .table th:first-child,.blk .table td:first-child{padding-left:20px}
-.blk .table th:last-child,.blk .table td:last-child{padding-right:20px}
-.blk .table tr:last-child td{border-bottom:0}
-.blk>.empty{border:0}
+@media (min-width:720.02px){
+  .blk .table th:first-child,.blk .table td:first-child{padding-left:20px}
+  .blk .table th:last-child,.blk .table td:last-child{padding-right:20px}
+}
+.blk .table tr:last-child>*{border-bottom:0}
+/* An empty list keeps its dashed frame inside a block (the same treatment everywhere: J14, J18, C32). */
+.blk .empty{margin:var(--s5)}
 .group{margin:0 0 16px;min-width:0}
 .group .hint{margin-top:6px}
 .inline{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:flex-end}
@@ -54,24 +57,13 @@ html:has(.toast){scroll-padding-bottom:7rem}
 @keyframes k-toast-in{from{opacity:0;transform:translateY(20px)}}
 .noscript{margin:0}
 @media (max-width:720px){
+  .hide-sm{display:none!important}
   .main{padding:var(--s6) var(--s4) var(--s8)}
   .blk-h{padding:12px 14px}
   .pad{padding:14px}
-  .blk .table th:first-child,.blk .table td:first-child{padding-left:14px}
-  .blk .table th:last-child,.blk .table td:last-child{padding-right:14px}
   .skel{margin:10px 14px}
   .find{width:100%}
-  /* Keep row identity, facts and actions together instead of clipping a desktop ledger. */
-  .table{display:block}
-  .table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
-  .table tbody{display:block}
-  .table tr{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;padding:14px;border-bottom:1px solid var(--rule-soft)}
-  .blk .table td{display:block;padding:0;border:0;white-space:normal;text-align:left;overflow-wrap:anywhere;min-width:0}
-  .table td.act{display:flex;flex-wrap:wrap;gap:8px}
-  .table td.act .btn+.btn{margin:0}
-  .table .chip{white-space:normal;overflow-wrap:anywhere}
-  .table .url{display:flex}
-  .table .url a{white-space:normal;overflow-wrap:anywhere}
+  .blk .empty{margin:14px}
 }
 @media print{.toasts{display:none}}
 .stack>*+*{margin-top:var(--s5)}
@@ -95,3 +87,5 @@ html:has(.toast){scroll-padding-bottom:7rem}
 .toggles{margin:4px 0 4px}
 .toggles .tog{flex:1 1 16rem}
 .main>.crumbs{margin:0 0 10px}
+/* A panel's closing note (who to ask, what agents do instead), under a soft rule. */
+.panel>.panel-note{margin:22px 0 0;padding-top:14px;border-top:1px solid var(--rule-soft)}

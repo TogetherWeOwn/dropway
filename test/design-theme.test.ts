@@ -190,10 +190,12 @@ describe("server-rendered colour mode (no flash, no script)", () => {
     // Only paths on this site.
     for (const bad of ["//evil.test/", "https://evil.test/", "/elsewhere/", `${base}\\evil`, `${base}../other-site/`, `${base}..//evil.test/`]) expect(await location(bad)).toBe(base);
 
-    // The viewer page frames a folder through it in an explicit mode, and directly in Auto.
+    // The viewer page frames a folder through it, with the embed (the listing draws no header or footer of its
+    // own inside the app) and, in an explicit mode, the mode. A raw file goes direct in Auto.
     const frameSrc = async (path: string, cookie?: string) => /<iframe id="dw-frame"[^>]* src="([^"]+)"/.exec(await (await dw.call(path, { headers: cookie ? { Cookie: cookie } : {} })).text())![1]!.replaceAll("&amp;", "&");
-    expect(await frameSrc(`/v/${slug}/docs/`, `${THEME_COOKIE}=light`)).toBe(`${ORIGIN}${base}__dropway/open?next=${encodeURIComponent(`${base}docs/`)}&theme=light`);
-    expect(await frameSrc(`/v/${slug}/docs/`)).toBe(`${ORIGIN}${base}docs/`);
+    expect(await frameSrc(`/v/${slug}/docs/`, `${THEME_COOKIE}=light`)).toBe(`${ORIGIN}${base}__dropway/open?next=${encodeURIComponent(`${base}docs/`)}&embed=1&theme=light`);
+    expect(await frameSrc(`/v/${slug}/docs/`)).toBe(`${ORIGIN}${base}__dropway/open?next=${encodeURIComponent(`${base}docs/`)}&embed=1`);
+    expect(await frameSrc(`/v/${slug}/docs/a.txt?mode=raw`)).toBe(`${ORIGIN}${base}docs/a.txt?raw=1`);
 
     // A locked site: the gate is drawn in the mode and returns to __dropway/open once unlocked.
     await dw.json(`/api/v1/sites/${slug}`, { method: "PATCH", key: dw.ownerKey, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: "correct horse" }) });

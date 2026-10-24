@@ -237,6 +237,35 @@ export function dropwayClient(motifsFactory) {
   function plural(n, one, many) {
     return n + " " + (n === 1 ? one : many || one + "s");
   }
+  /** A file kind as people read it ("Markdown", "Table"): the same labels as the site viewer bar (boot.kindLabels). */
+  function kindLabel(kind) {
+    var labels = boot.kindLabels || {};
+    return labels[kind] || kind;
+  }
+  /** The kind of a file chosen in the browser, from its name (before the server has seen it). */
+  function kindOfName(name) {
+    var ext = (/\.([a-z0-9]+)$/i.exec(name) || [])[1];
+    ext = ext ? ext.toLowerCase() : "";
+    if (/^(csv|tsv|json|xlsx?|ods)$/.test(ext)) return "csv";
+    if (/^(png|jpe?g|gif|webp|avif|svg|ico|bmp)$/.test(ext)) return "image";
+    if (/^(mp4|webm|mov|m4v|mp3|wav|ogg|oga|m4a|flac|aac)$/.test(ext)) return "video";
+    if (/^(zip|tar|gz|tgz|7z|rar)$/.test(ext)) return "archive";
+    return "doc";
+  }
+  /** A 40px thumbnail by kind: a sheet for tables and data, a picture for images, a play mark for media, a folder for archives, else a page. */
+  function thumbFor(kind) {
+    var inner =
+      kind === "folder" || kind === "archive"
+        ? h("span", { class: "k-th-folder" })
+        : kind === "csv" || kind === "json"
+          ? h("span", { class: "k-th-sheet" })
+          : kind === "image" || kind === "svg"
+            ? h("span", { class: "k-th-image" })
+            : kind === "video" || kind === "audio"
+              ? h("span", { class: "k-th-play" })
+              : h("span", { class: "k-th-doc" }, h("i"), h("b"), h("b", { class: "k-s" }));
+    return h("span", { class: "k-thumb", "aria-hidden": "true" }, inner);
+  }
   /** Date and time in the reader's time zone, with the zone named (DESIGN.md: times always show a zone). */
   function localTime(iso) {
     if (!iso) return "";
@@ -425,10 +454,16 @@ export function dropwayClient(motifsFactory) {
       var m = await me();
       if (m.principal !== "member") return null;
       clear(box);
-      var who = (m.member && (m.member.email || m.member.name)) || "Signed in";
+      // The same header as the hosted pages: the person in the mono tag beside the wordmark, "Sign out" here.
+      var tag = d.getElementById("dw-tag");
+      if (tag) {
+        var email = (m.member && (m.member.email || m.member.name)) || "Signed in";
+        var account = m.tenant && m.tenant.name && m.tenant.name.toLowerCase() !== String(email).toLowerCase() ? m.tenant.name : null;
+        tag.textContent = account ? account + " · " + email : email;
+        tag.title = tag.textContent;
+      }
       add(
         box,
-        h("span", { class: "k-who", title: (m.member && m.member.role) || "", text: who }),
         h("button", {
           type: "button",
           class: "k-btn k-sm k-quiet",
@@ -726,7 +761,7 @@ export function dropwayClient(motifsFactory) {
             h(
               "li",
               { class: "k-frow" },
-              h("span", { class: "k-thumb", "aria-hidden": "true" }, h("span", { class: "k-th-doc" }, h("i"), h("b"), h("b", { class: "k-s" }))),
+              thumbFor(kindOfName(it.path)),
               h("span", {}, h("span", { class: "k-fname", text: it.path }), h("span", { class: "k-fmeta", text: bytes(it.file.size) + (folder ? " · in a folder" : "") })),
               h("span"),
             ),
@@ -1073,14 +1108,16 @@ export function dropwayClient(motifsFactory) {
         h("a", { class: "k-title", href: "/dashboard/sites/" + encodeURIComponent(s.slug), text: s.title || s.slug }),
         s.title ? h("span", { class: "k-sub k-mono", text: s.slug }) : null,
         h("span", { class: "k-chips k-rowchips" }, chips),
+        // Under 1100px the URL sits here, under the name (its own column is hidden).
+        h("span", { class: "k-url k-rowurl k-only-narrow" }, h("a", { href: s.url, target: "_blank", rel: "noopener", class: "k-small", text: s.url.replace(/^https?:\/\//, "") }), copyButton(s.url, "Copy URL of " + s.slug)),
       ),
       h(
         "td",
-        {},
+        { class: "k-only-wide" },
         h("span", { class: "k-url" }, h("a", { href: s.url, target: "_blank", rel: "noopener", class: "k-small", text: s.url.replace(/^https?:\/\//, "") }), copyButton(s.url, "Copy URL of " + s.slug)),
       ),
-      h("td", { class: "k-num k-small" }, v ? "v" + v.number : "–", h("span", { class: "k-sub", text: v ? plural(v.fileCount, "file") + " · " + bytes(v.totalBytes) : "" })),
-      h("td", { class: "k-num k-small k-hide-sm", title: s.updatedAt, text: ago(s.updatedAt) }),
+      h("td", { class: "k-num k-small", "data-label": "Live" }, v ? "v" + v.number : "–", h("span", { class: "k-sub", text: v ? plural(v.fileCount, "file") + " · " + bytes(v.totalBytes) : "" })),
+      h("td", { class: "k-num k-small", "data-label": "Updated", title: s.updatedAt, text: ago(s.updatedAt) }),
       h(
         "td",
         { class: "k-act" },
@@ -1106,8 +1143,8 @@ export function dropwayClient(motifsFactory) {
       { class: "k-table-wrap" },
       h(
         "table",
-        { class: "k-table" },
-        h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Site" }), h("th", { scope: "col", class: "k-hide-sm", text: "URL" }), h("th", { scope: "col", class: "k-num", text: "Live" }), h("th", { scope: "col", class: "k-num k-hide-sm", text: "Updated" }), h("th", { scope: "col" }, h("span", { class: "k-sr", text: "Actions" })))),
+        { class: "k-table k-sites" },
+        h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Site" }), h("th", { scope: "col", class: "k-only-wide", text: "URL" }), h("th", { scope: "col", class: "k-num", text: "Live" }), h("th", { scope: "col", class: "k-num", text: "Updated" }), h("th", { scope: "col" }, h("span", { class: "k-sr", text: "Actions" })))),
         tbody,
       ),
     );
@@ -1263,7 +1300,7 @@ export function dropwayClient(motifsFactory) {
     });
     var versionsSection = blk(
       "Versions",
-      h("span", { class: "k-small", text: plural(versions.length, "version") + ". Restoring is instant: it only moves the live pointer." }),
+      h("span", { class: "k-small", text: versions.length ? plural(versions.length, "version") + ". Restoring is instant: it only moves the live pointer." : "No versions yet." }),
       versions.length
         ? vList
         : h("div", { class: "k-empty" }, h("h3", { text: "Nothing published yet" }), h("p", { text: "This site exists but has no live version yet." }), h("a", { class: "k-btn", href: "/dashboard/publish?site=" + encodeURIComponent(slug), text: "Publish files" })),
@@ -1286,9 +1323,15 @@ export function dropwayClient(motifsFactory) {
           h(
             "tr",
             { "data-search": f.path.toLowerCase() },
-            h("td", { class: "k-mono" }, v.live ? h("a", { href: "/v/" + encodeURIComponent(slug) + "/" + encodePath(f.path), text: f.path }) : h("span", { text: f.path })),
-            h("td", { class: "k-hide-sm" }, h("span", { class: "k-chip", text: f.kind })),
-            h("td", { class: "k-hide-sm" }, sealFor(f.path, f.sha256, { mini: true })),
+            h(
+              "td",
+              { class: "k-mono" },
+              v.live ? h("a", { href: "/v/" + encodeURIComponent(slug) + "/" + encodePath(f.path), text: f.path }) : h("span", { text: f.path }),
+              // 720-1099px: the kind sits under the path (its own column, and the checksum's, need 1100px).
+              h("span", { class: "k-chips k-rowchips k-only-narrow k-hide-sm" }, h("span", { class: "k-chip", text: kindLabel(f.kind) })),
+            ),
+            h("td", { class: "k-only-wide" }, h("span", { class: "k-chip", text: kindLabel(f.kind) })),
+            h("td", { class: "k-only-wide" }, sealFor(f.path, f.sha256, { mini: true })),
             h("td", { class: "k-num k-small", text: bytes(f.size) }),
             h(
               "td",
@@ -1310,7 +1353,7 @@ export function dropwayClient(motifsFactory) {
         filesSection,
         h("div", { class: "k-blk-h" }, h("h2", { text: "Files in v" + v.number + (v.live ? " (live)" : "") }), h("div", { class: "k-tools" }, h("span", { class: "k-small", text: plural(files.files.length, "file") }), filter)),
         v.live ? null : h("p", { class: "k-pad k-small", text: "Older versions are not served publicly. Restore this version to view it on the site, or download single files." }),
-        h("div", { class: "k-table-wrap" }, h("table", { class: "k-table" }, h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Path" }), h("th", { scope: "col", class: "k-hide-sm", text: "Kind" }), h("th", { scope: "col", class: "k-hide-sm", text: "Checksum" }), h("th", { scope: "col", class: "k-num", text: "Size" }), h("th", { scope: "col" }, h("span", { class: "k-sr", text: "Actions" })))), tb)),
+        h("div", { class: "k-table-wrap" }, h("table", { class: "k-table k-ftable" }, h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Path" }), h("th", { scope: "col", class: "k-only-wide", text: "Kind" }), h("th", { scope: "col", class: "k-only-wide", text: "Checksum" }), h("th", { scope: "col", class: "k-num", text: "Size" }), h("th", { scope: "col" }, h("span", { class: "k-sr", text: "Actions" })))), tb)),
       );
     }
 
@@ -1506,11 +1549,11 @@ export function dropwayClient(motifsFactory) {
               "tr",
               {},
               h("td", {}, h("strong", { text: k.name || "Unnamed" }), k.current ? h("span", { class: "k-chips k-rowchips" }, h("span", { class: "k-chip k-accent", text: "This browser" })) : null, h("span", { class: "k-sub k-mono", text: k.prefix + "…" })),
-              h("td", {}, h("span", { class: "k-chips" }, k.scopes.map(function (sc) {
+              h("td", { "data-label": "Scopes" }, h("span", { class: "k-chips" }, k.scopes.map(function (sc) {
                 return h("span", { class: "k-chip", text: sc });
               })), k.siteId ? h("span", { class: "k-sub", text: "One site only" }) : null),
-              h("td", { class: "k-num k-small k-hide-sm" }, h("span", { title: localTime(k.createdAt), text: "Created " + ago(k.createdAt) }), h("span", { class: "k-sub", title: k.lastUsedAt ? localTime(k.lastUsedAt) : null, text: k.lastUsedAt ? "Used " + ago(k.lastUsedAt) : "Never used" })),
-              h("td", { class: "k-num k-small k-hide-sm", text: k.expiresAt ? "Expires " + localTime(k.expiresAt) : "No expiry" }),
+              h("td", { class: "k-num k-small" }, h("span", { title: localTime(k.createdAt), text: "Created " + ago(k.createdAt) }), h("span", { class: "k-sub", title: k.lastUsedAt ? localTime(k.lastUsedAt) : null, text: k.lastUsedAt ? "Used " + ago(k.lastUsedAt) : "Never used" })),
+              h("td", { class: "k-num k-small", text: k.expiresAt ? "Expires " + localTime(k.expiresAt) : "No expiry" }),
               h(
                 "td",
                 { class: "k-act" },
@@ -1544,7 +1587,7 @@ export function dropwayClient(motifsFactory) {
             ),
           );
         });
-        add(listBody, h("div", { class: "k-table-wrap" }, h("table", { class: "k-table" }, h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Key" }), h("th", { scope: "col", text: "Scopes" }), h("th", { scope: "col", class: "k-num k-hide-sm", text: "Activity" }), h("th", { scope: "col", class: "k-num k-hide-sm", text: "Expiry" }), h("th", { scope: "col" }, h("span", { class: "k-sr", text: "Actions" })))), tb)));
+        add(listBody, h("div", { class: "k-table-wrap" }, h("table", { class: "k-table" }, h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Key" }), h("th", { scope: "col", text: "Scopes" }), h("th", { scope: "col", class: "k-num", text: "Activity" }), h("th", { scope: "col", class: "k-num", text: "Expiry" }), h("th", { scope: "col" }, h("span", { class: "k-sr", text: "Actions" })))), tb)));
       } catch (e) {
         clear(listBody);
         add(listBody, h("div", { class: "k-pad" }, errorBox(e, "Could not load keys")));
@@ -1612,8 +1655,8 @@ export function dropwayClient(motifsFactory) {
               "tr",
               {},
               h("td", {}, h("strong", { text: x.email || x.name || x.id }), x.name && x.email ? h("span", { class: "k-sub", text: x.name }) : null),
-              h("td", {}, h("span", { class: "k-chip" + (x.role === "owner" ? " k-accent" : ""), text: x.role })),
-              h("td", { class: "k-num k-small k-hide-sm", title: localTime(x.createdAt), text: "Added " + ago(x.createdAt) }),
+              h("td", { "data-label": "Role" }, h("span", { class: "k-chip" + (x.role === "owner" ? " k-accent" : ""), text: x.role })),
+              h("td", { class: "k-num k-small", title: localTime(x.createdAt), text: "Added " + ago(x.createdAt) }),
               h(
                 "td",
                 { class: "k-act" },
@@ -1640,7 +1683,7 @@ export function dropwayClient(motifsFactory) {
             ),
           );
         });
-        add(list, h("div", { class: "k-table-wrap" }, h("table", { class: "k-table" }, h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Member" }), h("th", { scope: "col", text: "Role" }), h("th", { scope: "col", class: "k-num k-hide-sm", text: "Added" }), h("th", { scope: "col" }, h("span", { class: "k-sr", text: "Actions" })))), tb)));
+        add(list, h("div", { class: "k-table-wrap" }, h("table", { class: "k-table" }, h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Member" }), h("th", { scope: "col", text: "Role" }), h("th", { scope: "col", class: "k-num", text: "Added" }), h("th", { scope: "col" }, h("span", { class: "k-sr", text: "Actions" })))), tb)));
       } catch (e) {
         clear(list);
         add(list, h("div", { class: "k-pad" }, errorBox(e, "Could not load members")));
@@ -1677,20 +1720,21 @@ export function dropwayClient(motifsFactory) {
       return P.siteUrl + encodePath(p);
     }
     /**
-     * Folders, raw files and HTML pages may be the site's own bytes: in an explicit mode they open through the
-     * site's __dropway/open address, which adds ?theme= only when the frame will show a page Kofra draws
-     * (a listing, a viewer, the password gate), so the site's own HTML never sees it.
+     * Folders, raw files and HTML pages may be the site's own bytes: they open through the site's
+     * __dropway/open address, which adds ?theme= (an explicit mode) and &embed=1 (folders: the listing or the
+     * password gate drawn without a header and footer of their own) only when the frame will show a page
+     * Kofra draws, so the site's own HTML never sees either.
      */
-    function openInFrame(target) {
+    function openInFrame(target, embed) {
       var pref = themePref();
-      if (pref === "auto") return target;
+      if (pref === "auto" && !embed) return target;
       var u = new URL(target);
-      return P.siteUrl + "__dropway/open?next=" + encodeURIComponent(u.pathname + u.search) + "&theme=" + pref;
+      return P.siteUrl + "__dropway/open?next=" + encodeURIComponent(u.pathname + u.search) + (embed ? "&embed=1" : "") + (pref === "auto" ? "" : "&theme=" + pref);
     }
     function viewSrc(p, mode) {
       var f = fileByPath(p);
       var base = siteUrlFor(p);
-      if (!p || p.charAt(p.length - 1) === "/") return openInFrame(base);
+      if (!p || p.charAt(p.length - 1) === "/") return openInFrame(base, true);
       if (mode === "source") return withViewerTheme(base + "?view=source&embed=1");
       if (mode === "raw") return openInFrame(base + "?raw=1");
       if (f && f.kind === "html") return openInFrame(base);
@@ -1756,7 +1800,7 @@ export function dropwayClient(motifsFactory) {
       );
       add(
         info,
-        f ? h("span", { class: "k-chip k-accent", text: f.kind }) : null,
+        f ? h("span", { class: "k-chip k-accent", text: kindLabel(f.kind) }) : null,
         h("span", { class: "k-crumbs" }, h("span", { "aria-current": "page", text: p || "/" })),
         f ? h("span", { class: "k-vmeta", text: bytes(f.size) + " · " + f.contentType.split(";")[0] }) : null,
         f ? sealFor(p, f.sha256, { mini: true, full: true }) : null,
@@ -1863,6 +1907,15 @@ export function dropwayClient(motifsFactory) {
     var smallSite = manifest.files.length <= 40;
     var filter = h("input", { class: "k-input k-find", type: "search", placeholder: "Filter files", "aria-label": "Filter files" });
     var treeBox = h("nav", { class: "k-tree", "aria-label": "Files of " + slug }, renderNode(buildTree(manifest.files), "", 0));
+    // Phones: the tree folds into a "Files (n)" disclosure above the preview, closed, so the page opens on the
+    // file. From 761px it is always open and the disclosure's summary is hidden.
+    var narrowQuery = window.matchMedia ? window.matchMedia("(max-width: 760px)") : null;
+    var fold = h("details", { class: "k-treebox", open: !(narrowQuery && narrowQuery.matches) }, h("summary", { text: "Files (" + manifest.files.length + ")" }), filter, treeBox);
+    if (narrowQuery && narrowQuery.addEventListener) {
+      narrowQuery.addEventListener("change", function () {
+        if (!narrowQuery.matches) fold.open = true;
+      });
+    }
     filter.addEventListener("input", function () {
       var q = filter.value.trim().toLowerCase();
       $$("a[data-path]", treeBox).forEach(function (a) {
@@ -1874,12 +1927,13 @@ export function dropwayClient(motifsFactory) {
     add(
       tree,
       h("div", { class: "k-vside-h" }, h("a", { class: "k-title", href: "/dashboard/sites/" + encodeURIComponent(slug), text: slug }), h("span", { class: "k-small", text: manifest.version ? "v" + manifest.version.number + " · " + plural(manifest.files.length, "file") : "No live version" })),
-      filter,
-      treeBox,
+      fold,
     );
     go(current, mode, false);
+    // Bring the current file into the tree's own scroll box (wide screens only: on phones the page itself
+    // would scroll, and the header and preview would leave the screen).
     var cur = $("a[aria-current]", tree);
-    if (cur) cur.scrollIntoView({ block: "nearest" });
+    if (cur && !(narrowQuery && narrowQuery.matches)) cur.scrollIntoView({ block: "nearest" });
   };
 
   // ------------------------------------------------------------------ colour mode (Auto / Light / Dark)

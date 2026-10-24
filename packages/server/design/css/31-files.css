@@ -3,6 +3,7 @@
 .dropzone.over,.dropzone:focus-within,.dropzone:focus-visible{border-color:var(--accent);background:var(--accent-wash)}
 .dropzone strong{font-family:var(--serif);font-weight:500;font-size:23px;color:var(--accent);line-height:1.2}
 .dropzone p{margin:0;max-width:36em;color:var(--ink-2);font-size:14px}
+.fmeta{display:block;font-size:13px;color:var(--ink-2);margin-top:2px}
 .frows.chosen{margin:14px 0 0;border-top:1px solid var(--accent)}
 .chosen .frow{padding:8px 0}
 .prog{height:5px;background:var(--accent-tint);margin:14px 0 8px}

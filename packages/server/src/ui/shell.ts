@@ -1,10 +1,10 @@
 import type { Context } from "hono";
-import { appOrigin, type DropwayContext } from "@dropway/core";
+import { appOrigin, KIND_LABELS, type DropwayContext } from "@dropway/core";
 import type { DropwayEnv } from "../env";
 import type { NavItem, UiSlots } from "../extensions";
 import { domainsLine, escapeHtml } from "../html";
 import { clientScriptUrl } from "./assets";
-import { appChrome, type ChromeNavItem } from "./chrome";
+import { accountArea, appChrome, type ChromeNavItem } from "./chrome";
 import { renderDocument } from "./document";
 import { THEME_COLORS } from "./design.generated";
 import { nextFor, themeOf } from "./theme";
@@ -152,16 +152,18 @@ export async function renderAppPage(c: Context<DropwayEnv>, opts: AppPageOptions
     session: slots.session ? { signIn: slots.session.signInPath, signOut: slots.session.signOutPath } : null,
     page: { name: opts.page, ...opts.data },
     themeColors: THEME_COLORS,
+    kindLabels: KIND_LABELS,
   };
   const scripts = [clientScriptUrl(), ...(opts.scripts ?? [])].map((s) => `<script src="${escapeHtml(s)}" defer></script>`).join("");
-  const signIn = escapeHtml(slots.session?.signInPath ?? "/login");
   const body = appChrome({
     header: {
       name,
+      // The dashboard script fills the tag ("<account> · <email>") and swaps "Sign in" for "Sign out".
+      tagId: "dw-tag",
       nav: opts.nav === false ? [] : navItems(slots),
       active: opts.active,
       navLabel: "Dashboard",
-      account: `<a class="k-btn k-sm k-ghost" href="${signIn}">Sign in</a>`,
+      account: accountArea({ signIn: slots.session?.signInPath ?? "/login" }),
       accountId: "dw-account",
       theme,
       next: nextFor(c.req.url),
@@ -193,7 +195,7 @@ export async function renderAppPage(c: Context<DropwayEnv>, opts: AppPageOptions
 export function appStatePage(
   dw: DropwayContext,
   url: string,
-  opts: { title: string; code: string; heading: string; message: string; extra?: string; actions?: string },
+  opts: { title: string; code: string; heading: string; message: string; extra?: string; actions?: string; signIn?: string },
 ): string {
   const name = dw.config.instanceName;
   const theme = themeOf(dw);
@@ -205,7 +207,7 @@ export function appStatePage(
     robots: "noindex",
     bodyAttrs: ' class="k-page"',
     body: appChrome({
-      header: { name, theme, next: nextFor(url), account: "" },
+      header: { name, theme, next: nextFor(url), account: accountArea({ signIn: opts.signIn ?? "/login" }) },
       main,
       footer: { name, domains: domainsLine(dw), links: CORE_FOOTER_LINKS },
     }),

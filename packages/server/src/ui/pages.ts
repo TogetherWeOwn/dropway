@@ -141,24 +141,27 @@ export async function loginPage(c: Context<DropwayEnv>): Promise<Response> {
     : "";
   const setUp = await isSetUp(dw).catch(() => true);
   const bootstrapField = `<div class="k-group"><label class="k-label" for="%ID%">Bootstrap secret (ADMIN_BOOTSTRAP_KEY)</label><input class="k-input k-mono" id="%ID%" name="secret" type="password" autocomplete="off" required><p class="k-hint">Sent once to this instance's API, never stored in the browser.</p></div>`;
+  const name = e(dw.config.instanceName);
+  // One panel per job, its heading inside it (the same pattern as the hosted sign-in page): the page h1 sits in
+  // the first panel, the setup panel when the instance is not set up yet, else the API-key panel.
   const setup = setUp
     ? ""
-    : `<section class="k-panel" id="setup" aria-labelledby="dw-setup-h"><p class="k-k">First run</p><h2 id="dw-setup-h">Set up this instance</h2><form id="dw-setup" method="post" action="/login">
+    : `<section class="k-panel" id="setup" aria-labelledby="dw-setup-h"><p class="k-k">First run</p><h1 id="dw-setup-h">Set up ${name}</h1><p>Create the owner of this instance with the bootstrap secret you configured.</p><form id="dw-setup" method="post" action="/login">
 ${bootstrapField.replaceAll("%ID%", "dw-setup-secret")}
 <div class="k-two"><div class="k-group"><label class="k-label" for="dw-setup-email">Your email</label><input class="k-input" id="dw-setup-email" name="email" type="email" autocomplete="email"></div>
 <div class="k-group"><label class="k-label" for="dw-setup-name">Name</label><input class="k-input" id="dw-setup-name" name="name" autocomplete="name"></div></div>
 <button type="submit" class="k-btn">Create the owner</button><div data-out aria-live="polite"></div></form></section>`;
+  const keyHeading = setUp ? `<h1 id="dw-key-h">Sign in to ${name}</h1>` : `<h2 id="dw-key-h">Sign in with an API key</h2>`;
   const body = `<div class="k-narrow k-stack">
-${pageHead(`Sign in to ${dw.config.instanceName}`, "")}
 <div id="dw-login-note"></div>
 ${sessionNote}${setup}
-<section class="k-panel" aria-labelledby="dw-key-h"><h2 id="dw-key-h">API key</h2><form id="dw-signin" method="post" action="/login">
+<section class="k-panel" aria-labelledby="dw-key-h">${keyHeading}<p>Use an API key of this instance. It is only ever sent to this instance's API.</p><form id="dw-signin" method="post" action="/login">
 <div class="k-group"><label class="k-label" for="dw-key">API key</label><input class="k-input k-mono" id="dw-key" name="key" type="password" autocomplete="current-password" placeholder="dw_…" required spellcheck="false"></div>
 <label class="k-tog"><input type="checkbox" name="remember"><span>Keep me signed in on this browser<span class="k-sub">Otherwise the key is forgotten when this tab closes.</span></span></label>
 <div class="k-btnrow"><button type="submit" class="k-btn">Sign in</button></div>
 <div id="dw-signin-out" aria-live="polite"></div>
-</form></section>
-<p class="k-small">Keys come from the instance owner: the owner key is created at setup, and anyone with the <code>keys:write</code> scope can create more under API keys. The key is only ever sent to this instance's API.</p>
+</form>
+<p class="k-small k-panel-note">Keys come from the instance owner: the owner key is created at setup, and anyone with the <code>keys:write</code> scope can create more under API keys.</p></section>
 ${
   setUp
     ? `<details class="k-how"><summary>Lost the owner key?</summary><form class="k-panel" id="dw-recover" method="post" action="/login">${bootstrapField.replaceAll("%ID%", "dw-recover-secret")}<button type="submit" class="k-btn k-ghost">Create a new owner key</button><div data-out aria-live="polite"></div></form></details>`
@@ -198,6 +201,8 @@ export function publishPage(c: Context<DropwayEnv>): Promise<Response> {
     title: "Publish",
     page: "publish",
     active: "/dashboard/publish",
+    // It lists the files chosen for publishing: the trust line goes in the footer (PORT-SPEC 6.0, A08-A13).
+    trust: true,
     body: `${pageHead("Publish", "Drop a build folder, some files or a .zip. Agents do the same with one API call, the CLI or MCP.")}${block({ title: "The press", titleId: "dw-publish-h", body: `<div class="k-pad" id="dw-publish">${NOSCRIPT}</div>` })}`,
   });
 }
@@ -240,7 +245,7 @@ export async function settingsPage(c: Context<DropwayEnv>, slots: UiSlots): Prom
       return block({ id: s.id, title: s.title, body: `<div class="k-pad">${html}</div>` });
     }),
   );
-  const body = `${pageHead("Settings", "How this instance is configured. Change these with Worker variables (wrangler.jsonc) and redeploy.")}
+  const body = `${pageHead("Settings", "How this instance is set up. Change it in wrangler.jsonc and redeploy.")}
 ${block({ title: "Your account", titleId: "dw-me-h", body: `<div class="k-pad" id="dw-me">${NOSCRIPT}</div>` })}
 ${block({ title: "Members", titleId: "dw-members-h", tools: '<span class="k-small">People and agents who can sign in. Each gets their own keys.</span>', body: `<div id="dw-members">${NOSCRIPT}</div>` })}
 ${block({ title: "This instance", titleId: "dw-instance-h", body: `<div class="k-pad"><dl class="k-kv">${rows.map(([k, v]) => `<dt>${e(k)}</dt><dd>${v}</dd>`).join("")}</dl></div>` })}
@@ -256,11 +261,16 @@ export function withViewerTheme(url: string, pref: string): string {
   return /[?&]view=(1|source)\b/.test(url) ? `${url}&theme=${pref}` : url;
 }
 
-/** The frame address for a folder or raw file: direct in Auto; through <site>/__dropway/open in an explicit mode. */
-export function openInFrameUrl(root: string, target: string, pref: ThemePref): string {
-  if (pref !== "light" && pref !== "dark") return target;
+/**
+ * The frame address for a folder or raw file: through <site>/__dropway/open, which passes an explicit mode
+ * (?theme=) and, for folders, the embed (&embed=1: the listing or the password gate drawn without a header
+ * and footer of their own) on only to pages Kofra draws. Direct when there is nothing to pass on.
+ */
+export function openInFrameUrl(root: string, target: string, pref: ThemePref, embed = false): string {
+  const explicit = pref === "light" || pref === "dark";
+  if (!explicit && !embed) return target;
   const t = new URL(target);
-  return `${root}__dropway/open?next=${encodeURIComponent(t.pathname + t.search)}&theme=${pref}`;
+  return `${root}__dropway/open?next=${encodeURIComponent(t.pathname + t.search)}${embed ? "&embed=1" : ""}${explicit ? `&theme=${pref}` : ""}`;
 }
 
 export function viewerPage(c: Context<DropwayEnv>): Response | Promise<Response> {
@@ -279,7 +289,7 @@ export function viewerPage(c: Context<DropwayEnv>): Response | Promise<Response>
   // Folders and raw files may be the site's own bytes, so in an explicit mode they open through the site's
   // __dropway/open address, which adds ?theme= only when the frame will show a page Kofra draws.
   const target = isDir ? fileUrl : mode === "source" ? `${fileUrl}?view=source&embed=1` : mode === "raw" ? `${fileUrl}?raw=1` : `${fileUrl}?view=1&embed=1`;
-  const src = isDir || mode === "raw" ? openInFrameUrl(root, target, pref) : withViewerTheme(target, pref);
+  const src = isDir ? openInFrameUrl(root, target, pref, true) : mode === "raw" ? openInFrameUrl(root, target, pref) : withViewerTheme(target, pref);
   const shared = sitesCspSource(dw) === "'self'";
   // A sandboxed frame. On a separate sites origin the page keeps that (different) origin so its own
   // storage works; on the shared origin it gets an opaque origin, like every site response there.

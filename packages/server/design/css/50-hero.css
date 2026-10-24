@@ -1,4 +1,5 @@
 /* Landing and self-host home: hero with plate art, numbered sections, stat tiles. */
+.lede{font-size:19px;max-width:33em;color:var(--ink-2);margin:0}
 .hero{padding:var(--s10) 0 var(--s9)}
 .hero>.wrap{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(0,.92fr);gap:var(--s9);align-items:center}
 .hero h1{margin:var(--s4) 0 22px;overflow-wrap:anywhere}

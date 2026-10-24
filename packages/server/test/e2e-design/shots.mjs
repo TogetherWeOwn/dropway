@@ -21,8 +21,8 @@
 //   flash    (G7) explicit modes: the HTML already carries data-theme, and every frame painted until load has
 //            the mode's paper behind it (sampled each animation frame from the first one)
 //   focus    (G4) Tab from the top through every focusable element: each shows a ring >= 2px with >= 3:1
-//            against what is behind it, is in the viewport and not covered; app pages start at "Skip to
-//            content"; an open dialog keeps focus inside
+//            against what is behind it, not cut off by an ancestor that clips its overflow, is in the viewport
+//            and not covered; app pages start at "Skip to content"; an open dialog keeps focus inside
 //   identity (G6) auto with the OS light is pixel-identical to light, and auto with the OS dark to dark
 //            (the mode switch, whose pressed state differs, and per-screen secrets are masked; channel
 //            deltas of 2/255 or less, rasteriser rounding on anti-aliased edges, are reported as noise)
@@ -894,6 +894,25 @@ const FOCUS_PROBE = () => {
       covered = hit.tagName.toLowerCase() + (hit.className && typeof hit.className === "string" ? `.${hit.className.trim().split(/\s+/).join(".")}` : "");
     }
   }
+  // A ring cut off by an ancestor that clips its overflow (an outline drawn outside a box whose parent has
+  // overflow:hidden shows only a sliver): the ring's box must fit inside every clipping ancestor's padding box.
+  let clipped = null;
+  if (outline || shadow) {
+    const grow = outline ? (parseFloat(cs.outlineOffset) || 0) + ow : 2;
+    const ring = { l: r.left - grow, t: r.top - grow, r: r.right + grow, b: r.bottom + grow };
+    for (let n = ringEl.parentElement; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+      const ncs = getComputedStyle(n);
+      if (ncs.overflowX === "visible" && ncs.overflowY === "visible") continue;
+      const nr = n.getBoundingClientRect();
+      const box = { l: nr.left + (parseFloat(ncs.borderLeftWidth) || 0), t: nr.top + (parseFloat(ncs.borderTopWidth) || 0), r: nr.right - (parseFloat(ncs.borderRightWidth) || 0), b: nr.bottom - (parseFloat(ncs.borderBottomWidth) || 0) };
+      const cutX = ncs.overflowX !== "visible" && (ring.l < box.l - 0.5 || ring.r > box.r + 0.5);
+      const cutY = ncs.overflowY !== "visible" && (ring.t < box.t - 0.5 || ring.b > box.b + 0.5);
+      if (cutX || cutY) {
+        clipped = n.tagName.toLowerCase() + (n.className && typeof n.className === "string" && n.className.trim() ? `.${n.className.trim().split(/\s+/).join(".")}` : "");
+        break;
+      }
+    }
+  }
   const open = document.querySelector("dialog[open]");
   const name = el.tagName.toLowerCase() + (el.id ? `#${el.id}` : "") + (el.className && typeof el.className === "string" && el.className.trim() ? `.${el.className.trim().split(/\s+/).join(".")}` : "");
   return {
@@ -905,6 +924,7 @@ const FOCUS_PROBE = () => {
     contrast,
     inView,
     covered,
+    clipped,
     escaped: !!open && !open.contains(el),
     inDialog: !!open && open.contains(el),
   };
@@ -947,6 +967,39 @@ async function focusWalk(page) {
     }
   }
   return { stops, back, focusable };
+}
+
+/** A computed colour ("rgb(...)", "rgba(...)" or "color(srgb ...)") as 0-255 channels and alpha. */
+export function parseColor(c) {
+  let m = /^rgba?\(([^)]+)\)/.exec(c ?? "");
+  if (m) {
+    const p = m[1].split(/[\s,/]+/).filter(Boolean).map(Number);
+    return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+  }
+  m = /^color\(srgb ([^)]+)\)/.exec(c ?? "");
+  if (m) {
+    const p = m[1].split(/[\s/]+/).filter(Boolean).map(Number);
+    return { r: p[0] * 255, g: p[1] * 255, b: p[2] * 255, a: p.length > 3 ? p[3] : 1 };
+  }
+  return null;
+}
+
+/** WCAG relative luminance of 0-255 channels. */
+function luminance(c) {
+  const f = (v) => {
+    v /= 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+}
+
+/** Whether a dialog backdrop, laid over the page paper, makes it darker (a scrim must never lighten the page). */
+export function scrimDarkens(backdrop, paper) {
+  const b = parseColor(backdrop);
+  const p = parseColor(paper);
+  if (!b || !p) return false;
+  const over = { r: b.r * b.a + p.r * (1 - b.a), g: b.g * b.a + p.g * (1 - b.a), b: b.b * b.a + p.b * (1 - b.a) };
+  return b.a > 0 && luminance(over) < luminance(p);
 }
 
 /** Number of differing pixels between two PNGs (decoded by the browser), or a size mismatch (diff -1). */
@@ -1213,6 +1266,21 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
       shifts: (window.__shifts ?? []).slice(0, 5),
       clsAfterLoad: Math.round((window.__clsAfter ?? 0) * 1000) / 1000,
       frames: window.__frames ?? [],
+      // G8 kickers: every system-state kicker is Martian Mono in accent-2 (a cascade slip once greyed them).
+      kickers: [...document.querySelectorAll(".k-state-code")].map((e) => ({ color: getComputedStyle(e).color, font: getComputedStyle(e).fontFamily })),
+      accent2: (() => {
+        const t = document.createElement("span");
+        t.style.color = "var(--accent-2)";
+        (document.querySelector("main") ?? document.body).append(t);
+        const c = getComputedStyle(t).color;
+        t.remove();
+        return c;
+      })(),
+      // G8 scrim: an open dialog's backdrop must darken the page in both modes (never a light veil in dark).
+      backdrop: (() => {
+        const d = document.querySelector("dialog[open]");
+        return d ? getComputedStyle(d, "::backdrop").backgroundColor : null;
+      })(),
       motion: {
         buttons: dur(".k-btn, .k-mode-switch button"),
         skel: [...document.querySelectorAll(".k-skel")].map((e) => getComputedStyle(e).animationName).filter((n) => n !== "none"),
@@ -1254,6 +1322,8 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
   // Explicit modes pin the metas to the chosen colour; Auto lists both (PORT-SPEC 3.1). The static platform
   // error page (S08) is built without request data and is always Auto.
   const metaMode = sc.staticTheme ? "auto" : (explicit ?? "auto");
+  const badKickers = (probe.kickers ?? []).filter((k) => k.color !== probe.accent2 || !/Martian Mono/.test(k.font)).map((k) => `${k.color} ${k.font.split(",")[0]} (accent-2 ${probe.accent2})`);
+  const scrimOk = probe.backdrop === null || scrimDarkens(probe.backdrop, probe.bg);
   const metasOk =
     metaMode === "auto"
       ? probe.colorScheme === "light dark" && probe.themeColors.join(" ") === `(prefers-color-scheme: light)=${THEME_COLOR.light} (prefers-color-scheme: dark)=${THEME_COLOR.dark}`
@@ -1266,7 +1336,7 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
   // Under forced colours the rings are system colours (CanvasText on Canvas); computed backgrounds still
   // report author colours there, so only the ring itself is checked.
   const forced = pass === "forced";
-  const badStops = stops.filter((x) => !x.ring || (x.width !== null && x.width < 2) || (!forced && (x.contrast === null || x.contrast < 3)) || !x.inView || x.covered || x.escaped);
+  const badStops = stops.filter((x) => !x.ring || (x.width !== null && x.width < 2) || (!forced && (x.contrast === null || x.contrast < 3)) || !x.inView || x.covered || x.clipped || x.escaped);
   const gates = {
     csp: { pass: probe.csp.length === 0, detail: probe.csp },
     console: { pass: sc.expectConsole ? true : consoleMsgs.filter((m) => !/Failed to load resource/.test(m) || unexpected.length).length === 0 && unexpected.length === 0, detail: [...consoleMsgs, ...unexpected] },
@@ -1276,7 +1346,10 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
     fonts: { pass: probe.fonts.sans && (!probe.h1Font || !probe.h1Font.includes("Newsreader") || probe.fonts.serif), detail: probe.fonts },
     brand: { pass: userContent || !BANNED.test(probe.text), detail: (probe.text.match(BANNED) ?? [])[0] ?? null },
     status: { pass: !sc.status || status === sc.status, detail: status },
-    tokens: { pass: sc.userPage || (metasOk && oldHex.length === 0), detail: { colorScheme: probe.colorScheme, themeColors: probe.themeColors, oldHex } },
+    tokens: {
+      pass: sc.userPage || (metasOk && oldHex.length === 0 && badKickers.length === 0 && scrimOk),
+      detail: { colorScheme: probe.colorScheme, themeColors: probe.themeColors, oldHex, badKickers, backdrop: probe.backdrop, scrimOk },
+    },
     // G9: the shift measured on a load with the API held (fonts and CSS only); the cell's own load is
     // reported too (pageLoad), including what the dashboard does once its data arrives.
     fontload: { pass: badFont.length === 0 && g9.cls <= 0.02, detail: { cls: g9.cls, shifts: g9.shifts, pageLoad: { cls: probe.cls, clsAfterLoad: probe.clsAfterLoad, shifts: probe.shifts }, fonts: fontHeaders.length, bad: badFont.slice(0, 3) } },

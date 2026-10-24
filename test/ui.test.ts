@@ -124,7 +124,8 @@ describe("app-origin file viewer (/v/:slug/*path)", () => {
     const res = await dw.call("/v/bright-otter-x7k2/");
     expect(res.headers.get("content-security-policy")).toContain("frame-src 'self' https://sites.example");
     const html = await res.text();
-    expect(html).toContain('src="https://sites.example/bright-otter-x7k2/"');
+    // A folder opens through the site's __dropway/open with the embed (the listing draws no frame of its own there).
+    expect(html).toContain('src="https://sites.example/bright-otter-x7k2/__dropway/open?next=%2Fbright-otter-x7k2%2F&amp;embed=1"');
     expect(/sandbox="([^"]+)"/.exec(html)![1]).toContain("allow-same-origin");
   });
 
@@ -173,7 +174,9 @@ describe("UI slots for embedding apps", () => {
     const dw = await freshInstance({}, { uiSlots: { session: { signInPath: "/signin", signOutPath: "/auth/signout" } } });
     const html = await (await dw.call("/dashboard")).text();
     expect(boot(html).session).toEqual({ signIn: "/signin", signOut: "/auth/signout" });
-    expect(html).toContain('<div class="k-acct" id="dw-account"><a class="k-btn k-sm k-ghost" href="/signin">Sign in</a></div>');
+    expect(html).toContain('<div class="k-acct" id="dw-account"><a class="k-btn k-sm k-quiet" href="/signin">Sign in</a></div>');
+    // One header everywhere: the tag beside the wordmark is filled by the dashboard script once someone is signed in.
+    expect(html).toContain('<a class="k-wm" href="/">Kofra</a><span class="k-tag" id="dw-tag"></span>');
     const login = await (await dw.call("/login?next=/dashboard/publish")).text();
     expect(login).toContain('href="/signin?next=%2Fdashboard%2Fpublish">Sign in with your account</a>');
     // Without the slot nothing changes.

@@ -14,6 +14,9 @@
 .toolbar .vfile .crumbs{overflow-wrap:anywhere;min-width:0}
 .vcenter>.trust{padding:6px 18px;border-bottom:1px solid var(--rule-soft);background:var(--paper-2)}
 .frame{flex:1;width:100%;min-height:0;border:0;background:#fff;display:block}
+/* The file list folds into a "Files (n)" disclosure on phones; from 761px it is always open and its summary hidden. */
+.treebox>summary{display:none}
+.treebox>.find{margin:0 0 12px}
 .tree{font-size:14px;line-height:1.35}
 .tree ul{list-style:none;margin:0;padding:0 0 0 12px}
 .tree>ul{padding-left:0}
@@ -30,6 +33,8 @@
   .vapp{flex-direction:column}
   /* Let page scrolling reach both the complete tree and a usable, separately scrolling preview. */
   .vside{width:auto;overflow:visible;flex:none;border-right:0;border-bottom:1px solid var(--rule)}
+  .treebox>summary{display:list-item;padding:6px 4px;font-weight:600}
+  .treebox[open]>summary{margin-bottom:10px}
   .vcenter{min-height:70vh}
   .frame{flex:none;height:80vh;min-height:30rem}
   .toolbar{padding:10px 14px}

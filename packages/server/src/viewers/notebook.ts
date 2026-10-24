@@ -1,8 +1,9 @@
 import { escapeHtml } from "../html";
 import { cachedRender } from "./cache";
-import { standardTabs, viewerPage } from "./chrome";
+import { standardTabs, viewerCarry, viewerPage } from "./chrome";
 import { HIGHLIGHT_CSS, highlight, hljsLanguage } from "./highlight";
 import type { Viewer } from "./index";
+import { carryDocLinks } from "./links";
 import { MD_CSS, renderMarkdown } from "./markdown";
 import { sanitizeHtml } from "./sanitize";
 
@@ -11,11 +12,12 @@ import { sanitizeHtml } from "./sanitize";
  * with their execution count, outputs shown (text, errors, PNG/JPEG/GIF/SVG
  * images, HTML and Markdown through the sanitizer). Nothing executes.
  */
-const NB_VERSION = 3;
+const NB_VERSION = 4;
 const MAX_OUTPUT_TEXT = 100_000;
 
 const NB_CSS = `
-.k-doc.nb{max-width:62rem}
+.k-doc .anchor-link{margin-left:.35em;color:var(--muted);opacity:0;text-decoration:none;font:400 .7em var(--sans)}
+.k-doc :is(h1,h2,h3,h4,h5,h6):hover .anchor-link,.k-doc .anchor-link:focus-visible{opacity:1}
 .nb-cell{display:grid;grid-template-columns:5.5rem minmax(0,1fr);gap:.5rem;margin:0 0 1rem}
 .nb-prompt{font:400 12px/1.9 var(--mono);color:var(--muted);text-align:right;padding-top:.45rem}
 .nb-cell pre{margin:0;background:var(--paper-3);border:1px solid var(--rule-soft);padding:12px 14px;overflow:auto;font-size:13px;line-height:1.55}
@@ -97,7 +99,7 @@ export const notebookViewer: Viewer = {
     return viewerPage(vc, {
       tabs: standardTabs(vc, { rendered: "Notebook", source: true }),
       css: MD_CSS + NB_CSS + HIGHLIGHT_CSS,
-      body: `<main class="k-doc nb">${r.html}</main>`,
+      body: `<main class="k-doc nb">${await carryDocLinks(r.html, vc.url.pathname, vc.siteBase, viewerCarry(vc))}</main>`,
       headers: { "X-Kofra-Render-Cache": r.cache },
     });
   },

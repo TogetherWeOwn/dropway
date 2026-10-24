@@ -34,4 +34,3 @@
 .chip.warn{border-color:var(--warning);color:var(--warning);background:var(--warning-wash)}
 .chip.danger{border-color:var(--danger);color:var(--danger)}
 .chip.solid{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
-.chips{display:flex;flex-wrap:wrap;gap:6px}

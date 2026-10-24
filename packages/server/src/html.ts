@@ -70,6 +70,8 @@ export function systemPage(opts: {
   trust?: boolean;
   /** Load the self-hosted fonts (default true; the platform error page sets false). */
   fonts?: boolean;
+  /** Drawn inside the app's file viewer frame (&embed=1): no header, band or footer of its own (the app has them). */
+  embed?: boolean;
 }): string {
   const dw = opts.dw;
   const origin = dw ? appOrigin(dw) : undefined;
@@ -80,9 +82,11 @@ export function systemPage(opts: {
     opts.variant === "panel"
       ? `<div class="k-panel">${inner}</div>`
       : `<div class="k-state${stamp ? "" : " k-nostamp"}${opts.variant === "empty" ? " k-empty" : ""}">${stamp}<div>${inner}</div></div>`;
-  const body = `<div class="k-sys">${origin ? siteHeader(name, origin) : ""}<main id="dw-main">${state}</main><div class="k-guilloche-band" aria-hidden="true"></div>${
-    origin && dw ? siteFooter({ name, appOrigin: origin, domains: domainsLine(dw), trust: opts.trust }) : ""
-  }</div>`;
+  const body = opts.embed
+    ? `<div class="k-sys"><main id="dw-main">${state}</main></div>`
+    : `<div class="k-sys">${origin ? siteHeader(name, origin) : ""}<main id="dw-main">${state}</main><div class="k-guilloche-band" aria-hidden="true"></div>${
+        origin && dw ? siteFooter({ name, appOrigin: origin, domains: domainsLine(dw), trust: opts.trust }) : ""
+      }</div>`;
   return htmlPage({
     title: opts.title,
     body,
