@@ -87,7 +87,7 @@ export async function homePage(c: Context<DropwayEnv>): Promise<Response> {
     [
       "docs",
       "Agent docs",
-      `<p>Point an agent at these; they describe this instance, not a generic one.</p><ul class="dw-small"><li><a href="/llms.txt">/llms.txt</a>: how to publish, update and roll back</li><li><a href="/llms-full.txt">/llms-full.txt</a>: every endpoint, MCP tool and error code</li><li><a href="/skill.md">/skill.md</a>: Agent Skill (<code>npx skills add ${e(o)}</code>)</li><li><a href="/openapi.json">/openapi.json</a>: every REST operation</li><li><code>${e(o)}/mcp</code>: the MCP endpoint</li></ul>`,
+      `<p>Point an agent at these; they describe this instance, not a generic one.</p><ul class="dw-small"><li><a href="/connect">/connect</a>: one-line setup per agent client</li><li><a href="/llms.txt">/llms.txt</a>: how to publish, update and roll back</li><li><a href="/llms-full.txt">/llms-full.txt</a>: every endpoint, MCP tool and error code</li><li><a href="/skill.md">/skill.md</a>: Agent Skill (<code>npx skills add ${e(o)}</code>)</li><li><a href="/openapi.json">/openapi.json</a>: every REST operation</li><li><code>${e(o)}/mcp</code>: the MCP endpoint</li></ul>`,
     ],
   ];
   const tabList = tabs
