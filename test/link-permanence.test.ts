@@ -389,6 +389,9 @@ describe("R-59 operator release with a reason", () => {
     const unknown = await release("never-held-name", { reason: "x", confirm: "never-held-name" });
     expect(unknown.status).toBe(404);
     expect(unknown.body.error.code).toBe("slug_not_held");
+    const malformed = await release("!!", { reason: "x", confirm: "!!" });
+    expect(malformed.status).toBe(400);
+    expect(malformed.body.error.code).toBe("invalid_slug");
   });
 });
 
