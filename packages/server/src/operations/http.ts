@@ -24,7 +24,7 @@ import {
 } from "@dropway/core";
 import type { DropwayEnv } from "../env";
 import { readJson } from "../routes/api";
-import { defineOperation } from "../operations";
+import { defineOperation, rawRequestInput } from "../operations";
 import { fromSchema, RO, WRITE, P, D, clientOf } from "./shared";
 
 export const HTTP_OPERATIONS = [
@@ -319,6 +319,9 @@ export const HTTP_OPERATIONS = [
     },
     http: {
       statuses: [200, 201],
+      // The handler collects every malformed manifest field and coerces legacy
+      // metadata itself; schema validation would reject those before it runs.
+      parseInput: (c) => rawRequestInput(c),
       handler: async (c) => {
         const dw = D(c);
         const p = P(c);

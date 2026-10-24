@@ -2,10 +2,9 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { freshInstance, jsonBody, manifestEntry } from "./helpers";
 
-// Review pin (PR #23): POST /deploys with a settings change plus malformed
-// metadata returns 400 and writes nothing. REST schema validation rejects
-// the poison before the handler; the handler additionally parses metadata
-// before updateSite as defense-in-depth.
+// Review pin (PR #23): POST /deploys parses metadata before writing site
+// settings, so a settings change plus malformed message/baseVersionId
+// returns 400 invalid_field with the site row untouched.
 const poison = { toString: null };
 const slug = "ordering-guard";
 const siteApi = `/api/v1/sites/${slug}`;
@@ -24,10 +23,9 @@ describe("deploy settings/metadata ordering", () => {
         key: instance.ownerKey, ...jsonBody({ files: [entry], title: "pwned-title", [name]: poison }),
       });
       expect(result.status, JSON.stringify(result.body)).toBe(400);
-      // REST schema validation rejects the poison before the handler runs;
-      // the handler still parses metadata before writing settings as
-      // defense-in-depth. Either way nothing is written.
-      expect(result.body.error.code).toBe("invalid_request");
+      // The handler parses metadata before writing settings, so the poison
+      // fails closed with nothing written.
+      expect(result.body.error.code).toBe("invalid_field");
       expect(result.body.error.retryable).toBe(false);
       expect(result.body.error.details.fields.map((field: { path: string }) => field.path)).toContain(name);
       const after = await env.DB.prepare("SELECT * FROM sites WHERE slug = ?").bind(slug).first();
