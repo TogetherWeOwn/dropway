@@ -7,6 +7,7 @@
 import type { Limits } from "./config";
 import type { DropwayContext } from "./context";
 import type { Principal } from "./principal";
+import type { Capability, CapabilityDecision, OperationMeta, QuotaKey } from "./policy";
 import type { ApiError } from "./errors";
 
 /** SQL prepared on the same dc.env.DB, committed after core SQL in one batch. */
@@ -59,9 +60,15 @@ export interface PolicyAdapter {
   /** Called before a deploy is recorded, with its totals. */
   beforeDeploy?(
     principal: Principal,
-    input: { siteId: string; tenantId: string | null; fileCount: number; totalBytes: number },
+    input: { siteId: string; tenantId: string | null; fileCount: number; totalBytes: number; newBytes: number },
     dc: DropwayContext,
   ): void | Promise<void>;
+  /** Core checks instance support before consulting the adapter. */
+  capability?(principal: Principal, capability: Capability, owner: SiteOwner | null, dc: DropwayContext): CapabilityDecision | Promise<CapabilityDecision>;
+  /** null means unlimited; omitted hooks use the instance's configured quotas. */
+  quota?(principal: Principal, key: QuotaKey, owner: SiteOwner | null, dc: DropwayContext): number | null | Promise<number | null>;
+  /** After authorization and validation, before registry dispatch. */
+  beforeOperation?(principal: Principal, op: OperationMeta, input: unknown, dc: DropwayContext): void | Promise<void>;
 }
 
 export type UsageEvent =
@@ -69,7 +76,8 @@ export type UsageEvent =
   | { type: "blob_upload"; tenantId: string | null; sha256: string; bytes: number; at: number }
   | { type: "site_request"; tenantId: string | null; siteId: string; status: number; bytes: number; at: number }
   | { type: "site_created"; tenantId: string | null; siteId: string; anonymous: boolean; at: number }
-  | { type: "site_deleted"; tenantId: string | null; siteId: string; at: number };
+  | { type: "site_deleted"; tenantId: string | null; siteId: string; at: number }
+  | { type: "storage_snapshot"; tenantId: string; bytes: number; at: number };
 
 /** Usage metering. The default does nothing. Called off the hot path (waitUntil). */
 export interface MeteringAdapter {
@@ -140,6 +148,8 @@ export const defaultPolicy: PolicyAdapter = {
   limits(_principal, owner, dc) {
     return owner.tenantId === null ? dc.config.anonymous.limits : dc.config.limits;
   },
+  capability() { return { allowed: true }; },
+  quota(_principal, key, _owner, dc) { return dc.config.quotas[key]; },
 };
 
 /** Default metering: none. */

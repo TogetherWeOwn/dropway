@@ -195,7 +195,7 @@ export async function renderAppPage(c: Context<DropwayEnv>, opts: AppPageOptions
 export function appStatePage(
   dw: DropwayContext,
   url: string,
-  opts: { title: string; code: string; heading: string; message: string; extra?: string; actions?: string; signIn?: string },
+  opts: { title: string; code: string; heading: string; message: string; extra?: string; actions?: string; signIn?: string; modeSwitch?: boolean },
 ): string {
   const name = dw.config.instanceName;
   const theme = themeOf(dw);
@@ -207,7 +207,7 @@ export function appStatePage(
     robots: "noindex",
     bodyAttrs: ' class="k-page"',
     body: appChrome({
-      header: { name, theme, next: nextFor(url), account: accountArea({ signIn: opts.signIn ?? "/login" }) },
+      header: { name, theme, next: nextFor(url), account: accountArea({ signIn: opts.signIn ?? "/login" }), modeSwitch: opts.modeSwitch },
       main,
       footer: { name, domains: domainsLine(dw), links: CORE_FOOTER_LINKS },
     }),

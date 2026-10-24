@@ -10,7 +10,9 @@ import { hasScope, type Principal } from "../principal";
 import { blobScope, putVerifiedBlob } from "./blobs";
 import { emit, meter } from "./events";
 import { refreshLive } from "./live";
-import { createSite, discardNewSite, getVersion, serializeVersion, type SiteRow, type SiteSettingsInput, type VersionRow } from "./sites";
+import { createSite, discardNewSite, getSiteFor, getVersion, serializeVersion, type SiteRow, type SiteSettingsInput, type VersionRow } from "./sites";
+import { requireQuota, quotaExceeded } from "./policy";
+import { getUsage, incrementalBytes, PROJECTED_STORAGE_SQL, usageStatements } from "./usage";
 
 /** One entry of a deploy manifest as sent by clients. */
 export interface ManifestEntry {
@@ -56,6 +58,7 @@ export function validateManifest(files: unknown, lim: Limits): { entries: Normal
     });
   }
   const seen = new Set<string>();
+  const sizes = new Map<string, number>();
   const entries: NormalisedEntry[] = [];
   let totalBytes = 0;
   for (const raw of files) {
@@ -71,6 +74,8 @@ export function validateManifest(files: unknown, lim: Limits): { entries: Normal
     }
     const sha256 = String(f.sha256 ?? "").toLowerCase();
     if (!SHA256_RE.test(sha256)) throw badRequest("invalid_sha256", `sha256 for "${path}" must be 64 hex characters.`, "Compute it with `sha256sum <file>` or `shasum -a 256 <file>`.");
+    if (sizes.has(sha256) && sizes.get(sha256) !== size) throw badRequest("size_mismatch", `Files with the same SHA-256 must declare the same size.`, "Use the actual file byte length for every occurrence of a hash.");
+    sizes.set(sha256, size);
     totalBytes += size;
     entries.push({ path, size, sha256, contentType: normaliseContentType(f.contentType, path) });
   }
@@ -124,6 +129,19 @@ export async function missingForScope(dc: DropwayContext, scope: string, shas: s
   return unique.filter((s) => !present.has(s));
 }
 
+/** Only compare verified bytes this owner has proven it holds; never reveal another tenant's blob. */
+async function validateStoredSizes(dc: DropwayContext, site: SiteRow, entries: NormalisedEntry[]): Promise<void> {
+  const scope = blobScope(siteOwner(site));
+  for (const json of jsonChunks(entries.map((e) => [e.path, e.sha256, e.size]))) {
+    const mismatch = await dc.env.DB.prepare(`SELECT json_extract(j.value, '$[0]') AS path, b.size AS expected,
+        json_extract(j.value, '$[2]') AS received FROM json_each(?) j
+      JOIN blob_scopes bs ON bs.sha256 = json_extract(j.value, '$[1]') AND bs.scope = ?
+      JOIN blobs b ON b.sha256 = bs.sha256
+     WHERE b.size != json_extract(j.value, '$[2]') LIMIT 1`).bind(json, scope).first<{ path: string; expected: number; received: number }>();
+    if (mismatch) throw badRequest("size_mismatch", `The declared size of "${mismatch.path}" differs from its verified bytes.`, "Use the actual file byte length from its stored manifest.", mismatch);
+  }
+}
+
 function siteOwner(site: SiteRow) {
   return { siteId: site.id, tenantId: site.tenant_id };
 }
@@ -134,10 +152,14 @@ function siteOwner(site: SiteRow) {
  * A byte-identical manifest returns { unchanged: true } and records nothing.
  */
 export async function createDeploy(dc: DropwayContext, p: Principal, site: SiteRow, files: unknown, opts: DeployOptions = {}) {
+  site = await getSiteFor(dc, p, site.slug, "sites:write");
   if (site.mode === "transfer" && !opts.transferCreate) throw conflict("transfer_immutable", "Transfer files cannot be replaced.", "Create a new transfer instead.");
-  const lim = await dc.adapters.policy.limits(p, siteOwner(site), dc);
+  const owner = siteOwner(site);
+  const lim = await dc.adapters.policy.limits(p, owner, dc);
   const { entries, totalBytes } = validateManifest(files, lim);
-  await dc.adapters.policy.beforeDeploy?.(p, { siteId: site.id, tenantId: site.tenant_id, fileCount: entries.length, totalBytes }, dc);
+  await validateStoredSizes(dc, site, entries);
+  const newBytes = site.mode === "transfer" ? 0 : await incrementalBytes(dc, site.tenant_id, site.id, entries);
+  await dc.adapters.policy.beforeDeploy?.(p, { siteId: site.id, tenantId: site.tenant_id, fileCount: entries.length, totalBytes, newBytes }, dc);
 
   const baseVersionId = opts.baseVersionId == null || opts.baseVersionId === "" ? null : String(opts.baseVersionId);
   if (baseVersionId && baseVersionId !== site.current_version_id) throw versionConflict(site);
@@ -157,6 +179,8 @@ export async function createDeploy(dc: DropwayContext, p: Principal, site: SiteR
       };
     }
   }
+
+  await requireQuota(dc, p, "storage_bytes", owner, (await getUsage(dc, site.tenant_id)).storage_bytes, newBytes);
 
   const now = Date.now();
   const version: VersionRow = {
@@ -340,6 +364,7 @@ export async function uploadBlob(
 
 /** Atomically make a pending version live. Retrying a finished finalize is safe. */
 export async function finalizeDeploy(dc: DropwayContext, p: Principal, site: SiteRow, versionId: string, transferCreate = false) {
+  site = await getSiteFor(dc, p, site.slug, "sites:write");
   if (site.mode === "transfer" && !transferCreate) throw conflict("transfer_immutable", "Transfer files cannot be replaced.", "Create a new transfer instead.");
   const version = await getVersion(dc, site.id, versionId);
   if (!version) throw notFound("deploy_not_found", `No deploy ${versionId} on site ${site.slug}.`, "Start one with POST /api/v1/sites/:slug/deploys.");
@@ -360,20 +385,32 @@ export async function finalizeDeploy(dc: DropwayContext, p: Principal, site: Sit
       missing: missingRows.map((r) => r.sha256),
     });
   }
+  const { results: files } = await dc.env.DB.prepare("SELECT path, sha256, size, content_type AS contentType FROM version_files WHERE version_id = ?").bind(version.id).all<NormalisedEntry>();
+  validateManifest(files, await dc.adapters.policy.limits(p, siteOwner(site), dc));
+  await validateStoredSizes(dc, site, files);
+  const newBytes = site.mode === "transfer" ? 0 : await incrementalBytes(dc, site.tenant_id, site.id, files);
+  const storageQuota = await requireQuota(dc, p, "storage_bytes", siteOwner(site), (await getUsage(dc, site.tenant_id)).storage_bytes, newBytes);
   const now = Date.now();
-  const [, upd] = await dc.env.DB.batch([
-    dc.env.DB.prepare("UPDATE versions SET status = 'ready', finalized_at = ? WHERE id = ? AND status = 'pending'").bind(now, version.id),
-    // The base check sits inside the same transaction as the pointer flip.
+  const [upd] = await dc.env.DB.batch([
+    // Check quota and base against transaction-local state; parallel pending deploys reserve no storage.
     dc.env.DB.prepare(
       `UPDATE sites SET current_version_id = ?, updated_at = ?
-        WHERE id = ? AND deleted_at IS NULL AND (? IS NULL OR current_version_id IS ?)`,
-    ).bind(version.id, now, site.id, version.base_version_id, version.base_version_id),
+        WHERE id = ? AND tenant_id IS ? AND deleted_at IS NULL AND (? IS NULL OR current_version_id IS ?)
+          AND EXISTS (SELECT 1 FROM versions WHERE id = ? AND status = 'pending')
+          AND (? IS NULL OR (${PROJECTED_STORAGE_SQL}) <= ?)`,
+    ).bind(version.id, now, site.id, site.tenant_id, version.base_version_id, version.base_version_id,
+      version.id, storageQuota, site.tenant_id, site.id, version.id, storageQuota),
+    dc.env.DB.prepare(`UPDATE versions SET status = 'ready', finalized_at = ? WHERE id = ? AND status = 'pending'
+      AND EXISTS (SELECT 1 FROM sites WHERE id = ? AND current_version_id = ? AND updated_at = ? AND deleted_at IS NULL)`)
+      .bind(now, version.id, site.id, version.id, now),
+    ...usageStatements(dc, site.tenant_id),
   ]);
   if (!upd?.meta.changes) {
-    // Roll the version back to pending so it can be retried after reconciling.
-    await dc.env.DB.prepare("UPDATE versions SET status = 'pending', finalized_at = NULL WHERE id = ?").bind(version.id).run();
-    const fresh = await dc.env.DB.prepare("SELECT * FROM sites WHERE id = ?").bind(site.id).first<SiteRow>();
-    if (!fresh || fresh.deleted_at) throw notFound("site_not_found", `Site ${site.slug} was deleted.`);
+    const fresh = await getSiteFor(dc, p, site.slug, "sites:write");
+    const latest = await getVersion(dc, site.id, version.id);
+    if (latest?.status === "ready") return { version: latest, replayed: true, live: latest.id === fresh.current_version_id, warnings: [] as Warning[] };
+    if (version.base_version_id && fresh.current_version_id !== version.base_version_id) throw versionConflict(fresh);
+    if (storageQuota !== null) throw quotaExceeded("storage_bytes", storageQuota);
     throw versionConflict(fresh);
   }
   await refreshLive(dc, site.id);
@@ -453,7 +490,8 @@ export async function restoreVersion(dc: DropwayContext, p: Principal, site: Sit
 }
 
 /** Permanently delete one non-live version (for example one that leaked a secret). */
-export async function deleteVersion(dc: DropwayContext, site: SiteRow, versionId: string) {
+export async function deleteVersion(dc: DropwayContext, p: Principal, site: SiteRow, versionId: string) {
+  site = await getSiteFor(dc, p, site.slug, "sites:delete");
   if (site.mode === "transfer") throw conflict("transfer_immutable", "Transfer files cannot be deleted separately.", "Revoke the transfer; retained bytes are purged by cleanup when not held.");
   const version = await getVersion(dc, site.id, versionId);
   if (!version) throw notFound("version_not_found", `No version ${versionId} on site ${site.slug}.`);
@@ -461,6 +499,7 @@ export async function deleteVersion(dc: DropwayContext, site: SiteRow, versionId
   await dc.env.DB.batch([
     dc.env.DB.prepare("DELETE FROM version_files WHERE version_id = ?").bind(version.id),
     dc.env.DB.prepare("DELETE FROM versions WHERE id = ?").bind(version.id),
+    ...usageStatements(dc, site.tenant_id),
   ]);
   return { deleted: true, id: version.id };
 }

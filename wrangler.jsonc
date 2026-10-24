@@ -40,6 +40,6 @@
   "analytics_engine_datasets": [
     { "binding": "ANALYTICS", "dataset": "dropway_hits" }
   ],
-  // Hourly cleanup: expired anonymous sites, abandoned uploads, unreferenced files.
-  "triggers": { "crons": ["17 * * * *"] }
+  // Hourly cleanup; nightly usage true-up and storage snapshots (UTC).
+  "triggers": { "crons": ["17 * * * *", "0 0 * * *"] }
 }

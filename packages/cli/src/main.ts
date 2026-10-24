@@ -674,8 +674,9 @@ const apiCmd: Command = {
       }
     }
     if (operationId) {
-      const { data: catalog } = await client.get<{ operations: { id: string; method: string; path: string }[] }>("/operations");
-      const operation = catalog.operations.find((entry) => entry.id === operationId);
+      const catalog = await client.get<{ operations: { id: string; method: string; path: string }[] }>("/operations")
+        .then((result) => result.data).catch(() => null);
+      const operation = catalog?.operations?.find((entry) => entry.id === operationId);
       if (!operation) {
         // Preserve the original `api sites` shorthand for GET /sites.
         method = "GET";
