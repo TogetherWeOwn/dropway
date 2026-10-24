@@ -28,11 +28,13 @@
 //            deltas of 2/255 or less, rasteriser rounding on anti-aliased edges, are reported as noise)
 // Extra passes: every screen in Light at 320 px (reflow), forced colours (G12: axe and focus) on J15, J16,
 // J53 and J57, and the switch itself (G13: no-script POST, in-place switch with the script, keyboard,
-// persistence across a reload).
+// persistence across a reload, and an explicit mode kept when someone follows a link inside the app viewer's
+// frame).
 // Explicit modes use the __Host-dw_theme cookie on the app origin and ?theme= on site origins; Auto uses
 // the emulated prefers-color-scheme and no cookie.
 //
-// Usage: node packages/server/test/e2e-design/shots.mjs --out <dir> [--only J03,J08] [--widths 390,1440] [--modes light,dark] [--no-extra]
+// Usage: node packages/server/test/e2e-design/shots.mjs --out <dir> [--only J03,J08] [--widths 390,1440] [--modes light,dark] [--no-extra] [--switch]
+// (--switch runs the G13 switch checks with a selection too; a full run always does.)
 // Browser: CHROME_PATH, default the cached Playwright headless shell.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -618,7 +620,7 @@ async function main() {
       }),
     );
     for (const job of main.filter((x) => x.mutates).flatMap(jobsFor)) await runOne(job);
-    if (EXTRA && !ONLY) checks.themeSwitch = await themeSwitchChecks(browser, mf, fx);
+    if ((EXTRA && !ONLY) || args.includes("--switch")) checks.themeSwitch = await themeSwitchChecks(browser, mf, fx);
     if (separate.length) {
       pathWorker = await startFreshWorker((dir) => startWorker(dir, { SITES_MODE: "path", SITES_DOMAIN: "", SITES_ORIGIN: SEPARATE }));
       const pathFx = await seed(pathWorker.mf, pathWorker.db);
@@ -805,6 +807,68 @@ async function themeSwitchChecks(browser, mf, fx) {
       record("keyboard", focused === "light" && after === null && (await page.evaluate(() => window.__marker === 2)), { focused, cookie: after });
     } catch (e) {
       record("in-place", false, String(e).slice(0, 300));
+    } finally {
+      await context.close();
+    }
+  }
+  // 3. An explicit mode survives navigation inside the app viewer's frame: explicit Dark with the OS light,
+  //    open a folder, click a file in the framed listing; the file must paint dark, embedded (no second
+  //    viewer bar, header or wordmark inside the app).
+  {
+    const context = await browser.newContext(ctxOpts);
+    await context.route("**/*", async (route) => {
+      const req = route.request();
+      const url = req.url();
+      if (!/^https:\/\/([a-z0-9-]+\.)?kofra(-sites|-separate)?\.test\//.test(url)) return route.abort();
+      const body = req.postDataBuffer();
+      const res = await mf.dispatchFetch(url, { method: req.method(), headers: await req.allHeaders(), body: body && req.method() !== "GET" && req.method() !== "HEAD" ? body : undefined, redirect: "manual" });
+      const location = res.headers.get("location");
+      // As in the matrix: a redirected navigation continues through a meta refresh (a new, routed request).
+      if (location && res.status >= 300 && res.status < 400 && req.isNavigationRequest()) {
+        const to = new URL(location, url).href.replace(/[&"<>]/g, (c) => ({ "&": "&amp;", '"': "&quot;", "<": "&lt;", ">": "&gt;" })[c]);
+        return route.fulfill({ status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }, body: `<!doctype html><meta http-equiv="refresh" content="0;url=${to}">` });
+      }
+      const headers = {};
+      res.headers.forEach((v, k) => {
+        headers[k] = v;
+      });
+      await route.fulfill({ status: res.status, headers, body: Buffer.from(await res.arrayBuffer()) });
+    });
+    await context.addCookies([{ name: "__Host-dw_theme", value: "dark", url: `${APP}/`, secure: true, sameSite: "Lax" }]);
+    await context.addInitScript((key) => location.hostname === "kofra.test" && sessionStorage.setItem("dropway.key", key), fx.owner);
+    const page = await context.newPage();
+    // The framed page Kofra drew at `path`, once it has settled (no meta refresh hop left).
+    const framed = async (path) => {
+      for (let i = 0; i < 100; i++) {
+        for (const f of page.frames()) {
+          if (f === page.mainFrame()) continue;
+          const u = new URL(f.url(), "https://x.invalid");
+          if (u.hostname !== site("fx-site").replace(/^https:\/\//, "").replace(/\/$/, "") || u.pathname !== path) continue;
+          const ok = await f.evaluate(() => document.readyState === "complete" && !document.querySelector('meta[http-equiv="refresh"]') && !!document.body).catch(() => false);
+          if (ok) return f;
+        }
+        await page.waitForTimeout(100);
+      }
+      return null;
+    };
+    const facts = (f) =>
+      f.evaluate(() => ({
+        url: location.pathname + location.search,
+        theme: document.documentElement.getAttribute("data-theme"),
+        bg: getComputedStyle(document.body).backgroundColor,
+        bars: document.querySelectorAll(".k-vbar, .k-sitehead, .k-foot").length,
+      }));
+    try {
+      await page.goto(`${APP}/v/fx-site/docs/`);
+      const listing = await framed("/docs/");
+      const before = listing ? await facts(listing) : null;
+      if (listing) await listing.click('a.k-fname:text-is("api.md")');
+      const file = await framed("/docs/api.md");
+      const after = file ? await facts(file) : null;
+      const good = (x) => !!x && x.theme === "dark" && x.bg === PAPER.dark && x.bars === 0;
+      record("frame-nav", good(before) && good(after), { before, after });
+    } catch (e) {
+      record("frame-nav", false, String(e).slice(0, 300));
     } finally {
       await context.close();
     }

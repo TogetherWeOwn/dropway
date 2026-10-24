@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { THEME_COOKIE } from "@dropway/server";
 import { accountArea, appChrome, identityTag } from "../packages/server/src/ui/chrome";
+import { APP_CSS, SITE_CSS } from "../packages/server/src/ui/design.generated";
 import { carryDocLinks, carryLink } from "../packages/server/src/viewers/links";
 import { form, freshInstance } from "./helpers";
 
@@ -163,5 +164,26 @@ describe("viewer details", () => {
     const { call } = await siteFixture({ "d.json": '{"a":1}', "p.html": "<p>x</p>" });
     expect(await (await call("/d.json")).text()).toContain('<div class="dw-jtabs k-seg" role="group"');
     expect(await (await call("/p.html?view=1")).text()).toContain('<a class="k-btn k-sm k-ghost" href="/p.html" rel="nofollow" title="Open the page without the bar">Open</a>');
+  });
+});
+
+describe("design system rules the judges found broken", () => {
+  it("state kickers are accent-2 Martian Mono in both bundles, in end states and in panels (the cascade once greyed them)", () => {
+    for (const css of [APP_CSS, SITE_CSS]) {
+      expect(css).toContain(".k-state-code,.k-state .k-state-code{font:500 12px/1.3 var(--mono);letter-spacing:.11em;text-transform:uppercase;color:var(--accent-2)}");
+      // Nothing more specific recolours it afterwards.
+      expect(css.slice(css.indexOf(".k-state .k-state-code{"))).not.toMatch(/\.k-state-code[^{,]*\{[^}]*color:var\(--ink/);
+    }
+  });
+
+  it("the dialog scrim darkens in both modes: it mixes the shadow token, never the ink (near-white in Midnight)", () => {
+    for (const css of [APP_CSS, SITE_CSS]) {
+      expect(css).toContain("--scrim:color-mix(in srgb,var(--shadow) 50%,transparent)");
+      expect(css).not.toMatch(/--scrim:color-mix\(in srgb,var\(--ink\)/);
+    }
+  });
+
+  it("the site bundle keeps its budget after this round", () => {
+    expect(SITE_CSS.length).toBeLessThanOrEqual(24576);
   });
 });
