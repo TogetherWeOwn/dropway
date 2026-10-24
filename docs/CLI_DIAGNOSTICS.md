@@ -78,7 +78,7 @@ Key, highest precedence first:
 | # | Kind | Detail (closed set) |
 |---|------|---------------------|
 | 1 | `flag` | `--key` |
-| 2 | `env` | `KOFRA_API_KEY` (possibly filled from `DROPWAY_API_KEY`) |
+| 2 | `env` | `KOFRA_API_KEY` (possibly filled from `DROPWAY_API_KEY`) <!-- rebrand:keep --> |
 | 3 | `saved` | `credentials.json` entry for the effective API origin |
 
 Rules:
@@ -89,8 +89,15 @@ Rules:
   reported as shadowed, never consulted, and their values are not
   validated. This mirrors `resolveInstance`, which normalizes the first
   present value and throws.
-- Empty string is absent everywhere (matches the resolver's `||`
-  chaining and the legacy merge below).
+- Empty string is absent for env and for every key source, but
+  present-but-empty for API flag/link/default sources. The resolver
+  chains env with `||` and tests keys with truthiness, so empty values
+  there fall through; it chains the API flag, link and default with
+  `??`, so an empty `--api`, an empty link `api` and an empty saved
+  default each *win* and then fail resolution with `no_instance`
+  (`main.ts:128-136`; `str()` returns `""` for `--api ""`). The
+  diagnostic mirrors this exactly: it reports the empty winner plus
+  `api.empty_value`, never a fall-through.
 - Legacy names: `DROPWAY_*` fills an unset or empty `KOFRA_*` twin
   (`withLegacyEnv` in `packages/cli/src/legacy-brand.ts`). The output
   names the literal winning variable and sets `viaLegacyName: true`
@@ -117,12 +124,15 @@ and classified as one of:
 
 Value sources (flag, env, `link.api`, saved default) classify as:
 
-- `absent`: unset or empty.
+- `absent`: unset; or empty for env values and for every key source.
 - `valid`: present and accepted (API values must pass origin
   normalization; any non-empty key counts as present — key format is
   not validated offline).
 - `invalid`: present but rejected (API values that fail normalization).
   The rejected input is never echoed.
+- `empty`: present-but-empty API flag, link `api` or saved default.
+  Resolution fails with `no_instance`, exactly as the resolver does;
+  lower sources are shadowed, never consulted.
 
 ## JSON contract
 
@@ -148,7 +158,7 @@ illustrative but bound by the same redaction rules.
     "source": { "kind": "saved" },    // flag | env | saved | null
     "kind": "api_key"                 // api_key (dw_…) | claim_token (dwc_…) | other | null
   },
-  "configDir": { "selector": "default", "path": "~/.config/dropway" },
+  "configDir": { "selector": "default", "viaLegacyName": false, "path": "~/.config/dropway" },
   "credentialsFile": {
     "state": "valid", "detail": null,
     "defaultPresent": true, "instanceCount": 2,
@@ -174,8 +184,19 @@ Field rules:
 - `source.detail` for flags is the literal flag (`--api`, `--key`); for
   env it is the literal variable name from the closed set above; for
   `project`, `default` and `saved` it is `null`.
-- `configDir.selector` is one of `KOFRA_CONFIG_DIR`, `XDG_CONFIG_HOME`,
-  `APPDATA`, `default`, matching `configDir()` precedence.
+- `projectLink.apiMatchesEffective` is raw string equality between
+  `link.api` and the effective origin, mirroring `publish`
+  (`main.ts:300`), not normalized equality. A link whose `api`
+  normalizes to the effective origin but carries trimmable parts still
+  reports `false`, and its mappings are ignored, exactly as `publish`
+  behaves today.
+- `configDir.selector` names the literal winning variable: one of
+  `KOFRA_CONFIG_DIR`, `DROPWAY_CONFIG_DIR`, `XDG_CONFIG_HOME`, <!-- rebrand:keep -->
+  `APPDATA`, `default`, matching `configDir()` precedence. `run()`
+  merges env with the generic legacy rule before commands read it, so
+  `DROPWAY_CONFIG_DIR` fills `KOFRA_CONFIG_DIR` exactly like the API <!-- rebrand:keep -->
+  twins; when it does, the selector is `DROPWAY_CONFIG_DIR` with <!-- rebrand:keep -->
+  `viaLegacyName: true`.
 - Every string is capped at 1024 characters; longer values are cut with
   a `[…truncated]` marker. `checks` holds at most 32 entries (the
   closed ID set below cannot reach that; the cap is a backstop).
@@ -194,6 +215,7 @@ real values) or `null`. Hints and templates contain no caller values.
 |----|----------|------|------|-----------------------|
 | `api.selected` | info | `source_selected` | an API source won | null |
 | `api.unconfigured` | error | `no_instance` | no API source present | `kofra login --api https://<your-instance>` |
+| `api.empty_value` | error | `empty_value` | the winning flag/link/default source is set but empty, so resolution fails with `no_instance` exactly as the resolver does (no fall-through) | `Unset the empty source or pass --api https://<your-instance>.` |
 | `api.invalid_value` | error | `invalid_api_url` | the winning value failed normalization | `Pass --api https://<your-instance>.` |
 | `api.value_trimmed` | info | `input_trimmed` | normalization dropped `userinfo`, `path`, `query` or `fragment` (listed in `removed`) | `Use the bare origin https://<host>.` |
 | `api.source_shadowed` | info | `source_shadowed` | a lower source was set but not consulted | null |
@@ -204,7 +226,7 @@ real values) or `null`. Hints and templates contain no caller values.
 | `credentials_file.unreadable` | error | `unreadable_credentials` | see States (`detail` set) | `Check the permissions of <path>.` |
 | `project_link.malformed` | error | `malformed_project_link` | see States (`detail` set) | `Delete or fix ./dropway.json.` |
 | `project_link.unreadable` | error | `unreadable_project_link` | see States (`detail` set) | `Check the permissions of ./dropway.json.` |
-| `project_link.foreign_instance` | warning | `foreign_project_link` | link `api` is valid but differs from the effective origin, so its mappings are ignored | `Publish once with --api <effective-origin> --new, or remove ./dropway.json.` |
+| `project_link.foreign_instance` | warning | `foreign_project_link` | link `api` is valid but raw-unequal to the effective origin, so its mappings are ignored (comparison mirrors `publish`: raw string equality, `main.ts:300`, not normalized equality; a self-link with trimmable parts also mismatches) | `Publish once with --api <effective-origin> --new, or remove ./dropway.json.` |
 | `project_link.mapping_missing` | info | `mapping_missing` | `[path]` given and the link has no entry for it | null |
 | `project_link.mapping_found` | info | `mapping_found` | `[path]` given and an entry exists | null |
 | `env.legacy_shadowed` | info | `source_shadowed` | a `DROPWAY_*` twin was set but its `KOFRA_*` twin won | null |
@@ -233,11 +255,17 @@ never echoed. In particular:
   port; userinfo, path, query and fragment are dropped) and invalid
   inputs are described by code only. Only normalized credential-free
   origins and source kinds appear.
-- Never emit token-shaped substrings anywhere in stdout or stderr. The
-  implementation reuses the existing credential-pattern list
-  (`SECRET_PATTERNS` in `packages/cli/src/secrets.ts`, which already
-  reports kind and location, never values) as the verification sweep:
-  the future test asserts that no pattern matches any output byte.
+- Never emit token-shaped substrings anywhere in stdout or stderr.
+  The sufficient pin is canary-substring absence: the future test
+  plants synthetic secrets of every key kind (including `other`-shaped
+  values with no fixed prefix, which no pattern can match) and asserts
+  each planted substring is absent from every output byte. The
+  existing credential-pattern list (`SECRET_PATTERNS` in
+  `packages/cli/src/secrets.ts`, which already reports kind and
+  location, never values) is only a necessary backstop sweep: the
+  future test also asserts that no pattern matches any output byte,
+  but a passing sweep alone never proves the absence of an
+  `other`-shaped leak.
 - Paths are emitted with the home directory collapsed to `~` (user
   profile on Windows), so diagnostics pasted into tickets do not leak
   usernames. Precedent commands print raw paths; this command is held
@@ -251,9 +279,11 @@ never echoed. In particular:
   contract forbids.
 
 Fixture rule for tests: fixtures are synthetic values generated for the
-test (for example `dw_test_…` canaries that match the real prefixes).
-Never use a real credential, and assert each canary is absent from the
-output bytes.
+test. Plant at least one canary per key kind: `dw_test_…` and
+`dwc_test_…` canaries that match the real prefixes, plus an
+`other`-shaped secret with no fixed prefix (for example a random
+alphanumeric string). Never use a real credential, and assert each
+canary substring is absent from the output bytes.
 
 ## Offline and read-only (normative)
 
@@ -284,8 +314,12 @@ each one with a sentinel:
 |------|----------|---------|
 | 0 | `ready` | an API origin resolved and a key was selected |
 | 3 | `needs_key` | an API origin resolved, no key selected |
-| 2 | `unconfigured` | no API origin resolved, or argv failed to parse |
+| 2 | `unconfigured` | no API origin resolved |
 | 1 | — | unexpected internal failure only; never a diagnosed state |
+
+Argument-parsing failures also exit 2, but they keep the standard
+error envelope (`{ok: false, exitCode, error}`), which carries no
+`status` field. Only diagnosed outcomes carry `status`.
 
 Exits 4–8 are unreachable: there is no server contact. The `exitCode`
 is echoed in JSON so piped output stays interpretable.
@@ -312,9 +346,12 @@ normative.
   commands automatically, that output must link here, not copy the
   schema.
 - The check an agent runs: `kofra explain-config --json` and branch on
-  `exitCode` / `status` / `checks[].severity`. Zero means "a following
-  authenticated command has what it needs"; anything else names the
-  blocker and the fix.
+  `exitCode` / `status` / `checks[].severity`. Exit 0 asserts presence,
+  not authorization: an API origin resolved and a key-shaped value was
+  selected, but the key may be invalid, unscoped or a claim token that
+  member-only commands refuse. Anything else names the configuration
+  blocker and the fix; agents must still handle 401/403 from the real
+  command.
 
 ## Future acceptance matrix
 
@@ -325,12 +362,12 @@ config dir via `KOFRA_CONFIG_DIR`, synthetic cwd, controlled env):
 |---|------|--------|
 | 1 | `--api` set plus env, link and default | exit per key state; `api.selected` source `flag`; one `api.source_shadowed` per lower set source |
 | 2 | `KOFRA_API` plus `KOFRA_URL` | `KOFRA_API` wins; `KOFRA_URL` shadowed |
-| 3 | only `DROPWAY_API` set | wins with `viaLegacyName: true` |
-| 4 | `KOFRA_API` plus `DROPWAY_API` | `KOFRA_API` wins; `env.legacy_shadowed` info |
+| 3 | only `DROPWAY_API` set | wins with `viaLegacyName: true` <!-- rebrand:keep --> |
+| 4 | `KOFRA_API` plus `DROPWAY_API` | `KOFRA_API` wins; `env.legacy_shadowed` info <!-- rebrand:keep --> |
 | 5 | empty-string env values | treated as absent |
 | 6 | link `api` plus saved default | link wins; default shadowed |
 | 7 | valid link `api` differing from effective origin | `project_link.foreign_instance` warning; mappings ignored |
-| 8 | nothing set anywhere | exit 2, `status: unconfigured`, `api.unconfigured` error |
+| 8 | nothing set anywhere | exit 2, `status: unconfigured`, `api.unconfigured` error; unknown flags also exit 2 but keep the error envelope with no `status` |
 | 9 | winning `--api` invalid, valid env present | exit 2 `invalid_api_url` on the flag; env shadowed, not consulted |
 | 10 | `credentials.json` with invalid JSON | `credentials_file.malformed` (`invalid_json`); key falls through; exit follows the effective outcome |
 | 11 | `credentials.json` valid JSON, wrong shape | `malformed` with `invalid_shape` (resolver behavior unchanged) |
@@ -338,7 +375,7 @@ config dir via `KOFRA_CONFIG_DIR`, synthetic cwd, controlled env):
 | 13 | `dropway.json` malformed / unreadable | matching `project_link.*` error checks |
 | 14 | key precedence flag over env over saved; kinds `dw_` / `dwc_` / other | `key.selected` with the right source and kind; `key.kind_noted` for non-`dw_` |
 | 15 | API resolved, no key anywhere | exit 3, `status: needs_key`, `key.absent` error |
-| 16 | credential-shaped canaries planted in both files | no `SECRET_PATTERNS` match in any output byte; canary substrings absent |
+| 16 | canaries of every key kind planted (`dw_test_…`, `dwc_test_…`, prefix-less `other` secret) | no `SECRET_PATTERNS` match in any output byte; every canary substring absent |
 | 17 | `--api` with userinfo, path, query, fragment | origin emitted; `api.value_trimmed` lists each removed part; no input echo |
 | 18 | hostile schemes (`javascript:`, `ftp:`, `file:`), control characters | `invalid`, exit 2 |
 | 19 | 8 KB URL, unicode/IDN host, padded whitespace | bounded output (≤1024 chars per string, truncation marker); normalized origin |
@@ -349,6 +386,10 @@ config dir via `KOFRA_CONFIG_DIR`, synthetic cwd, controlled env):
 | 24 | determinism: two consecutive runs | byte-identical stdout; no `savedAt`, no timestamps |
 | 25 | no-prompt: stdin closed, stdout piped | exits promptly; stderr carries no prompt |
 | 26 | JSON conformance | parses; `schema` exact; `checks` within bounds and ID set; unknown IDs ignored by the consumer test |
+| 27 | empty `--api ""` with valid env present | exit 2 `no_instance` on the flag plus `api.empty_value`; env shadowed, not consulted |
+| 28 | empty `--key ""` with valid env key present | flag falls through (truthiness); env key selected |
+| 29 | link `api` with trimmable suffix normalizing to the effective origin | `apiMatchesEffective: false`, mappings ignored, `foreign_instance` warning (mirrors `publish` string equality) |
+| 30 | only `DROPWAY_CONFIG_DIR` set | `configDir.selector` is `DROPWAY_CONFIG_DIR` with `viaLegacyName: true` <!-- rebrand:keep --> |
 
 ## Security-review questions
 
