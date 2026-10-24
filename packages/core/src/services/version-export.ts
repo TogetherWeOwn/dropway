@@ -1,9 +1,10 @@
 import { strToU8 } from "fflate";
 import type { DropwayContext } from "../context";
-import { ApiError, forbidden, tooLarge } from "../errors";
+import { ApiError, conflict, forbidden, tooLarge } from "../errors";
 import type { Principal } from "../principal";
-import { readBlob } from "./blobs";
+import { blobScope, readBlob } from "./blobs";
 import { getSiteByRef, resolveVersionRef } from "./site-ops";
+import type { SiteRow, VersionRow } from "./sites";
 
 /**
  * Exact version bytes as a ZIP (VERSION-ZIP). One version's served manifest
@@ -44,6 +45,8 @@ const ZIP_METHOD_STORE = 0;
 const ZIP_VERSION_NEEDED = 10;
 /** Classic ZIP (no zip64) counts entries in 16 bits; the file-count cap never exceeds it. */
 const MAX_ZIP_ENTRIES = 0xffff;
+/** Classic ZIP (no zip64) stores sizes and offsets in 32 bits; total bytes never exceed it. */
+const MAX_ZIP_BYTES = 0xffffffff;
 
 const CRC_TABLE: Uint32Array = (() => {
   const table = new Uint32Array(256);
@@ -134,12 +137,17 @@ async function readExportBytes(dc: DropwayContext, file: ExportFile): Promise<Ui
   return new Uint8Array(await new Response(blob.body).arrayBuffer());
 }
 
+interface ZipEntry extends ExportFile {
+  /** UTF-8 entry name, encoded once up front (also sizes the archive pre-stream). */
+  name: Uint8Array;
+}
+
 /**
- * A pull-driven ZIP stream over already-sorted manifest files. Each pull reads
+ * A pull-driven ZIP stream over already-sorted manifest entries. Each pull reads
  * at most one blob and emits that entry, so the first ZIP bytes flow before
  * later blobs are read and each blob is read exactly once.
  */
-function zipStream(dc: DropwayContext, files: ExportFile[]): ReadableStream<Uint8Array> {
+function zipStream(dc: DropwayContext, entries: ZipEntry[]): ReadableStream<Uint8Array> {
   const central: CentralEntry[] = [];
   let index = 0;
   let offset = 0;
@@ -147,16 +155,15 @@ function zipStream(dc: DropwayContext, files: ExportFile[]): ReadableStream<Uint
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       if (finished) return;
-      if (index < files.length) {
-        const file = files[index++]!;
-        const bytes = await readExportBytes(dc, file);
+      if (index < entries.length) {
+        const entry = entries[index++]!;
+        const bytes = await readExportBytes(dc, entry);
         const crc = crc32(bytes);
-        const name = strToU8(file.path);
-        controller.enqueue(localHeader(name, crc, bytes.length));
-        controller.enqueue(name);
+        controller.enqueue(localHeader(entry.name, crc, bytes.length));
+        controller.enqueue(entry.name);
         if (bytes.length) controller.enqueue(bytes);
-        central.push({ name, crc, size: bytes.length, offset });
-        offset += 30 + name.length + bytes.length;
+        central.push({ name: entry.name, crc, size: bytes.length, offset });
+        offset += 30 + entry.name.length + bytes.length;
         return;
       }
       const dirOffset = offset;
@@ -177,6 +184,31 @@ const fileByFileHint = (slug: string, versionId: string) =>
   `Download file by file instead: list the manifest with list_files (GET /api/v1/sites/${slug}/files?version=${versionId}) and read each file with read_file or GET /api/v1/sites/${slug}/files/{path}.`;
 
 /**
+ * Refuse a pending version whose bytes are not all uploaded yet, with the same
+ * D1-only missing check finalize uses (no blob reads, so streaming is
+ * unaffected). Without it the export would start with 200 and die mid-stream.
+ */
+async function refusePendingWithMissingBytes(dc: DropwayContext, site: SiteRow, version: VersionRow): Promise<void> {
+  const scope = blobScope({ siteId: site.id, tenantId: site.tenant_id });
+  const { results: missingRows } = await dc.env.DB.prepare(
+    `SELECT DISTINCT vf.sha256 FROM version_files vf
+       LEFT JOIN blob_scopes bs ON bs.sha256 = vf.sha256 AND bs.scope = ?
+       LEFT JOIN blobs b ON b.sha256 = vf.sha256
+      WHERE vf.version_id = ? AND (bs.sha256 IS NULL OR b.sha256 IS NULL) LIMIT 200`,
+  )
+    .bind(scope, version.id)
+    .all<{ sha256: string }>();
+  if (missingRows.length) {
+    throw conflict(
+      "missing_blobs",
+      `Version v${version.number} of "${site.slug}" still awaits ${missingRows.length} upload(s).`,
+      "Upload the missing bytes and finalize the version, then export again.",
+      { missing: missingRows.map((r) => r.sha256) },
+    );
+  }
+}
+
+/**
  * Resolve a site plus a version ref ("live", "vN", "N" or an id) to a
  * streaming ZIP export. Auth equals version-read auth; transfer slugs are
  * refused (versions only, never transfers). Over-cap versions answer 413
@@ -188,6 +220,7 @@ export async function exportVersionZip(dc: DropwayContext, p: Principal, siteRef
     throw forbidden("Transfer files are only available as sites-host downloads.", "Use the transfer page's download links.", "transfer_download_required");
   }
   const version = await resolveVersionRef(dc, site, versionRef);
+  if (version.status === "pending") await refusePendingWithMissingBytes(dc, site, version);
   const { results } = await dc.env.DB.prepare("SELECT path, sha256, size FROM version_files WHERE version_id = ? ORDER BY path")
     .bind(version.id)
     .all<ExportFile>();
@@ -195,12 +228,17 @@ export async function exportVersionZip(dc: DropwayContext, p: Principal, siteRef
   const files = [...results].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const fileCount = files.length;
   const totalBytes = files.reduce((n, f) => n + f.size, 0);
+  const entries: ZipEntry[] = files.map((f) => ({ ...f, name: strToU8(f.path) }));
+  // Exact archive size: file bytes plus 30 + name per local entry, 46 + name
+  // per central entry, and the 22-byte end record. The format ceiling gates
+  // this, not the manifest total, so near-4 GiB versions cannot wrap offsets.
+  const archiveBytes = totalBytes + entries.reduce((n, e) => n + 76 + 2 * e.name.length, 0) + 22;
   const lim = await dc.adapters.policy.limits(p, { tenantId: site.tenant_id, siteId: site.id }, dc);
   const countLimit = Math.min(lim.maxFiles, MAX_ZIP_ENTRIES);
   if (fileCount > countLimit) {
     throw tooLarge(
       "export_too_many_files",
-      `Version v${version.number} of "${site.slug}" holds ${fileCount} files (${totalBytes} bytes); a ZIP export covers at most ${countLimit} files.`,
+      `Version v${version.number} of "${site.slug}" holds ${fileCount} files (${totalBytes} bytes); a ZIP export covers at most ${countLimit} files${countLimit < lim.maxFiles ? " (classic ZIP counts entries in 16 bits)" : ""}.`,
       fileByFileHint(site.slug, version.id),
       { fileCount, totalBytes, limit: countLimit },
     );
@@ -213,6 +251,14 @@ export async function exportVersionZip(dc: DropwayContext, p: Principal, siteRef
       { fileCount, totalBytes, limit: lim.maxSiteBytes },
     );
   }
+  if (archiveBytes > MAX_ZIP_BYTES) {
+    throw tooLarge(
+      "export_too_large",
+      `Version v${version.number} of "${site.slug}" holds ${fileCount} files (${totalBytes} bytes); its ZIP archive would pass the classic ZIP 32-bit ceiling of ${MAX_ZIP_BYTES} bytes (no zip64).`,
+      fileByFileHint(site.slug, version.id),
+      { fileCount, totalBytes, limit: MAX_ZIP_BYTES },
+    );
+  }
   return {
     slug: site.slug,
     versionId: version.id,
@@ -220,6 +266,6 @@ export async function exportVersionZip(dc: DropwayContext, p: Principal, siteRef
     filename: `${site.slug}-v${version.number}.zip`,
     fileCount,
     totalBytes,
-    stream: zipStream(dc, files),
+    stream: zipStream(dc, entries),
   };
 }

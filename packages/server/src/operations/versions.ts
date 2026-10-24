@@ -145,7 +145,7 @@ export const VERSION_OPERATIONS = [
     toolset: "versions",
     scopes: ["sites:read"],
     description:
-      'Stream one version ("live", "v3", "3" or an id) as a deterministic ZIP of exactly its served manifest bytes: entries stored uncompressed and sorted by path, one fixed timestamp, no data descriptors. Answers 413 when the version exceeds the effective file-count or byte caps. Binary payload: download it with REST or `kofra api`.',
+      'Stream one version ("live", "v3", "3" or an id) as a deterministic ZIP of exactly its served manifest bytes: entries stored uncompressed and sorted by path, one fixed timestamp, no data descriptors. Answers 413 when the version exceeds the effective file-count or byte caps. Binary payload: download it over REST (for example curl).',
     input: fromSchema({
       type: "object",
       properties: { site: SITE_REF, version: VERSION_REF },
@@ -155,7 +155,7 @@ export const VERSION_OPERATIONS = [
     output: fromSchema({ type: "object", additionalProperties: true }),
     annotations: RO,
     mcp: {
-      exclude: "Binary ZIP bytes never pass through the model; download the export with REST (GET /api/v1/sites/{slug}/versions/{version}/export) or `kofra api`.",
+      exclude: "Binary ZIP bytes never pass through the model; download the export over REST (GET /api/v1/sites/{slug}/versions/{version}/export), for example with curl.",
     },
     http: {
       input: fromSchema({
