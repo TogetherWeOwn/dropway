@@ -3,6 +3,7 @@ import { abuseContactOf } from "../packages/core/src/config";
 import { appHeader } from "../packages/server/src/ui/chrome";
 import { CLIENT_SCRIPT } from "../packages/server/src/ui/assets";
 import { APP_CSS, SITE_CSS } from "../packages/server/src/ui/design.generated";
+import { urlCode } from "../packages/server/src/ui/code";
 import { CORE_FOOTER_LINKS } from "../packages/server/src/ui/shell";
 import { SOURCE_REPO } from "../packages/server/src/repo";
 import { form, freshInstance, ORIGIN } from "./helpers";
@@ -198,8 +199,10 @@ describe("Report abuse opens a page (it was a 404)", () => {
     const html = await res.text();
     expect(html).toContain('<p class="k-state-code">REPORT</p>');
     expect(html).toContain("<h1>Report this site</h1>");
-    expect(html).toContain(`<code>${url.origin}/</code>`);
-    expect(html).toContain("Tell the people who run");
+    // Fix round 4: the address is code.k-brk (it wraps only after "/" and before "."), and the sentence goes on
+    // in lower case after its comma.
+    expect(html).toContain(`<p>${urlCode(`${url.origin}/`)}</p>`);
+    expect(html).toContain("private data), tell the people who run");
   });
 
   it("with ABUSE_CONTACT an email address opens a prefilled email; an https URL is the report link", async () => {

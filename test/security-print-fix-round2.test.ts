@@ -118,7 +118,8 @@ describe("text never breaks inside a token", () => {
     expect(urlCode("https://SITE.kofra-sites.test/")).toBe('<code class="k-tok">https://SITE.kofra-sites.test/</code>');
     expect(urlCode("https://SITE.long-sites-domain.example.com/p/")).toBe('<code class="k-brk"><span>https://</span><wbr><span>SITE</span><wbr><span>.long-sites-domain</span><wbr><span>.example</span><wbr><span>.com/</span><wbr><span>p/</span></code>');
     expect(urlCode("npx skills add https://kofra.example.com")).toBe('<code class="k-brk"><span>npx</span> <span>skills</span> <span>add</span> <span>https://</span><wbr><span>kofra</span><wbr><span>.example</span><wbr><span>.com</span></code>');
-    expect(APP_CSS).toContain("code.k-tok,code.k-brk>span{white-space:nowrap}");
+    // Round 4: the parts stay whole wherever they sit in the code (a link inside it too), on both origins.
+    for (const css of [APP_CSS, SITE_CSS]) expect(css).toContain("code.k-tok,code.k-brk span{white-space:nowrap}");
   });
 
   it("inline code keeps its padding when it wraps and only breaks a token longer than the line", () => {

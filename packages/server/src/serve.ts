@@ -19,6 +19,7 @@ import {
   type LiveSite,
 } from "@dropway/core";
 import { escapeHtml, siteSystemCsp, systemPage } from "./html";
+import { urlCode } from "./ui/code";
 import { safeNext, themeOf } from "./ui/theme";
 import { findViewer, toViewerFile, VIEWER_CSP, VIEWERS, type ViewMode, type Viewer } from "./viewers";
 import { VIEWER_PAGE_VERSION } from "./viewers/chrome";
@@ -207,7 +208,7 @@ function reportPage(dw: DropwayContext, req: Request, mode: ServeMode, live: Liv
     : contact
       ? `<a class="k-btn" href="${escapeHtml(contact)}" rel="noopener">Report it</a>`
       : "";
-  const how = contact ? "Report it with its address:" : "Tell the people who run {app}, with its address:";
+  const how = contact ? "report it with its address:" : "tell the people who run {app}, with its address:";
   return systemResponse(
     dw,
     req,
@@ -217,7 +218,8 @@ function reportPage(dw: DropwayContext, req: Request, mode: ServeMode, live: Liv
     "REPORT",
     "Report this site",
     `Sites here are not reviewed before they go live. If this one is harmful (phishing, malware, someone's private data), ${how}`,
-    `<p><code>${escapeHtml(address)}</code></p>`,
+    // The address wraps only after "/" and before "." (code.k-brk), never at a hyphen inside the site's name.
+    `<p>${urlCode(address)}</p>`,
     primary,
   );
 }

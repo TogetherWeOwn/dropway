@@ -48,6 +48,9 @@ p{margin:0 0 var(--s3)}
 code,kbd,samp,pre{font-family:var(--mono);font-size:.86em;font-size-adjust:ch-width .7}
 /* Inline code wraps only when a token is longer than the line, and a wrapped fragment keeps its padding. */
 :not(pre)>code{background:var(--paper-3);color:var(--ink);padding:2px 6px;overflow-wrap:break-word;border-radius:2px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+/* A short token never wraps (ui/code.ts tok); a URL or command wraps only between its parts (urlCode), on app and
+   site-origin pages alike. */
+code.tok,code.brk span{white-space:nowrap}
 kbd{border:1px solid var(--edge);border-bottom-width:2px;border-radius:3px;padding:1px 5px;background:var(--surface)}
 summary{cursor:pointer;color:var(--accent)}
 input[type=checkbox],input[type=radio]{accent-color:var(--accent)}

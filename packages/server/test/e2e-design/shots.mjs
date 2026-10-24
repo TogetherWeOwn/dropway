@@ -34,9 +34,9 @@
 // Extra passes: every screen in Light at 320 px (reflow), every screen in Light at 1440 px with normal motion
 // (motion: the other cells run with reduced motion), forced colours (G12: axe and focus) on J15, J16, J53 and
 // J57, the switch itself (G13: no-script POST, in-place switch with the script, keyboard, persistence across a
-// reload, and an explicit mode kept when someone follows a link inside the app viewer's frame), and a
-// filmstrip (G7b): explicit modes loaded with the stylesheet and fonts held back, every painted frame captured
-// from the compositor (CDP screencast) and its dominant colour checked against the mode.
+// reload, an explicit mode kept when someone follows a link inside the app viewer's frame, and no switch while a
+// secret is shown once), and a filmstrip (G7b): explicit modes loaded with the stylesheet and fonts held back,
+// every painted frame captured from the compositor (CDP screencast) and its dominant colour checked against the mode.
 // Explicit modes use the __Host-dw_theme cookie on the app origin and ?theme= on site origins; Auto uses
 // the emulated prefers-color-scheme and no cookie.
 //
@@ -254,7 +254,8 @@ export default { fetch: worker.fetch, scheduled: worker.scheduled };`);
   return join(dir, "index.js");
 }
 
-async function startWorker(tmp, bindings = {}) {
+/** The core Worker in Miniflare (local D1, R2, KV; no network), migrated. Unit tests that drive a browser use it too. */
+export async function startWorker(tmp, bindings = {}) {
   const script = bundle(join(tmp, "bundle"));
   // Miniflare 5 takes the new options shape; the v4 shape (one worker) converts.
   const mf = new Miniflare(
@@ -877,6 +878,35 @@ async function themeSwitchChecks(browser, mf, fx) {
       record("in-place", false, String(e).slice(0, 300));
     } finally {
       await context.close();
+    }
+  }
+  // 2b. A secret shown once (DESIGN.md section 7, Mode switch): creating an API key hides the switch and marks the
+  //     header k-noswitch (as the server's switch-less pages are); the switch comes back when the key's block goes.
+  //     The key is revoked afterwards, so later checks see the keys as seeded.
+  {
+    const { context, page } = await open(true);
+    const state = () =>
+      page.evaluate(() => {
+        const form = document.getElementById("dw-mode");
+        return { shown: !!form && form.getClientRects().length > 0, noswitch: document.querySelector(".k-top").classList.contains("k-noswitch") };
+      });
+    try {
+      await page.goto(`${APP}/dashboard/keys`);
+      await page.waitForSelector("#dw-keys tbody tr");
+      const before = await state();
+      await page.fill("#dw-k-name", "harness switch key");
+      await page.click("text=Create key");
+      await page.waitForSelector("#dw-keys .k-keyout");
+      const during = await state();
+      await page.evaluate(() => document.querySelector("[data-once]").remove());
+      await page.waitForFunction(() => !document.getElementById("dw-mode").hidden, null, { timeout: 5000 }).catch(() => {});
+      const after = await state();
+      record("secret-once-no-switch", before.shown && !before.noswitch && !during.shown && during.noswitch && after.shown && !after.noswitch, { before, during, after });
+    } catch (e) {
+      record("secret-once-no-switch", false, String(e).slice(0, 300));
+    } finally {
+      await context.close();
+      await revokeKeys("harness switch key")(ownerApi(mf, fx)).catch(() => {});
     }
   }
   // 3. An explicit mode survives navigation inside the app viewer's frame: explicit Dark with the OS light,

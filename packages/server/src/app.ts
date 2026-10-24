@@ -7,6 +7,7 @@ import { buildOpenApi } from "./openapi";
 import type { OperationDefinition } from "./operations";
 import { agentSkillsIndex, legacySkillsIndex, llmsFullTxt, llmsTxt, skillInstance, skillMarkdown, SKILL_NAME } from "./discovery";
 import { homePage, installUi } from "./ui";
+import { nameCode, tok } from "./ui/code";
 import { appStatePage, uiSlotsOf } from "./ui/shell";
 import { installTransferPages } from "./transfers";
 import { installEncrypted } from "./encrypted";
@@ -75,7 +76,8 @@ export function createAppRouter(opts: { app: Hono<DropwayEnv>; uiSlots: UiSlots;
       title: "Claim a site",
       code: "CLAIM",
       heading: "Keep this site",
-      message: `Anonymous sites expire. To keep <code>${escapeHtml(slug)}</code>, call the API with an API key of this instance and the claim token (the part of this link after <code>#token=</code>):`,
+      // The site name and "#token=" are code.k-tok: each moves to the next line whole, never split at a hyphen.
+      message: `Anonymous sites expire. To keep ${nameCode(slug)}, call the API with an API key of this instance and the claim token (the part of this link after ${tok("#token=")}):`,
       // No script on this page, so no Copy button: the command wraps (all of it shows) and one click selects it.
       extra: `<div class="k-codeblock"><div class="k-codeblock-h"><span class="k-k">Claim with curl</span><span class="k-small">One click selects the command</span></div><pre class="k-wrapped k-pick" tabindex="0" role="region" aria-label="Claim with curl">${escapeHtml(curl)}</pre></div>`,
       signIn: uiSlotsOf(c).session?.signInPath,

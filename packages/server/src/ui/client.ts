@@ -431,16 +431,44 @@ export function dropwayClient(motifsFactory) {
     });
   }
 
-  /** A secret shown once, with Copy. */
+  /**
+   * A secret shown once, with Copy. `note` is text, or text and nodes (a secret's name as tok()). data-once: while
+   * the block is on the page the colour switch is hidden (hideSwitchWhileSecret).
+   */
   function secretBlock(title, value, note) {
     return h(
       "div",
-      { class: "k-keyout", role: "status" },
+      { class: "k-keyout", role: "status", "data-once": true },
       h("span", { class: "k-k", text: "Shown once" }),
       h("strong", { text: title }),
       h("div", { class: "k-keyout-row" }, h("code", { text: value }), copyButton(value, "Copy key")),
-      note ? h("p", { class: "k-small", text: note }) : null,
+      note ? h("p", { class: "k-small" }, note) : null,
     );
+  }
+  /** A short token as inline code that never breaks (code.k-tok): a secret's name, a header. */
+  function tok(t) {
+    return h("code", { class: "k-tok", text: t });
+  }
+  /**
+   * A URL as inline code that wraps only after "/" and before "." (<wbr> between nowrap parts), never inside a name
+   * such as "kofra-sites" (ui/code.ts urlCode). A part longer than a phone line (24 characters) may break inside
+   * itself rather than run off the screen.
+   */
+  function urlParts(u) {
+    var text = String(u);
+    var out = [];
+    var from = 0;
+    var part = function (s) {
+      return s.length > 24 ? s : h("span", { text: s });
+    };
+    for (var i = 1; i < text.length; i++) {
+      if (text.charAt(i - 1) === "/" ? text.charAt(i) !== "/" : text.charAt(i) === "." && text.charAt(i - 1) !== ".") {
+        out.push(part(text.slice(from, i)), d.createElement("wbr"));
+        from = i;
+      }
+    }
+    out.push(part(text.slice(from)));
+    return out;
   }
 
   function skeleton(n) {
@@ -941,7 +969,7 @@ export function dropwayClient(motifsFactory) {
           h("span", { class: "k-k", text: r.unchanged ? "Unchanged" : "Published" }),
           h("strong", { text: r.unchanged ? "Nothing changed: the live version already has exactly these files." : "It's live" + (r.version && r.version.number ? " as v" + r.version.number : "") + "." }),
           url
-            ? h("div", { class: "k-keyout-row" }, h("code", {}, h("a", { href: url, target: "_blank", rel: "noopener", text: url })), copyButton(url, "Copy URL"))
+            ? h("div", { class: "k-keyout-row" }, h("code", { class: "k-brk" }, h("a", { href: url, target: "_blank", rel: "noopener" }, urlParts(url))), copyButton(url, "Copy URL"))
             : null,
           h(
             "div",
@@ -958,7 +986,7 @@ export function dropwayClient(motifsFactory) {
           r.claimToken
             ? h(
                 "div",
-                { class: "k-small" },
+                { class: "k-small", "data-once": true },
                 h("p", { text: "Anonymous site: it expires " + (r.expiresAt ? localTime(r.expiresAt) : "soon") + ". Keep it with the claim token (shown once):" }),
                 h("div", { class: "k-keyout-row" }, h("code", { text: r.claimToken }), copyButton(r.claimToken, "Copy claim token")),
               )
@@ -1087,7 +1115,7 @@ export function dropwayClient(motifsFactory) {
           });
           add(
             out,
-            secretBlock(label, k, "Store it in your password manager; agents use it as Authorization: Bearer <key>."),
+            secretBlock(label, k, ["Store it in your password manager; agents use it as ", tok("Authorization: Bearer <key>"), "."]),
             h("button", {
               type: "button",
               class: "k-btn",
@@ -1551,7 +1579,7 @@ export function dropwayClient(motifsFactory) {
         var k = await api("/keys", { method: "POST", body: body });
         add(
           created,
-          secretBlock("Key “" + (k.name || k.prefix) + "” created", k.key, "Give it to the agent or person as KOFRA_API_KEY."),
+          secretBlock("Key “" + (k.name || k.prefix) + "” created", k.key, ["Give it to the agent or person as ", tok("KOFRA_API_KEY"), "."]),
           h("div", { class: "k-codeblock" }, h("div", { class: "k-codeblock-h" }, h("span", { class: "k-k", text: "Environment" })), h("pre", { class: "k-wrapped", tabindex: "0", role: "region", "aria-label": "Environment", text: "export KOFRA_URL=" + boot.origin + "\nexport KOFRA_API_KEY=" + k.key })),
         );
         form.reset();
@@ -2051,10 +2079,30 @@ export function dropwayClient(motifsFactory) {
     }
     updateAutoTitle();
   }
+  /**
+   * Pages that show a secret once leave the colour switch out (DESIGN.md section 7, Mode switch). The dashboard
+   * shows its secrets (a new API key, a claim token) after the page has loaded, in a block marked data-once: while
+   * one is on the page the switch is hidden and the header is k-noswitch, as on the server's switch-less pages (the
+   * account area ends flush with the content edge). The switch comes back when the block goes.
+   */
+  function hideSwitchWhileSecret() {
+    var form = d.getElementById("dw-mode");
+    var top = form && form.closest(".k-top");
+    if (!top || !window.MutationObserver) return;
+    var sync = function () {
+      var once = !!$("[data-once]");
+      if (form.hidden === once) return;
+      form.hidden = once;
+      top.classList.toggle("k-noswitch", once);
+    };
+    new MutationObserver(sync).observe(d.body, { childList: true, subtree: true });
+    sync();
+  }
 
   // ------------------------------------------------------------------ start
 
   wireThemeSwitch();
+  hideSwitchWhileSecret();
   wireCopyButtons(d);
   var start = pages[d.body.getAttribute("data-page")];
   /** With uiSlots.session and no key in this browser, ask the API whether a cookie session is live first. */

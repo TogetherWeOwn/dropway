@@ -4,6 +4,7 @@ import type { DropwayEnv } from "../env";
 import type { UiSlots } from "../extensions";
 import { escapeHtml, formatBytes } from "../html";
 import { TRUST_LINE } from "./chrome";
+import { SHORT_CODE, tok, urlCode } from "./code";
 import { renderAppPage, sitesCspSource, uiSlotsOf } from "./shell";
 import { themeOf, type ThemePref } from "./theme";
 import { SOURCE_REPO } from "../repo";
@@ -23,36 +24,8 @@ function block(opts: { id?: string; title: string; titleId?: string; tools?: str
 
 const NOSCRIPT = `<noscript><p class="k-pad k-small">The dashboard loads its data with JavaScript.</p></noscript>`;
 
-/** Inline code that never breaks inside itself: a query, a scope, a secret's name (short tokens). */
-const tok = (t: string) => `<code class="k-tok">${e(t)}</code>`;
-
-/** Inline code shorter than this never wraps (a short URL or command moves to the next line whole). */
-export const SHORT_CODE = 40;
-
-/**
- * A URL or command as inline code. Short ones (under SHORT_CODE characters) never break; longer ones may wrap only
- * after "/", before "." and at spaces (<wbr>), never inside a name such as "kofra-sites", and never after a "?".
- */
-export function urlCode(t: string): string {
-  if (t.length < SHORT_CODE) return tok(t);
-  const html = t
-    .split(/(\s+)/)
-    .map((word) => {
-      if (!word || /^\s+$/.test(word)) return word;
-      const segs: string[] = [];
-      let from = 0;
-      for (let i = 1; i < word.length; i++) {
-        if (word[i - 1] === "/" ? word[i] !== "/" : word[i] === "." && word[i - 1] !== ".") {
-          segs.push(word.slice(from, i));
-          from = i;
-        }
-      }
-      segs.push(word.slice(from));
-      return segs.map((s) => `<span>${e(s)}</span>`).join("<wbr>");
-    })
-    .join("");
-  return `<code class="k-brk">${html}</code>`;
-}
+// Inline code helpers live in ./code (site-origin pages use them too); urlCode and SHORT_CODE stay exported here.
+export { SHORT_CODE, urlCode };
 
 /** Where sites are served, in words. */
 function sitesWhere(dw: DropwayContext): string {
