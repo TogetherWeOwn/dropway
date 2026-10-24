@@ -13,4 +13,5 @@
 /* Site-origin pages are full-bleed, on the viewer bar's gutter: the wordmark and footer sit on the same left
    edge on every site page (system pages, listings, viewers). */
 .sitehead>.wrap,.sitefoot>.wrap{max-width:none;padding:0 18px}
-@media (max-width:720px){.foot .end{margin-left:0;flex-basis:100%}.sitehead>.wrap,.sitefoot>.wrap{padding:0 12px}}
+/* Phones: the domains line is two fixed lines (app, then sites), so the footer's height never depends on the font. */
+@media (max-width:720px){.foot .end{margin-left:0;flex-basis:100%}.sitehead>.wrap,.sitefoot>.wrap{padding:0 12px}.foot .dom{flex-basis:100%}.foot .dom>span{display:block}.foot .dom>.dom-sep{display:none}}

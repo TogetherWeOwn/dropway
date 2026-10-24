@@ -119,9 +119,20 @@ export interface AppFooterOptions {
   trust?: boolean;
 }
 
+/**
+ * The footer's domains line ("kofra.app · sites on <slug>.kofra.io") in two parts. Under 720px each part has a line of
+ * its own (11-foot.css), so the footer's height never depends on which font has loaded (no shift when the fonts
+ * arrive); wider, they read as one line with the separator.
+ */
+function domainsHtml(domains: string): string {
+  const at = domains.indexOf(" · ");
+  if (at < 0) return `<span class="k-dom"><span>${e(domains)}</span></span>`;
+  return `<span class="k-dom"><span>${e(domains.slice(0, at))}</span><span class="k-dom-sep" aria-hidden="true"> · </span><span>${e(domains.slice(at + 3))}</span></span>`;
+}
+
 export function appFooter(o: AppFooterOptions): string {
   const links = (o.links ?? []).map((l) => `<a href="${e(l.href)}">${e(l.label)}</a>`).join("");
-  return `<footer class="k-foot"><div class="k-wrap"><a class="k-wm" href="${e(o.home ?? "/")}">${e(o.name)}</a>${o.domains ? `<span>${e(o.domains)}</span>` : ""}${links ? `<nav class="k-end" aria-label="Footer">${links}</nav>` : ""}${o.trust ? `<p class="k-trust">${TRUST_LINE}</p>` : ""}</div></footer>`;
+  return `<footer class="k-foot"><div class="k-wrap"><a class="k-wm" href="${e(o.home ?? "/")}">${e(o.name)}</a>${o.domains ? domainsHtml(o.domains) : ""}${links ? `<nav class="k-end" aria-label="Footer">${links}</nav>` : ""}${o.trust ? `<p class="k-trust">${TRUST_LINE}</p>` : ""}</div></footer>`;
 }
 
 export const SKIP_LINK = '<a class="k-skip" href="#dw-main">Skip to content</a>';
@@ -157,5 +168,5 @@ export function siteHeader(name: string, appOrigin: string): string {
 
 /** Footer for site-origin pages: domains line, plus the trust line on pages that show files. */
 export function siteFooter(o: { name: string; appOrigin: string; domains?: string; trust?: boolean }): string {
-  return `<footer class="k-foot k-sitefoot"><div class="k-wrap"><a class="k-wm" href="${e(o.appOrigin)}" rel="nofollow">${e(o.name)}</a>${o.domains ? `<span>${e(o.domains)}</span>` : ""}${o.trust ? `<p class="k-trust">${TRUST_LINE}</p>` : ""}</div></footer>`;
+  return `<footer class="k-foot k-sitefoot"><div class="k-wrap"><a class="k-wm" href="${e(o.appOrigin)}" rel="nofollow">${e(o.name)}</a>${o.domains ? domainsHtml(o.domains) : ""}${o.trust ? `<p class="k-trust">${TRUST_LINE}</p>` : ""}</div></footer>`;
 }

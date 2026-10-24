@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appHeader } from "../packages/server/src/ui/chrome";
+import { appFooter, appHeader, siteFooter } from "../packages/server/src/ui/chrome";
 import { CLIENT_SCRIPT } from "../packages/server/src/ui/assets";
 import { APP_CSS, SITE_CSS } from "../packages/server/src/ui/design.generated";
 import { urlCode } from "../packages/server/src/ui/pages";
@@ -204,5 +204,15 @@ describe("fallback faces are metric-matched on systems without Arial, Georgia or
       expect(APP_CSS, sel).toContain(sel);
     }
     expect(SITE_CSS.length).toBeLessThanOrEqual(24576);
+  });
+});
+
+describe("footers never change height when the fonts arrive (G9 at 320)", () => {
+  it("the domains line is two parts; under 720px each has a line of its own", () => {
+    const d = "kofra.test · sites on <site>.kofra-sites.test";
+    const want = '<span class="k-dom"><span>kofra.test</span><span class="k-dom-sep" aria-hidden="true"> · </span><span>sites on &lt;site&gt;.kofra-sites.test</span></span>';
+    expect(appFooter({ name: "Kofra", domains: d })).toContain(want);
+    expect(siteFooter({ name: "Kofra", appOrigin: "https://kofra.test", domains: d })).toContain(want);
+    for (const css of [APP_CSS, SITE_CSS]) expect(css).toContain(".k-foot .k-dom{flex-basis:100%}.k-foot .k-dom>span{display:block}.k-foot .k-dom>.k-dom-sep{display:none}");
   });
 });
