@@ -1673,10 +1673,12 @@ rewriting is unchanged. The link opens the site's absolute `__dropway/report` UR
 in a new window with `noopener noreferrer`, so an untrusted `<base>` cannot redirect it
 and it works without script authority in the sandbox. Raw/download responses and stored
 bytes are not changed; claimed and owned sites carry no anonymous link. Transformed HTML
-uses a separate versioned ETag and ignores byte ranges. **The report form and submission
-processing remain R-37.** Until that route exists, its destination follows ordinary site
-resolution: a 404 (possibly the site's `404.html`) or the site's `index.html` SPA fallback.
-The link alone is not an operational reporting channel.
+uses a separate versioned ETag and ignores byte ranges. The link's destination is a Kofra
+page on the site's origin: `<site>/__dropway/report` answers (before the password gate) with
+a REPORT system page that names the site's address and points at the instance's optional
+`ABUSE_CONTACT` (an email address opens a prefilled email; an https URL is the report link);
+without it, the page asks people to tell whoever runs the instance. **A report form that
+stores and processes submissions remains R-37.**
 
 ### 11.7 Default limits (all admin-configurable)
 
