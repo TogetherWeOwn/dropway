@@ -2,8 +2,9 @@ import { applyD1Migrations, createExecutionContext, env, reset, waitOnExecutionC
 import { describe, expect, it } from "vitest";
 import { createDropway, renderAppPage, type ServerBindings } from "@dropway/server";
 import { CLIENT_SCRIPT, CLIENT_HASH, fnv1a } from "../packages/server/src/ui/assets";
+import { urlCode } from "../packages/server/src/ui/pages";
 import { jsonForScript, navItems } from "../packages/server/src/ui/shell";
-import { form, freshInstance } from "./helpers";
+import { form, freshInstance, ORIGIN } from "./helpers";
 
 const scriptSrc = (html: string) => /<script src="(\/__dropway\/ui\/app-[0-9a-f]{8}\.js)" defer><\/script>/.exec(html)?.[1];
 const boot = (html: string) => JSON.parse(/<script type="application\/json" id="dw-boot">(.*?)<\/script>/s.exec(html)![1]!);
@@ -89,8 +90,8 @@ describe("app pages", () => {
     // Settings shows the instance configuration, server-rendered.
     const settings = await (await dw.call("/dashboard/settings")).text();
     expect(settings).toContain("Anonymous publishing");
-    // The example address is inline code that wraps only between its parts (<wbr>); its text is unchanged.
-    expect(settings.replace(/<[^>]+>/g, "")).toContain("/s/SITE/");
+    // The example address is inline code that wraps only between its parts (urlCode: <wbr> after "/" and before ".").
+    expect(settings).toContain(urlCode(`${ORIGIN}/s/SITE/`));
   });
 
   it("escapes boot data so it cannot close its script tag", () => {
