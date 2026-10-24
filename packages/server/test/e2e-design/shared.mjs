@@ -2,8 +2,10 @@
 // "@dropway/server/e2e-design" so they are reused, never copied. Plain JavaScript (Node and the browser), no build.
 
 /**
- * Until the page stops scrolling (a smooth scroll to the focused element, with normal motion), at most ~3 s. Run it
- * in the page: page.evaluate(SETTLE).
+ * Until a smooth scroll to the focused element (normal motion) has started, if it is needed, and come to rest: the
+ * page has not moved for 5 frames and the focused element is in the viewport (or 1 s has passed without it getting
+ * there, so a stop that never scrolls into view is still measured and reported). At most ~3 s. Run it in the page:
+ * page.evaluate(SETTLE).
  */
 export const SETTLE = () =>
   new Promise((done) => {
@@ -11,10 +13,13 @@ export const SETTLE = () =>
     let still = 0;
     let n = 0;
     const tick = () => {
+      n++;
       const now = `${scrollX},${scrollY}`;
       still = now === last ? still + 1 : 0;
       last = now;
-      if (still >= 5 || ++n > 180) done();
+      const r = document.activeElement?.getBoundingClientRect();
+      const inView = !r || (r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth);
+      if ((still >= 5 && (inView || n > 60)) || n > 180) done();
       else requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
