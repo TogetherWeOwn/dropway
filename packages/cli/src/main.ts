@@ -643,6 +643,89 @@ The owner API key is saved like \`kofra login\` (the full key is printed only wi
   },
 };
 
+/** The catalog row without its input schema; every other field stays exactly as the server sent it. */
+function stripInputSchema(row: Record<string, unknown>): Record<string, unknown> {
+  const compact: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) if (key !== "inputSchema") compact[key] = value;
+  return compact;
+}
+
+function operationDetail(row: Record<string, unknown>, withSchema: boolean): string {
+  const scopes = Array.isArray(row.scopes) ? row.scopes.map(String) : [];
+  const cli = row.cli as { command?: unknown; positional?: unknown } | undefined;
+  const lines = [
+    String(row.id),
+    `  ${String(row.method)} ${String(row.path)}`,
+    `  Scopes: ${scopes.length ? scopes.join(" ") : "(none)"}`,
+  ];
+  if (cli && Array.isArray(cli.command)) {
+    const positionals = Array.isArray(cli.positional) ? cli.positional.map((name) => `<${String(name)}>`).join(" ") : "";
+    lines.push(`  CLI: kofra ${cli.command.map(String).join(" ")}${positionals ? ` ${positionals}` : ""}`);
+  }
+  if (withSchema) lines.push(`  Input schema:\n${JSON.stringify(row.inputSchema ?? {}, null, 2)}`);
+  return lines.join("\n");
+}
+
+const operationsCmd: Command = {
+  summary: "List API operations, or inspect one, without running anything",
+  usage: "kofra operations [operationId] [--schema] [--json]",
+  flags: { schema: { kind: "boolean" } },
+  details: `Reads the instance's public operation catalog (GET /api/v1/operations): the
+operation ids, methods, paths, required scopes and CLI paths. Nothing is
+executed, so inspecting an advertised DELETE is safe. No API key is needed
+and none is sent.
+
+With an exact operation id, shows that one row instead of the list. Input
+schemas are omitted by default; add --schema (with an id) to include the
+row's unchanged inputSchema.
+
+Examples:
+  kofra operations --json
+  kofra operations list_versions --json
+  kofra operations create_site --schema --json`,
+  async run(p, io, out) {
+    const [id, extra] = p.positionals;
+    if (extra !== undefined) throw new UsageError(`Too many arguments. Usage: ${this.usage}`);
+    const withSchema = bool(p, "schema") === true;
+    if (withSchema && !id) throw new UsageError(`--schema needs an operation id. Usage: ${this.usage}`);
+    const inst = await resolveInstance(p, io);
+    // The catalog is public metadata: discover it without a credential.
+    const client = makeClient(io, inst.api, null);
+    const { data } = await client.get<unknown>("/operations");
+    const rows = (Array.isArray(data) ? data : (data as { operations?: unknown }).operations) as Record<string, unknown>[] | undefined;
+    if (!Array.isArray(rows) || rows.some((r) => !r || typeof r !== "object")) {
+      throw new CliError({
+        code: "invalid_catalog",
+        message: `The instance answered ${inst.api}/api/v1/operations with an unexpected shape.`,
+        hint: "Is this a Kofra instance? Check --api / KOFRA_API (use the origin, without /api/v1).",
+        exitCode: EXIT.error,
+      });
+    }
+    if (!id) {
+      const operations = rows.map(stripInputSchema);
+      out.result({ operations }, () => {
+        if (!operations.length) return "No operations: the instance answered with an empty catalog.";
+        return table(
+          rows.map((r) => [String(r.id), String(r.method), String(r.path)]),
+          ["OPERATION", "METHOD", "PATH"],
+        );
+      });
+      return EXIT.ok;
+    }
+    const found = rows.find((r) => r.id === id);
+    if (!found) {
+      throw new CliError({
+        code: "operation_not_found",
+        message: `No operation "${id}".`,
+        hint: "List available operations with: kofra operations --json",
+        exitCode: EXIT.notFound,
+      });
+    }
+    out.result({ operation: withSchema ? found : stripInputSchema(found) }, () => operationDetail(found, withSchema));
+    return EXIT.ok;
+  },
+};
+
 const apiCmd: Command = {
   summary: "Call any REST endpoint (escape hatch)",
   usage: "kofra api <operationId | [METHOD] path> [--data <json> | --data @file.json | --data -]",
@@ -719,6 +802,7 @@ const COMMANDS: Record<string, Command> = {
   logout: logoutCmd,
   setup: setupCmd,
   api: apiCmd,
+  operations: operationsCmd,
 };
 
 const ALIASES: Record<string, string> = {
