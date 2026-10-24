@@ -784,14 +784,15 @@ describe("inventory review affordance", () => {
 
   it("renders hostile filenames as text without creating elements from them", async () => {
     const h = await bootPublisher();
-    await pickFiles(h, [fakeFile('"><img src=x onerror=alert(1)>.html', 5), fakeFile("<script>alert(1)</script>.txt", 5)]);
+    // Keep markup slash-free: fakeFile treats "/" as a path separator.
+    await pickFiles(h, [fakeFile('"><img src=x onerror=alert(1)>.html', 5), fakeFile("<svg onload=alert(1)>.html", 5)]);
     const toggle = findReviewToggle(h.root);
     expect(toggle).not.toBeNull();
     activate(toggle!, "click");
     const body = reviewBody(h.root, toggle!)!;
     expect(body.textContent).toContain('"><img src=x onerror=alert(1)>.html');
-    expect(body.textContent).toContain("<script>alert(1)</script>.txt");
-    expect(allElements(body).filter((e) => e.tagName === "img" || e.tagName === "script")).toHaveLength(0);
+    expect(body.textContent).toContain("<svg onload=alert(1)>.html");
+    expect(allElements(body).filter((e) => ["img", "script", "svg"].includes(e.tagName))).toHaveLength(0);
   });
 
   it("labels a single ZIP as a server-unpacked archive, not a verified entry listing", async () => {
