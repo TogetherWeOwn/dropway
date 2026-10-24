@@ -7,7 +7,7 @@ import { contentTypeFor, normaliseContentType } from "../lib/mime";
 import { normaliseFilePath, stripCommonRoot } from "../lib/paths";
 import type { Principal } from "../principal";
 import { blobScope, putVerifiedBlob } from "./blobs";
-import { createDeploy, finalizeDeploy, precheckManifest } from "./deploys";
+import { createDeploy, finalizeDeploy, parseDeployOptions, precheckManifest } from "./deploys";
 import { createSite, discardNewSite, findSite, getSiteFor, parseSettings, serializeSite, updateSite, type SiteRow, type VersionRow } from "./sites";
 
 /** A file held in memory for one-shot publishing. */
@@ -194,6 +194,8 @@ export async function resolvePublishTarget(dc: DropwayContext, p: Principal, fie
  * (deduplicated), record a version and make it live.
  */
 export async function publishFiles(dc: DropwayContext, p: Principal, input: PublishInput, opts: { client?: string | null } = {}) {
+  const metadata = parseDeployOptions({ message: input.fields.message, baseVersionId: input.fields.baseVersionId });
+  input = { ...input, fields: { ...input.fields, ...metadata } };
   const hashed = await Promise.all(input.files.map(async (f) => ({ ...f, sha256: await sha256Hex(f.bytes) })));
   const manifest = hashed.map((f) => ({ path: f.path, size: f.bytes.length, sha256: f.sha256, contentType: f.contentType }));
   const target = await resolvePublishTarget(dc, p, input.fields, manifest);
