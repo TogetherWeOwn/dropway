@@ -217,6 +217,12 @@ describe("Report abuse opens a page (it was a 404)", () => {
     expect(abuseContactOf("javascript:alert(1)")).toBeNull();
     expect(abuseContactOf("")).toBeNull();
     expect(abuseContactOf(undefined)).toBeNull();
+    expect(abuseContactOf("https://desk@kofra.app/report")).toBe("https://desk@kofra.app/report");
+    expect(abuseContactOf("a@b")).toBeNull();
+    // No backtracking pattern: a crafted value is answered at once (CodeQL js/polynomial-redos).
+    const started = Date.now();
+    expect(abuseContactOf(`!@!.${"!.".repeat(5000)}`)).toBeNull();
+    expect(Date.now() - started).toBeLessThan(50);
   });
 });
 

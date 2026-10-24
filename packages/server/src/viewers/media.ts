@@ -208,7 +208,7 @@ export const fontViewer: Viewer = {
 .dw-font .try:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 .dw-fs{display:flex;gap:1rem;align-items:baseline;border-top:1px solid var(--rule-soft);padding:.4rem 0}
 .dw-fs span{flex:none;width:3.5rem;color:var(--muted);font-size:.8rem;font-family:var(--mono)}
-.dw-fs p{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:"dw-specimen",var(--mono)}`,
+.dw-fs p{margin:0;min-width:0;overflow-wrap:anywhere;font-family:"dw-specimen",var(--mono)}`,
       body: `<div class="dw-font"><p class="k-small">${escapeHtml(`${name} · ${formatBytes(vc.file.size)} · ${vc.file.contentType.split(";")[0]}`)}</p>
 <div class="s big" aria-hidden="true">Aa Gg</div>
 <p class="s set">ABCDEFGHIJKLMNOPQRSTUVWXYZ<br>abcdefghijklmnopqrstuvwxyz<br>0123456789 !?&amp;@#%()[]{}.,;:'"-+=*/\\</p>

@@ -131,7 +131,14 @@ export interface DropwayVars extends Partial<Record<`QUOTA_${Uppercase<QuotaKey>
 /** ABUSE_CONTACT as an email address or an https URL; anything else is ignored (null). */
 export function abuseContactOf(v: string | undefined): string | null {
   const t = v?.trim() ?? "";
-  if (/^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(t)) return t;
+  if (!t || t.length > 254) return null;
+  // An email address: one "@" with a dotted domain after it, no spaces, quotes, angle brackets, "/" or ":" (checked without a
+  // backtracking pattern, so a crafted value cannot make it slow).
+  const at = t.indexOf("@");
+  if (at > 0 && at === t.lastIndexOf("@") && !/[\s<>"/:]/.test(t)) {
+    const dot = t.lastIndexOf(".");
+    if (dot > at + 1 && dot < t.length - 1) return t;
+  }
   try {
     const u = new URL(t);
     return u.protocol === "https:" ? u.href : null;
