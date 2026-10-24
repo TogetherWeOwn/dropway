@@ -14,7 +14,7 @@ import type { ViewMode, Viewer, ViewerContext } from "./index";
 const MEDIA_CSS = `
 .dw-media{display:flex;flex-direction:column;align-items:center;padding:16px 18px 32px;gap:10px;background:var(--paper-3);min-height:calc(100vh - 4rem)}
 .dw-stage{display:flex;align-items:center;justify-content:center;width:100%;min-height:calc(100vh - 9rem);border:1px solid var(--rule-soft);overflow:auto}
-.dw-stage img{display:block;max-width:100%;max-height:calc(100vh - 10rem);object-fit:contain}
+.dw-stage img{display:block;max-width:100%;max-height:calc(100vh - 10rem);height:auto;object-fit:contain}
 #dw-zoom:checked~.dw-stage{align-items:flex-start;justify-content:flex-start}
 #dw-zoom:checked~.dw-stage img{max-width:none;max-height:none}
 #dw-zoom:checked~.dw-mediabar label{border-color:var(--accent);color:var(--accent)}

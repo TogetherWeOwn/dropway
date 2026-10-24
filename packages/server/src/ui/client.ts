@@ -256,6 +256,10 @@ export function dropwayClient(motifsFactory) {
   function plural(n, one, many) {
     return n + " " + (n === 1 ? one : many || one + "s");
   }
+  /** A member's role in words ("Owner"), the same words as the role picker. */
+  function roleLabel(role) {
+    return { owner: "Owner", admin: "Admin", member: "Member" }[role] || String(role || "");
+  }
   /** How a version was published, in words ("via the API"); an unknown kind shows nothing rather than a raw token. */
   function sourceLabel(src) {
     return { publish: "one-call publish", zip: "zip upload", api: "via the API", mcp: "via MCP", cli: "via the CLI", url: "from URLs", browser: "from the browser" }[src] || "";
@@ -1644,7 +1648,7 @@ export function dropwayClient(motifsFactory) {
           "dl",
           { class: "k-kv" },
           h("dt", { text: "Signed in as" }), h("dd", { text: m.member.email || m.member.name || m.member.id }),
-          h("dt", { text: "Role" }), h("dd", { text: m.member.role.charAt(0).toUpperCase() + m.member.role.slice(1) }),
+          h("dt", { text: "Role" }), h("dd", { text: roleLabel(m.member.role) }),
           h("dt", { text: "Key scopes" }), h("dd", { class: "k-mono", text: m.scopes.join(" ") }),
           h("dt", { text: "Sites this key reaches" }), h("dd", { text: m.siteRestriction ? "One site only" : "Every site" }),
         ),
@@ -1691,7 +1695,7 @@ export function dropwayClient(motifsFactory) {
               "tr",
               {},
               h("td", {}, h("strong", { text: x.email || x.name || x.id }), x.name && x.email ? h("span", { class: "k-sub", text: x.name }) : null),
-              h("td", { "data-label": "Role" }, h("span", { class: "k-chip" + (x.role === "owner" ? " k-accent" : ""), text: x.role })),
+              h("td", { "data-label": "Role" }, h("span", { class: "k-chip" + (x.role === "owner" ? " k-accent" : ""), text: roleLabel(x.role) })),
               h("td", { class: "k-num k-small", "data-label": "Added", title: localTime(x.createdAt), text: ago(x.createdAt) }),
               h(
                 "td",
