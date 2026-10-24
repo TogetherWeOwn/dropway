@@ -1,3 +1,4 @@
+// rebrand:keep-file (scripts/rebrand.mjs never edits this file.)
 /**
  * Acceptance: ZIP base conflicts and a bounded live-version wait.
  *
