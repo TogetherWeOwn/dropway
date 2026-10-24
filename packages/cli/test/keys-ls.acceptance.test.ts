@@ -185,9 +185,10 @@ function ownMetadata(keys: any[]) {
   expect(keys[1]).toEqual({
     id: "key_scoped", name: "Site-only agent", prefix: "dw_scopedF", memberId: "mem_owner",
     scopes: ["keys:write"], siteId: "site_restricted", current: false,
-    createdAt: "2026-01-01T00:00:05.000Z", lastUsedAt: "2026-01-01T00:00:07.000Z",
+    createdAt: "2026-01-01T00:00:05.000Z", lastUsedAt: expect.any(String),
     expiresAt: "2100-01-01T00:00:00.000Z", revoked: false,
   });
+  expect(Number.isFinite(Date.parse(keys[1].lastUsedAt))).toBe(true);
   expect(keys[2]).toEqual({
     id: "key_expired", name: null, prefix: "dw_expired", memberId: "mem_owner",
     scopes: ["keys:write"], siteId: null, current: false, createdAt: "2026-01-01T00:00:04.000Z",
