@@ -128,19 +128,25 @@ access controls:
      contains `ready` versions). If the row's `status` is not `ready`, fail
      with `version_not_ready` (section 8): a pending manifest is not
      immutable yet, so a comparison against one could silently mislead.
-   - If the site has no live version, fail with `no_live_version` (section 8);
-     comparing against "nothing" is a refusal, not an empty diff.
+   - If the ref is omitted or `live` and the site has no live version, fail
+     with `no_live_version` (section 8); comparing against "nothing" is a
+     refusal, not an empty diff. An explicit `v<N>` / `<N>` / id ref still
+     compares against that version once it is `ready` — `no_live_version`
+     never blocks an explicit historical ref.
    - If the ref matches nothing, fail with `version_not_found`.
 2. **Read the immutable manifest.**
    `GET /api/v1/sites/{slug}/files?version=<pinnedId>` in its raw REST form
    (`packages/server/src/operations/core-api.ts`, `list_files` HTTP handler),
    which returns the whole manifest from `listFiles()` in
-   `packages/core/src/services/deploys.ts`:
+   `packages/core/src/services/deploys.ts` in a single response:
    `{ version, files: [{ path, size, sha256, contentType, ... }] }` ordered
    by path from the immutable `version_files` rows. The implementation must
-   not use the operation/MCP handler's paged form (default limit 200, max
-   1000) unless it loops cursors to exhaustion first — counts are exact over
-   the full manifest, never over one page. Only `path`, `size`, and `sha256`
+   use this raw form, not the operation/MCP handler's paged form (default
+   limit 200, max 1000, `nextCursor`): the paged handler loads the same full
+   manifest via `listFiles()` and slices it in memory, so paging would add
+   requests without reducing server work, while one raw `GET` keeps the
+   "exactly two reads" contract exact. Counts are exact over the full
+   manifest, never over one page. Only `path`, `size`, and `sha256`
    are used; URLs in the response are never fetched.
 
 The pinned version id is echoed in every output (section 7). If live moves
@@ -301,7 +307,7 @@ and stable.
 | `compare_zip_unsupported` | 2 | `<path>` is a `.zip` | Extract locally and compare the folder |
 | `site_not_found` (HTTP 404 → existing mapping) | 4 | Site missing or not visible to the key | Check the name; `kofra list` |
 | `version_not_found` (existing) | 4 | `--version` matches nothing finalized | `kofra versions <name>` |
-| `no_live_version` | 4 | Site exists but nothing is live | Publish first, or pass an explicit `--version` |
+| `no_live_version` | 4 | Omitted/`live` ref on a site with nothing live | Publish first, or pass an explicit `--version` |
 | `version_not_ready` | 4 | Pinned version is `pending` | Wait for the publish to finalize, then re-run |
 | `compare_cap_exceeded` | 2 | Eligible paths/bytes exceed `--max-files`/`--max-bytes` | Raise the named flag, or narrow the directory |
 | `compare_source_changed` | 2 | A local file changed during hashing | Re-run when the tree is quiet |
@@ -352,7 +358,7 @@ implementation pairs with a fresh Test Author.
 | 6 | Live moves after pin | (Unit/clock test) live advances between resolve and manifest read | Records still describe the pinned id; `pinned.versionId` echoed; no re-resolve |
 | 7 | Missing version | `--version v99` | `version_not_found`, exit 4, hint names `kofra versions` |
 | 8 | Denied site | Key without access / wrong site | 404 mapping, exit 4; no manifest content leaked in error |
-| 9 | No live version | Fresh empty site | `no_live_version`, exit 4 (not an empty diff, exit 0) |
+| 9 | No live version | Fresh empty site, default (live) ref | `no_live_version`, exit 4 (not an empty diff, exit 0) |
 | 10 | Pending version | `--version` pointing at a `pending` deploy | `version_not_ready`, exit 4 |
 | 11 | Cap refusal | `--max-files 1` on a 3-file tree; `--max-bytes 1` | `compare_cap_exceeded`, exit 2, names cap + observed + flag; no partial claim |
 | 12 | Cancel | SIGINT mid-hash (large fixture) | `compare_cancelled`, exit 2; no partial JSON on stdout |
@@ -366,10 +372,10 @@ implementation pairs with a fresh Test Author.
 | 20 | Incomplete metadata | Manifest row with empty/missing sha256 (fault-injection) | Path classified `changed` with `reason=incomplete_metadata`; never `unchanged` |
 
 Docs-only checks performed for this spec (no code ran beyond them): every
-`--json` field traces to `collectFiles()` or `listFiles()` (section 7.1
-table); all three `GET` shapes exist on current main (`list_files` raw REST
-form, `get_version`, and the versions list behind `main.ts`
-`listAllVersions`); error codes follow the
+`--json` field traces to an existing primitive or documented CLI-side
+computation (section 7.1 table); all three `GET` shapes exist on current
+main (`list_files` raw REST form, `get_version`, and the versions list
+behind `main.ts` `listAllVersions`); error codes follow the
 `ApiError`/`CliError` snake_case convention; `publish --dry-run` is
 referenced but untouched.
 
