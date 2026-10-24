@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+import { applyD1Migrations, createExecutionContext, env, reset, waitOnExecutionContext } from "cloudflare:test";
 import {
   createTenantWithOwner,
   mintApiKey,
+  resolveVersionAddress,
   runCleanup,
   type DropwayContext,
   type MemberPrincipal,
@@ -10,6 +11,7 @@ import {
 import type { ServerBindings } from "@dropway/server";
 import { form, freshInstance, ORIGIN, type Instance } from "./helpers";
 import { connectMcp } from "./mcp-helpers";
+import { SITES as TRANSFER_SITES, create as createTransfer, instance as transferInstance, op as transferOp } from "./transfer-fixtures";
 
 const DAY = 24 * 3600_000;
 const NAV = { Accept: "text/html,*/*;q=0.8", "Sec-Fetch-Dest": "document" };
@@ -519,6 +521,65 @@ describe("R-59 operation parity", () => {
     const llms = await dw.call("/llms-full.txt");
     expect(llms.status).toBe(200);
     expect(await llms.text()).toContain("slug_reserved");
+  });
+});
+
+describe("R-59 review fixes", () => {
+  it("pre-existing sites get the long (chosen) hold after upgrade", async () => {
+    await reset();
+    const before = env.TEST_MIGRATIONS.filter((m) => m.name < "0004_slug_holds.sql");
+    expect(before.length).toBeGreaterThan(0);
+    await applyD1Migrations(env.DB, before);
+    const now = Date.now();
+    await env.DB.prepare("INSERT INTO sites (id, slug, created_at, updated_at) VALUES ('site_legacy', 'legacy-name', ?, ?)").bind(now, now).run();
+    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS.filter((m) => m.name >= "0004_slug_holds.sql"));
+    const row = await env.DB.prepare("SELECT slug_chosen FROM sites WHERE id = 'site_legacy'").first<{ slug_chosen: number }>();
+    expect(row!.slug_chosen).toBe(1);
+  });
+
+  it("a never-existing middle version number is absent, a deleted one below live is gone", async () => {
+    const dw = await freshInstance();
+    await publish(dw, "gap-site", "v1-content");
+    const site = (await env.DB.prepare("SELECT id FROM sites WHERE slug = 'gap-site'").first<{ id: string }>())!;
+    // A version 3 that exists without a version 2 ever existing (abandoned upload numbering).
+    await env.DB.prepare(
+      "INSERT INTO versions (id, site_id, number, status, file_count, total_bytes, manifest_hash, source, created_at) VALUES ('ver_gap3', ?, 3, 'ready', 0, 0, 'gap', 'test', ?)",
+    ).bind(site.id, Date.now()).run();
+    await asDc(dw, async (dc) => {
+      expect(await resolveVersionAddress(dc, "gap-site", 2)).toEqual({ kind: "absent" });
+      expect(await resolveVersionAddress(dc, "gap-site", 3)).toEqual({ kind: "preview" });
+    });
+    await publish(dw, "gap-site", "v2-content");
+    await env.DB.prepare("DELETE FROM version_files WHERE version_id IN (SELECT id FROM versions WHERE site_id = ? AND number = 1)").bind(site.id).run();
+    await env.DB.prepare("DELETE FROM versions WHERE site_id = ? AND number = 1").bind(site.id).run();
+    await asDc(dw, async (dc) => {
+      expect(await resolveVersionAddress(dc, "gap-site", 1)).toEqual({ kind: "gone" });
+    });
+  });
+
+  it("releasing an expired hold answers 404 slug_not_held", async () => {
+    const dw = await freshInstance();
+    await publish(dw, "stale-hold");
+    expect((await dw.call("/api/v1/sites/stale-hold", { method: "DELETE", key: dw.ownerKey })).status).toBe(200);
+    await env.DB.prepare("UPDATE slug_tombstones SET hold_until = 1 WHERE slug = 'stale-hold'").run();
+    const res = await dw.json("/api/v1/slugs/release", {
+      method: "POST",
+      key: dw.ownerKey,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slug: "stale-hold", reason: "too late", confirm: "stale-hold" }),
+    });
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("slug_not_held");
+  });
+
+  it("a renamed transfer name does not 308 (permanent sender reservations win)", async () => {
+    const dw = await transferInstance();
+    const t = await createTransfer(dw, { slug: "parcel-old" });
+    const renamed = await transferOp(dw, "rename_site", { site: t.slug, slug: "parcel-new" });
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.redirectUntil).toBeNull();
+    expect((await redirects("parcel-old")).results).toHaveLength(0);
+    expect((await dw.call(`${TRANSFER_SITES}/parcel-old/`, { headers: NAV })).status).not.toBe(308);
   });
 });
 

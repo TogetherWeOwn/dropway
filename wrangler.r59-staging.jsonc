@@ -1,0 +1,26 @@
+// THROWAWAY R-59 staging config. NEVER COMMIT. Deleted after staging evidence.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kofra-r59-staging",
+  "main": "apps/worker/src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": false },
+  "vars": {
+    "APP_ORIGIN": "",
+    "SITES_MODE": "path",
+    "SITES_ORIGIN": "",
+    "SITES_DOMAIN": "",
+    "ANONYMOUS_PUBLISH": "false"
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "kofra-r59-staging", "database_id": "9d640d79-bf5b-42b2-a451-a9ab8dcff3fa", "migrations_dir": "packages/core/migrations" }
+  ],
+  "r2_buckets": [
+    { "binding": "FILES", "bucket_name": "kofra-r59-staging-files" }
+  ],
+  "kv_namespaces": [
+    { "binding": "CACHE", "id": "95dff2507eb641c48d8d0769eb9fac3f" }
+  ]
+}

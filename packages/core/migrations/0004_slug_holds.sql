@@ -5,7 +5,9 @@
 
 -- 1 when the site's current name was explicitly chosen, 0 when generated.
 -- Decides the tombstone hold after delete/expiry (chosen vs generated).
-ALTER TABLE sites ADD COLUMN slug_chosen INTEGER NOT NULL DEFAULT 0;
+-- The permanence-safe default is 1: a pre-existing name's provenance is
+-- unknowable, so it gets the long hold; creates set the value explicitly.
+ALTER TABLE sites ADD COLUMN slug_chosen INTEGER NOT NULL DEFAULT 1;
 
 -- Old names that 308 to a live site's current name. One row per old name;
 -- rename chains resolve through the site's current slug at serve time.

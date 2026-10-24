@@ -162,12 +162,18 @@ export type VersionAddress =
  */
 export async function resolveVersionAddress(dc: DropwayContext, baseSlug: string, num: number): Promise<VersionAddress> {
   const now = Date.now();
-  const site = await dc.env.DB.prepare("SELECT id FROM sites WHERE slug = ? AND deleted_at IS NULL").bind(baseSlug).first<{ id: string }>();
+  const site = await dc.env.DB.prepare("SELECT id, current_version_id FROM sites WHERE slug = ? AND deleted_at IS NULL").bind(baseSlug).first<{ id: string; current_version_id: string | null }>();
   if (site) {
     const version = await dc.env.DB.prepare("SELECT 1 AS ok FROM versions WHERE site_id = ? AND number = ?").bind(site.id, num).first<{ ok: number }>();
     if (version) return { kind: "preview" };
-    const max = await dc.env.DB.prepare("SELECT MAX(number) AS m FROM versions WHERE site_id = ?").bind(site.id).first<{ m: number | null }>();
-    return max?.m !== null && max?.m !== undefined && num <= max.m ? { kind: "gone" } : { kind: "absent" };
+    // Numbers are dense from 1 (MAX+1 at creation), so every number below the
+    // live one existed: a missing number there was deleted (gone), while a
+    // missing number at or above live never existed (absent).
+    if (site.current_version_id) {
+      const live = await dc.env.DB.prepare("SELECT number FROM versions WHERE id = ?").bind(site.current_version_id).first<{ number: number }>();
+      if (live && num < live.number) return { kind: "gone" };
+    }
+    return { kind: "absent" };
   }
   const redirect = await resolveSlugRedirect(dc, baseSlug);
   if (redirect) return { kind: "redirect", slug: redirect.slug };
@@ -202,15 +208,24 @@ export async function releaseSlug(dc: DropwayContext, p: Principal, slugInput: u
   const reason = [...reasonInput.trim()].slice(0, 255).join("");
   const now = Date.now();
   const held = await dc.env.DB.prepare(
-    `SELECT (SELECT COUNT(*) FROM slug_redirects WHERE slug = ?) AS redirects,
-            (SELECT COUNT(*) FROM slug_tombstones WHERE slug = ? AND released_at IS NULL) AS holds`,
+    `SELECT (SELECT COUNT(*) FROM slug_redirects WHERE slug = ? AND hold_until > ?) AS redirects,
+            (SELECT COUNT(*) FROM slug_tombstones WHERE slug = ? AND released_at IS NULL AND hold_until > ?) AS holds`,
   )
-    .bind(slug, slug)
+    .bind(slug, now, slug, now)
     .first<{ redirects: number; holds: number }>();
   if (!held || (held.redirects === 0 && held.holds === 0)) {
-    throw notFound("slug_not_held", `No hold on "${slug}" to release.`, "Held names are freed names waiting out their hold; live and never-used names need no release.");
+    throw notFound("slug_not_held", `No hold on "${slug}" to release.`, "Held names are freed names waiting out their hold; live, expired and never-used names need no release.");
   }
-  const [dropped, stamped] = await dc.env.DB.batch([
+  // One batch: the audit row for a redirect-only release is stamped at INSERT
+  // (so the UPDATE below skips it), conditioned on the pre-batch state.
+  const auditId = newId("hold");
+  const [, dropped, stamped] = await dc.env.DB.batch([
+    dc.env.DB.prepare(
+      `INSERT INTO slug_tombstones (id, slug, tenant_id, site_id, chosen, hold_until, reason, created_at, released_at, release_reason, released_by)
+       SELECT ?, ?, NULL, ?, 0, ?, 'rename', ?, ?, ?, ?
+       WHERE EXISTS (SELECT 1 FROM slug_redirects WHERE slug = ?)
+         AND NOT EXISTS (SELECT 1 FROM slug_tombstones WHERE slug = ? AND released_at IS NULL)`,
+    ).bind(auditId, slug, `released:${slug}`, now, now, now, reason, operator.memberId, slug, slug),
     dc.env.DB.prepare("DELETE FROM slug_redirects WHERE slug = ?").bind(slug),
     dc.env.DB.prepare("UPDATE slug_tombstones SET released_at = ?, release_reason = ?, released_by = ? WHERE slug = ? AND released_at IS NULL").bind(
       now,
@@ -224,15 +239,5 @@ export async function releaseSlug(dc: DropwayContext, p: Principal, slugInput: u
   if (redirectsReleased === 0 && holdsReleased === 0) {
     throw notFound("slug_not_held", `No hold on "${slug}" to release.`, "Another operator may have released it just now.");
   }
-  if (holdsReleased === 0) {
-    // Only a redirect existed: write the audit row for it.
-    await insertTombstone(dc, { slug, tenantId: null, siteId: `released:${slug}`, chosen: false, holdUntil: now, reason: "rename", createdAt: now }).run();
-    await dc.env.DB.prepare("UPDATE slug_tombstones SET released_at = ?, release_reason = ?, released_by = ? WHERE slug = ? AND released_at IS NULL").bind(
-      now,
-      reason,
-      operator.memberId,
-      slug,
-    ).run();
-  }
-  return { released: true as const, slug, redirectsReleased, holdsReleased: holdsReleased === 0 ? 1 : holdsReleased, reason };
+  return { released: true as const, slug, redirectsReleased, holdsReleased, reason };
 }
