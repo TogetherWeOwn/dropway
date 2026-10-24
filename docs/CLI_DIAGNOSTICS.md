@@ -70,7 +70,7 @@ API origin, highest precedence first:
 | # | Kind | Detail (closed set) |
 |---|------|---------------------|
 | 1 | `flag` | `--api` |
-| 2 | `env` | `KOFRA_API`, `KOFRA_URL` (each possibly filled from its `DROPWAY_*` legacy twin; see below) |
+| 2 | `env` | `KOFRA_API` or `DROPWAY_API`, then `KOFRA_URL` or `DROPWAY_URL` (literal winning name within each twin pair; see below) | <!-- rebrand:keep -->
 | 3 | `project` | `./dropway.json` field `api` |
 | 4 | `default` | saved default instance in `credentials.json` |
 
@@ -79,7 +79,7 @@ Key, highest precedence first:
 | # | Kind | Detail (closed set) |
 |---|------|---------------------|
 | 1 | `flag` | `--key` |
-| 2 | `env` | `KOFRA_API_KEY` (possibly filled from `DROPWAY_API_KEY`) <!-- rebrand:keep --> |
+| 2 | `env` | `KOFRA_API_KEY` or `DROPWAY_API_KEY` (literal winning name within the twin pair) | <!-- rebrand:keep -->
 | 3 | `saved` | `credentials.json` entry for the effective API origin |
 
 Rules:
@@ -227,8 +227,37 @@ Field rules:
   check IDs and new nullable fields; consumers must ignore unknown
   check IDs. Any breaking change ships as a new schema string.
 - `source.detail` for flags is the literal flag (`--api`, `--key`); for
-  env it is the literal variable name from the closed set above; for
-  `project`, `default` and `saved` it is `null`.
+  env it is the literal variable name from the closed set
+  `KOFRA_API`, `DROPWAY_API`, `KOFRA_URL`, `DROPWAY_URL`, <!-- rebrand:keep -->
+  `KOFRA_API_KEY`, `DROPWAY_API_KEY`. This applies to selected and <!-- rebrand:keep -->
+  shadowed source references. A winning legacy twin keeps its literal
+  `DROPWAY_*` name and has `viaLegacyName: true`; a winning `KOFRA_*` <!-- rebrand:keep -->
+  name has `viaLegacyName: false`. A shadowed reference names the
+  literal variable but makes no claim about its value. For `project`,
+  `default` and `saved`, `source.detail` is `null`. <!-- rebrand:keep -->
+- `credentialsFile.defaultPresent`, `instanceCount` and
+  `hasEntryForEffectiveApi` are always present, never omitted. Their
+  values follow the table below; `null` means unavailable, not absent.
+  For a `valid` file, `defaultPresent` is true exactly when `default`
+  is a string (including an empty string), and `instanceCount` is the
+  number of own entries in `instances` (zero when omitted).
+  `hasEntryForEffectiveApi` is the truthiness of the saved entry's
+  `key` at the resolved origin, not merely the presence of that entry.
+  If no origin resolved (including an empty winning `--api`), no lookup
+  occurs and that field is `null`, regardless of file state.
+
+  | Credentials file state | `defaultPresent` | `instanceCount` | `hasEntryForEffectiveApi` |
+  |---|---|---|---|
+  | `absent` | `false` | `0` | `false` if an origin resolved, otherwise `null` |
+  | `valid` | boolean as above | count as above | boolean lookup result if an origin resolved, otherwise `null` |
+  | `malformed` (`invalid_json` or `invalid_shape`) | `null` | `null` | `null` |
+  | `unreadable` (any detail) | `null` | `null` | `null` |
+
+  Malformed and unreadable summaries stay unavailable even though the
+  unchanged resolver treats unreadable/invalid JSON credentials as
+  empty for resolution. A valid file's default and count remain known
+  when the effective API is unresolved. These summary fields do not
+  change source selection or exit semantics.
 - `removed` appears only on the `api.value_trimmed` check. It is an
   array of distinct strings drawn from `userinfo`, `path`, `query`
   and `fragment`, in that order, listing each part normalization
@@ -434,19 +463,19 @@ config dir via `KOFRA_CONFIG_DIR`, synthetic cwd, controlled env):
 |---|------|--------|
 | 1 | `--api` set plus env, link and default | exit per key state; `api.selected` source `flag`; one `api.source_shadowed` per lower set source |
 | 2 | `KOFRA_API` plus `KOFRA_URL` | `KOFRA_API` wins; `KOFRA_URL` shadowed |
-| 3 | only `DROPWAY_API` set | wins with `viaLegacyName: true` <!-- rebrand:keep --> |
-| 4 | `KOFRA_API` plus `DROPWAY_API` | `KOFRA_API` wins; `env.legacy_shadowed` info <!-- rebrand:keep --> |
+| 3 | only `DROPWAY_API` set; repeat with only `DROPWAY_URL` | literal `source.detail` is `DROPWAY_API` / `DROPWAY_URL`, respectively, with `viaLegacyName: true`; never renamed to `KOFRA_*` in output | <!-- rebrand:keep -->
+| 4 | `KOFRA_API` plus `DROPWAY_API` | `source.detail: KOFRA_API`, `viaLegacyName: false`; `env.legacy_shadowed` names `DROPWAY_API` without a validity claim | <!-- rebrand:keep -->
 | 5 | empty-string env values | treated as absent |
 | 6 | link `api` plus saved default | link wins; default shadowed |
 | 7 | valid link `api` differing from effective origin | `project_link.foreign_instance` warning; mappings ignored |
-| 8 | nothing set anywhere | exit 2, `status: unconfigured`, `api.unconfigured` error; unknown flags also exit 2 but keep the error envelope with no `status` |
-| 9 | winning `--api` invalid, valid env present | exit 2 `invalid_api_url` on the flag; env shadowed, not consulted |
-| 10 | `credentials.json` with invalid JSON | `credentials_file.malformed` (`invalid_json`); key falls through; exit follows the effective outcome |
-| 11 | `credentials.json` valid JSON, wrong shape | `malformed` with `invalid_shape` (resolver behavior unchanged) |
-| 12 | credentials path is a directory | `unreadable` with `not_a_file` |
+| 8 | nothing set anywhere | exit 2, `status: unconfigured`, `api.unconfigured` error; absent credentials summary is `defaultPresent: false`, `instanceCount: 0`, `hasEntryForEffectiveApi: null`; unknown flags also exit 2 but keep the error envelope with no `status` |
+| 9 | winning `--api` invalid, valid env present | exit 2 `invalid_api_url` on the flag; env shadowed, not consulted; `hasEntryForEffectiveApi: null` |
+| 10 | `credentials.json` with invalid JSON | `credentials_file.malformed` (`invalid_json`); all three credential summary fields are `null`, including with a resolved API; key falls through; exit follows the effective outcome |
+| 11 | `credentials.json` valid JSON, wrong shape | `malformed` with `invalid_shape`; all three credential summary fields are `null`, including with a resolved API (resolver behavior unchanged) |
+| 12 | credentials path is a directory; repeat with permission and other I/O failures | `unreadable` with `not_a_file` / `permission` / `io_error`; all three credential summary fields are `null`, including with a resolved API |
 | 13 | `dropway.json` malformed / unreadable | matching `project_link.*` error checks |
 | 14 | key precedence flag over env over saved; kinds `dw_` / `dwc_` / other | `key.selected` with the right source and kind; `key.kind_noted` for non-`dw_` |
-| 15 | API resolved, no key anywhere | exit 3, `status: needs_key`, `key.absent` error |
+| 15 | API resolved, no key anywhere, credentials file absent | exit 3, `status: needs_key`, `key.absent` error; `defaultPresent: false`, `instanceCount: 0`, `hasEntryForEffectiveApi: false` |
 | 16 | canaries of every key kind planted (`dw_test_…`, `dwc_test_…`, prefix-less `other` secret) | no `SECRET_PATTERNS` match in any output byte; every canary substring absent |
 | 17 | `--api` with userinfo, path, query, fragment | origin emitted; `api.value_trimmed` lists each removed part; no input echo |
 | 18 | hostile schemes (`javascript:`, `ftp:`, `file:`), control characters | `invalid`, exit 2 |
@@ -458,12 +487,14 @@ config dir via `KOFRA_CONFIG_DIR`, synthetic cwd, controlled env):
 | 24 | determinism: two consecutive runs | byte-identical stdout; no `savedAt`, no timestamps |
 | 25 | no-prompt: stdin closed, stdout piped | exits promptly; stderr carries no prompt |
 | 26 | JSON conformance | parses; `schema` exact; `checks` within bounds and ID set; unknown IDs ignored by the consumer test |
-| 27 | empty `--api ""` with valid env present | exit 2 `no_instance` on the flag plus `api.empty_value`; env shadowed, not consulted |
+| 27 | empty `--api ""` with valid env present; valid credentials with a string default and two instances | exit 2 `no_instance` on the flag plus `api.empty_value`; env shadowed, not consulted; `defaultPresent: true`, `instanceCount: 2`, `hasEntryForEffectiveApi: null`; repeat with absent credentials (`false`, `0`, `null`) and malformed/unreadable credentials (all three `null`) |
 | 28 | empty `--key ""` with valid env key present | flag falls through (truthiness); env key selected |
 | 29 | link `api` with trimmable suffix normalizing to the effective origin | `apiMatchesEffective: false`, mappings ignored, `foreign_instance` warning (mirrors `publish` string equality) |
 | 30 | only `DROPWAY_CONFIG_DIR` set | `configDir.selector` is `DROPWAY_CONFIG_DIR` with `viaLegacyName: true` <!-- rebrand:keep --> |
 | 31 | forced internal failure with `--json` | exit 1, byte-exact fixed error envelope, no `status`, no caller bytes |
 | 32 | `KOFRA_CONFIG_DIR` outside the home directory | `configDir.path` is `null` in JSON; human output names the selector only; no path component in either output |
+| 33 | API resolved, only `DROPWAY_API_KEY` set; repeat with both key twins set | legacy-only: `source.detail: DROPWAY_API_KEY`, `viaLegacyName: true`; both: `source.detail: KOFRA_API_KEY`, `viaLegacyName: false`, `env.legacy_shadowed` names `DROPWAY_API_KEY`; no key value emitted | <!-- rebrand:keep -->
+| 34 | valid credentials `{}`; then empty string default, two instances, one with a truthy key | first: `defaultPresent: false`, `instanceCount: 0`; second: `defaultPresent: true`, `instanceCount: 2`; each has `hasEntryForEffectiveApi: null` without a resolved API; with explicit valid `--api`, lookup is `true` only for the truthy-key entry, otherwise `false` |
 
 ## Security-review questions
 
