@@ -74,6 +74,7 @@ repository) or `npx skills add https://<app>` (templated with that instance).
 | `claim_site` | core | Claim an anonymous site (listed only when anonymous publishing is on) | `POST .../claim` |
 | `create_site` | sites | Reserve a site without files | `POST /api/v1/sites` |
 | `rename_site` | sites | New slug (the old URL stops working) | `POST .../rename` |
+| `duplicate_site` | sites | Copy the live version into a new slug, live at once (SPA mode only; re-apply a password) | `POST .../duplicate` |
 | `get_version` | versions | One version; missing uploads of a pending one | `GET .../versions/{version}` |
 | `delete_version` | versions | Delete a non-live version (needs `confirm`) | `DELETE .../versions/{id}` |
 | `list_api_keys`, `create_api_key`, `revoke_api_key` | keys | Scoped keys | `/api/v1/keys` |

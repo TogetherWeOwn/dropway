@@ -1,15 +1,19 @@
 import type { DropwayContext } from "../context";
-import { appOrigin, siteFileUrl } from "../context";
+import { appOrigin, siteFileUrl, siteUrl } from "../context";
 import { ApiError, badRequest, conflict, forbidden, notFound, unauthorized } from "../errors";
 import { detectFileKind } from "../lib/filetypes";
+import { newId } from "../lib/crypto";
 import { isHtml, isTextual } from "../lib/mime";
 import { encodePath, normaliseFilePath } from "../lib/paths";
 import { validateSlug } from "../lib/slug";
 import type { Principal, Scope } from "../principal";
 import { readBlob, readBlobRange } from "./blobs";
-import { getFile } from "./deploys";
+import { getFile, validateManifest } from "./deploys";
+import { emit, meter } from "./events";
 import { dropLive, refreshLive } from "./live";
-import { getSiteFor, parseSettings, updateSite, type SiteRow, type VersionRow } from "./sites";
+import { quotaExceeded, requireQuota } from "./policy";
+import { createSite, discardNewSite, getSiteFor, getVersion, parseSettings, updateSite, type SiteRow, type VersionRow } from "./sites";
+import { getUsage, incrementalBytes, PROJECTED_STORAGE_SQL, usageStatements } from "./usage";
 import { atomicWrite, siteSlugError } from "./atomic-write";
 
 /**
@@ -120,6 +124,100 @@ export async function renameSite(dc: DropwayContext, p: Principal, ref: unknown,
   await refreshLive(dc, site.id);
   const fresh = (await dc.env.DB.prepare("SELECT * FROM sites WHERE id = ?").bind(site.id).first<SiteRow>())!;
   return { renamed: true, site: fresh, oldSlug: site.slug };
+}
+
+export interface DuplicateSiteInput {
+  newSlug: unknown;
+  message?: unknown;
+  client?: string | null;
+  source?: string;
+}
+
+/**
+ * Copy a site's live version into a brand-new slug, live at once. Blobs are
+ * content-addressed, so this copies manifest pointers only; no bytes move and
+ * the source is untouched. Only SPA mode is carried over: the password (and
+ * with it the whole access gate), title, description and every other setting
+ * reset to the instance default, and the caller re-applies a password. Every
+ * refusal happens before the new site row exists, or removes it again, so a
+ * refused duplicate leaves no orphan site, version or taken slug.
+ */
+export async function duplicateSite(dc: DropwayContext, p: Principal, ref: unknown, input: DuplicateSiteInput) {
+  if (typeof input.newSlug !== "string") throw badRequest("invalid_slug", "newSlug must be a string.");
+  const wanted = validateSlug(input.newSlug);
+  const source = await getSiteByRef(dc, p, ref, "sites:write");
+  if (source.mode === "transfer") {
+    throw conflict("transfer_immutable", "Transfers cannot be duplicated into sites.", "Create a new transfer instead.");
+  }
+  const live = source.current_version_id ? await getVersion(dc, source.id, source.current_version_id) : null;
+  if (!live || live.status !== "ready") {
+    throw conflict(
+      "version_conflict",
+      `Site "${source.slug}" has no live version to duplicate.`,
+      `Publish files to "${source.slug}" first (POST /api/v1/publish with {"site": "${source.slug}", ...}), then duplicate again.`,
+    );
+  }
+  const { results: files } = await dc.env.DB.prepare("SELECT path, sha256, size, content_type AS contentType FROM version_files WHERE version_id = ? ORDER BY path")
+    .bind(live.id)
+    .all<{ path: string; sha256: string; size: number; contentType: string }>();
+  // The manifest went live once already, so this only re-checks the caps (which a
+  // host may have lowered since). It runs before createSite so a refusal is clean.
+  const owner = { siteId: source.id, tenantId: source.tenant_id };
+  validateManifest(files, await dc.adapters.policy.limits(p, owner, dc));
+  const newBytes = await incrementalBytes(dc, source.tenant_id, source.id, files);
+  const storageQuota = await requireQuota(dc, p, "storage_bytes", owner, (await getUsage(dc, source.tenant_id)).storage_bytes, newBytes);
+
+  // New-slug validation, collisions (including transfer tombstones), quotas and
+  // policy run inside createSite, exactly as for a fresh site.
+  const { site } = await createSite(dc, p, { slug: wanted, spa: source.spa === 1 });
+  const now = Date.now();
+  const versionId = newId("ver");
+  const message = input.message == null ? null : String(input.message).slice(0, 500);
+  try {
+    await dc.adapters.policy.beforeDeploy?.(
+      p,
+      { siteId: site.id, tenantId: site.tenant_id, fileCount: live.file_count, totalBytes: live.total_bytes, newBytes },
+      dc,
+    );
+    const [, , madeLive] = await dc.env.DB.batch([
+      dc.env.DB.prepare(
+        `INSERT INTO versions (id, site_id, number, status, file_count, total_bytes, manifest_hash, base_version_id, source, client, message, created_by, created_at, finalized_at)
+         VALUES (?, ?, (SELECT COALESCE(MAX(number), 0) + 1 FROM versions WHERE site_id = ?), 'ready', ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        versionId, site.id, site.id, live.file_count, live.total_bytes, live.manifest_hash,
+        input.source ?? "api", input.client ? String(input.client).slice(0, 120) : null, message,
+        p.kind === "member" ? p.memberId : p.kind, now, now,
+      ),
+      // Pointer copy: the new version's rows reference the same stored blobs.
+      dc.env.DB.prepare(
+        `INSERT INTO version_files (version_id, path, sha256, size, content_type)
+         SELECT ?, path, sha256, size, content_type FROM version_files WHERE version_id = ?`,
+      ).bind(versionId, live.id),
+      dc.env.DB.prepare(
+        `UPDATE sites SET current_version_id = ?, updated_at = ? WHERE id = ? AND current_version_id IS NULL AND deleted_at IS NULL
+           AND (? IS NULL OR (${PROJECTED_STORAGE_SQL}) <= ?)`,
+      ).bind(versionId, now, site.id, storageQuota, site.tenant_id, site.id, versionId, storageQuota),
+      ...usageStatements(dc, site.tenant_id),
+    ]);
+    if (!madeLive?.meta.changes) {
+      if (storageQuota !== null) throw quotaExceeded("storage_bytes", storageQuota);
+      throw conflict("version_conflict", "The new site changed while it was being duplicated.", "Retry the duplicate.");
+    }
+  } catch (e) {
+    await discardNewSite(dc, site);
+    throw e;
+  }
+  await refreshLive(dc, site.id);
+  const version = (await getVersion(dc, site.id, versionId))!;
+  emit(dc, "onPublish", {
+    kind: "deploy",
+    site: { id: site.id, slug: site.slug, tenantId: site.tenant_id, url: siteUrl(dc, site.slug) },
+    version: { id: version.id, number: version.number, fileCount: version.file_count, totalBytes: version.total_bytes },
+    principal: p,
+    at: now,
+  });
+  meter(dc, { type: "deploy", tenantId: site.tenant_id, siteId: site.id, versionId: version.id, fileCount: version.file_count, totalBytes: version.total_bytes, at: now });
+  return { site: { ...site, current_version_id: versionId, updated_at: now }, version };
 }
 
 export type AccessMode = "public" | "password" | "restricted" | "private";
