@@ -773,13 +773,57 @@ async function themeSwitchChecks(browser, mf, fx) {
       const pressed = await page.getAttribute('.k-mode-switch button[value="dark"]', "aria-pressed");
       record(
         "no-script",
-        scripts === 0 && hop?.location === "/nope?x=1" && (await theme(page)) === "dark" && c?.value === "dark" && c.secure && c.path === "/" && c.sameSite === "Lax" && !c.httpOnly && c.expires > Date.now() / 1000 + 364 * 86400 && pressed === "true",
+        scripts === 0 && hop?.location === "/nope?x=1#dw-mode" && (await theme(page)) === "dark" && c?.value === "dark" && c.secure && c.path === "/" && c.sameSite === "Lax" && !c.httpOnly && c.expires > Date.now() / 1000 + 364 * 86400 && pressed === "true",
         { scripts, hop, cookie: c, pressed },
       );
+
       await Promise.all([page.waitForNavigation(), page.click('.k-mode-switch button[value="auto"]')]);
       record("no-script-auto", (await theme(page)) === null && (await cookie(context)) === null, { theme: await theme(page), cookie: await cookie(context), hop: redirects.at(-1) });
     } catch (e) {
       record("no-script", false, String(e).slice(0, 300));
+    } finally {
+      await context.close();
+    }
+  }
+  // 1b. No script, as a browser follows it: the 303 is a real navigation to next#dw-mode (a meta refresh here, so
+  //     Chromium routes it), and the next Tab lands on the switch, not on "Skip to content", with the page unscrolled.
+  {
+    const context = await browser.newContext(ctxOpts);
+    await context.route("**/*", async (route) => {
+      const req = route.request();
+      const url = req.url();
+      if (!/^https:\/\/([a-z0-9-]+\.)?kofra(-sites|-separate)?\.test\//.test(url)) return route.abort();
+      const body = req.postDataBuffer();
+      const res = await mf.dispatchFetch(url, { method: req.method(), headers: await req.allHeaders(), body: body && req.method() !== "GET" && req.method() !== "HEAD" ? body : undefined, redirect: "manual" });
+      const location = res.headers.get("location");
+      if (location && res.status >= 300 && res.status < 400 && req.isNavigationRequest()) {
+        for (const c of res.headers.getSetCookie?.() ?? []) {
+          const pair = c.split(";")[0];
+          const i = pair.indexOf("=");
+          if (/max-age=0/i.test(c)) await context.clearCookies({ name: pair.slice(0, i) });
+          else await context.addCookies([{ name: pair.slice(0, i), value: pair.slice(i + 1), url: `${APP}/`, secure: true, sameSite: "Lax" }]);
+        }
+        const to = new URL(location, url).href.replace(/[&"<>]/g, (c) => ({ "&": "&amp;", '"': "&quot;", "<": "&lt;", ">": "&gt;" })[c]);
+        return route.fulfill({ status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }, body: `<!doctype html><meta http-equiv="refresh" content="0;url=${to}">` });
+      }
+      const headers = {};
+      res.headers.forEach((v, k) => {
+        headers[k] = v;
+      });
+      await route.fulfill({ status: res.status, headers, body: Buffer.from(await res.arrayBuffer()) });
+    });
+    const page = await context.newPage();
+    try {
+      await page.goto(`${APP}/nope?x=1`);
+      await Promise.all([page.waitForURL((u) => u.hash === "#dw-mode", { waitUntil: "load" }), page.click('.k-mode-switch button[value="dark"]')]);
+      // The returned page has settled (it is the :target's document, focused) before the key goes in.
+      await page.waitForFunction(() => document.readyState === "complete" && document.hasFocus() && document.querySelector(":target")?.id === "dw-mode");
+      await page.waitForTimeout(100);
+      await page.keyboard.press("Tab");
+      const resumed = await page.evaluate(() => ({ url: location.pathname + location.search + location.hash, theme: document.documentElement.getAttribute("data-theme"), focused: document.activeElement?.getAttribute("value") ?? document.activeElement?.tagName, inSwitch: !!document.activeElement?.closest(".k-mode-switch"), scrollY }));
+      record("no-script-focus-resumes", resumed.url === "/nope?x=1#dw-mode" && resumed.theme === "dark" && resumed.inSwitch && resumed.scrollY === 0, resumed);
+    } catch (e) {
+      record("no-script-focus-resumes", false, String(e).slice(0, 300));
     } finally {
       await context.close();
     }
@@ -1003,7 +1047,7 @@ const FOCUS_PROBE = () => {
 };
 
 /** G4: Tab from the top of the page (or of an open dialog) through every focusable element, then Shift+Tab back. */
-/** Until the page stops scrolling (a smooth scroll to the focused element, with normal motion), at most ~1 s. */
+/** Until the page stops scrolling (a smooth scroll to the focused element, with normal motion), at most ~3 s. */
 const SETTLE = () =>
   new Promise((done) => {
     let last = null;
@@ -1013,7 +1057,7 @@ const SETTLE = () =>
       const now = `${scrollX},${scrollY}`;
       still = now === last ? still + 1 : 0;
       last = now;
-      if (still >= 3 || ++n > 60) done();
+      if (still >= 5 || ++n > 180) done();
       else requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
