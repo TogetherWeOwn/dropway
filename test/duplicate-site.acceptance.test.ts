@@ -343,7 +343,7 @@ describe("duplicate_site over MCP", () => {
     try {
       const r = await mcp.call("duplicate_site", { site: "dupe-mcp-origin", newSlug: "dupe-mcp-copy" });
       expect(r.isError, r.text).toBe(false);
-      const [first] = r.text.trim().split("\n");
+      const first = r.text.trim().split("\n")[0] ?? "";
       expect(first.length, "one-line text summary").toBeGreaterThan(0);
       expect(first).toContain("dupe-mcp-copy");
       const url = (r.data as any).url ?? (r.data as any).site?.url;
