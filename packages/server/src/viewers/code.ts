@@ -31,6 +31,7 @@ export const CODE_CSS = `
 .dw-codehead .dw-lang{margin-right:auto;font-family:var(--mono);font-size-adjust:ch-width .7}
 .dw-src{margin:8px 18px 32px;border:1px solid var(--rule-soft);background:var(--paper-3);color:var(--ink);overflow:auto;font:13px/24px var(--mono);font-size-adjust:ch-width .7;tab-size:4}
 .dw-truncated .dw-src{max-height:70vh}
+@media (max-width:720px){.dw-codehead{flex-wrap:wrap}.dw-codehead .dw-lang{flex-basis:100%}}
 .dw-lines{display:table;width:max-content;min-width:100%;border-collapse:collapse;padding:.4rem 0}
 .dw-ln{display:table-row}
 .dw-ln>a{display:table-cell;width:3em;box-sizing:content-box;padding:0 .9em 0 .8em;text-align:right;color:var(--muted);opacity:.6;text-decoration:none;user-select:none;-webkit-user-select:none;border-right:1px solid var(--rule-soft);vertical-align:top}

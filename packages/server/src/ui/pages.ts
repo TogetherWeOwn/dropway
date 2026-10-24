@@ -112,7 +112,7 @@ export async function homePage(c: Context<DropwayEnv>): Promise<Response> {
   const body = `<section class="k-hero" aria-labelledby="dw-home-h"><div class="k-wrap"><div>
 <p class="k-k">Self-hosted · single tenant · on Cloudflare</p>
 <h1 id="dw-home-h">${e(name)}</h1>
-<p class="k-lede">Publish a file, a folder or a whole site to a live URL in one call. Every publish is a version you can roll back to, and every file opens in the browser as what it is: pages, Markdown, code, data, images, PDFs and media, with the raw file one click away.</p>
+<p class="k-lede">Publish a file, a folder or a whole site to a live URL in one call. Every publish is a version you can roll back to, and every file opens in the browser as what it is: pages, Markdown, code, data, images, PDFs and media.</p>
 <div class="k-btnrow" id="dw-home-cta"><a class="k-btn" href="/login">Sign in</a><a class="k-btn k-ghost" href="#dw-agents">Connect an agent</a></div>
 </div><figure class="k-plate" aria-hidden="true"><span class="k-plate-art"></span></figure></div></section>
 <div class="k-guilloche-band" aria-hidden="true"></div>
