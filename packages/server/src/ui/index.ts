@@ -17,8 +17,6 @@ export function installUi(app: Hono<DropwayEnv>, slots: UiSlots) {
   installSigninUi(app);
   app.get("/__dropway/ui/:file", (c) => clientScriptResponse(c.req.param("file")) ?? c.notFound());
   app.get("/login", async (c) => {
-    c.header("Cache-Control", "no-store");
-    c.header("Referrer-Policy", "no-referrer");
     if (c.req.query("token") !== undefined) {
       for (const [name, value] of Object.entries(SIGNIN_HEADERS)) c.header(name, value);
       try {
@@ -36,7 +34,9 @@ export function installUi(app: Hono<DropwayEnv>, slots: UiSlots) {
         return c.redirect("/login?invalid=1", 303);
       }
     }
-    return loginPage(c);
+    const response = await loginPage(c);
+    response.headers.set("Cache-Control", "no-store");
+    return response;
   });
   // The sign-in forms post here only if the dashboard script has not loaded yet: never echo or
   // store what was sent (it may be a key), just send the person back. Secrets never land in a URL.

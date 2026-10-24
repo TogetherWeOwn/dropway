@@ -432,11 +432,12 @@ is refused without mutation. Metadata-less GET requests with absent Accept or va
 non-HTML Accept (including JSON and `*/*`) retain the real one-use issuer contract;
 absence of browser evidence is not universal browser/scanner attestation. Legacy
 browsers without the required write headers cannot confirm or claim. Token confirmation,
-its errors, claim and session pages use no-store/no-referrer. Token-free login retains
-strict-origin-when-cross-origin for its native email forms. Auth forms have a 65,536-wire-byte
+its errors, claim and session pages use no-store/no-referrer. Token-free login uses
+no-store plus strict-origin-when-cross-origin for its native email forms. Auth forms have a 65,536-wire-byte
 ceiling with early declared-length refusal and streaming cancellation before proof, delivery,
 claim or session-refresh effects; JSON retains its separate 8MiB budget. Outer/auth error
-diagnostics redact URL queries and credential tokens; this is not an all-log secrecy guarantee.
+diagnostics and the missing-blob site diagnostic redact URL queries and credential tokens;
+this is not an all-log secrecy guarantee.
 Auth API operations are registered alongside other core operations, with browser-only
 MCP exclusions; the shared services enforce their real session or email proof.
 `/dashboard/sessions` lists/revokes sessions and signs out. The existing resource dashboard

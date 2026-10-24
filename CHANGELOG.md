@@ -63,6 +63,9 @@
 - Bound sign-in/claim URL-encoded forms at 65,536 wire bytes before proof, delivery,
   ownership or session-refresh effects. Reject declared oversize before reading,
   cancel streaming overflow, and preserve the separate JSON and disabled-email contracts.
+- Make token-free login explicitly no-store while retaining its native email form referrer
+  policy; keep token confirmation/claim/session pages no-referrer. Sanitize missing-blob
+  diagnostics with the same query/token redaction as outer errors.
 - Add migration `0004_sessions.sql`; apply it before upgrading the Worker.
   Numbers 0002 and 0003 remain reserved for their separate roadmap features.
 
