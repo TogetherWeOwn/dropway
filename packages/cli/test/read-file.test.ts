@@ -146,6 +146,13 @@ describe("read-file", () => {
     expect(h.stderr()).toContain("Truncated: continue with: kofra read-file my-site big.txt --offset 65536 --version v2 --length 65536");
   });
 
+  it("shell-quotes paths with metacharacters in the continuation command", async () => {
+    const h = await harness(() => okPage(page({ path: "docs/a #1.txt", size: 70000, offset: 0, length: 65536, truncated: true, nextOffset: 65536 })));
+    const code = await run(["read-file", "my-site", "docs/a #1.txt", ...BASE], h.io);
+    expect(code).toBe(EXIT.ok);
+    expect(h.stderr()).toContain("Truncated: continue with: kofra read-file my-site 'docs/a #1.txt' --offset 65536");
+  });
+
   it("keeps human content byte-for-byte with no added newline", async () => {
     const h = await harness(() => okPage(page({ content: "no-newline", size: 10, length: 10 })));
     const code = await run(["read-file", "my-site", "index.html", ...BASE], h.io);

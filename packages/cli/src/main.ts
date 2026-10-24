@@ -13,7 +13,7 @@ import { linkKey, linkPath, readCredentials, readLink, removeCredentials, saveCr
 import { collectFiles } from "./files.ts";
 import { encryptFiles } from "./encrypt.ts";
 import { withLegacyEnv } from "./legacy-brand.ts";
-import { formatBytes, plural, shortTime, table } from "./output.ts";
+import { formatBytes, plural, shellQuote, shortTime, table } from "./output.ts";
 import { publish, publishZip, waitForVersion, type ProgressEvent, type PublishResult, type VersionInfo } from "./publish.ts";
 import { VERSION } from "./version.ts";
 
@@ -553,8 +553,8 @@ Examples:
       const range = data.size === 0 ? "empty file" : `bytes ${data.offset}-${Math.max(data.offset, end - 1)} of ${data.size}`;
       let line = `${data.path} — ${formatBytes(data.size)} (${data.contentType}), encoding ${data.encoding}, version ${data.versionId}, ${range}. SHA-256: ${data.sha256}`;
       if (data.truncated && data.nextOffset !== null) {
-        const cont = [`kofra read-file ${slug} ${data.path}`, `--offset ${data.nextOffset}`];
-        if (version !== undefined) cont.push(`--version ${version}`);
+        const cont = [`kofra read-file ${shellQuote(slug)} ${shellQuote(data.path)}`, `--offset ${data.nextOffset}`];
+        if (version !== undefined) cont.push(`--version ${shellQuote(version)}`);
         if (length !== undefined) cont.push(`--length ${length}`);
         if (encoding !== undefined) cont.push(`--encoding ${encoding}`);
         line += `\nTruncated: continue with: ${cont.join(" ")}`;
