@@ -21,5 +21,10 @@ export function siteSlugError(error: unknown, slug: string, hint: string): ApiEr
   if (/\bUNIQUE constraint failed: sites\.slug(?=:|$)/.test(String(error)) || /\btransfer_slug_reserved(?=:|$)/.test(String(error))) {
     return conflict("slug_taken", `The site name "${slug}" is taken.`, hint);
   }
+  // Race backstop for R-59 holds (the common case already got a precise error
+  // from checkNameAvailable before the batch ran).
+  if (/\bslug_name_held(?=:|$)/.test(String(error)) || /\bslug_name_redirect(?=:|$)/.test(String(error))) {
+    return conflict("slug_reserved", `The site name "${slug}" is held for its previous owner.`, hint);
+  }
   return undefined;
 }

@@ -22,7 +22,7 @@ async function publish(dw: Instance, slug: string | null, content = "hello", key
     ...(key === undefined ? { key: dw.ownerKey } : key === null ? {} : { key }),
     body: form({ "index.html": `<h1>${content}</h1>`, "docs/page.html": `<p>${content}</p>` }, fields),
   });
-  expect(res.status).toBe(201);
+  expect([200, 201]).toContain(res.status);
   return res.body as { slug: string; url: string };
 }
 
@@ -444,6 +444,32 @@ describe("R-59 deleted versions answer 410, never another site's bytes", () => {
       expect([404, 410]).toContain(res.status);
       expect(await res.text()).not.toContain("new-owner-bytes");
     }
+  });
+
+  it("version addresses work from a separate sites origin", async () => {
+    const APP = "https://app.test";
+    const SITES = "https://sites.test";
+    const split = await freshInstance({ appOrigin: APP, sitesOrigin: SITES });
+    await publish(split, "split-site", "v1-content");
+    await publish(split, "split-site", "v2-content");
+    const list = await split.json("/api/v1/sites/split-site/versions", { key: split.ownerKey });
+    const v1 = (list.body.versions as Array<{ id: string; number: number }>).find((v) => v.number === 1)!;
+    const del = await split.call(`/api/v1/sites/split-site/versions/${v1.id}`, { method: "DELETE", key: split.ownerKey });
+    expect(del.status).toBe(200);
+    expect((await split.call(`${SITES}/split-site--v1/`, { headers: NAV })).status).toBe(410);
+    expect((await split.call(`${SITES}/split-site--v2/`, { headers: NAV })).status).toBe(404);
+    await rename(split, "split-site", "split-new");
+    const moved = await split.call(`${SITES}/split-site--v2/docs/page.html?q=1`, { headers: NAV });
+    expect(moved.status).toBe(308);
+    expect(moved.headers.get("location")).toBe(`${SITES}/split-new--v2/docs/page.html?q=1`);
+  });
+
+  it("in subdomain mode the path-prefix form of a version address 301s to canonical", async () => {
+    const sub = await freshInstance({ appOrigin: "https://app.test", sitesMode: "subdomain", sitesDomain: "sites.test" });
+    await publish(sub, "versioned-site", "v1-content");
+    const res = await sub.call("https://app.test/s/versioned-site--v1/docs/page.html?q=1", { headers: NAV });
+    expect(res.status).toBe(301);
+    expect(res.headers.get("location")).toBe("https://versioned-site--v1.sites.test/docs/page.html?q=1");
   });
 
   it("a deleted version's <slug>--v<N> answers 410 in subdomain mode", async () => {

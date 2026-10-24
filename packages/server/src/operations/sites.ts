@@ -1,9 +1,9 @@
 import { HTTP_SITE, HTTP_MANIFEST_ENTRY, HTTP_DEPLOY } from "./http-schemas";
-import { accessModeOf, appOrigin, createSite, describeSite, parseSettings, renameSite, siteUrl, createSiteWithDeploy, serializeSite } from "@dropway/core";
-import { SETTINGS_INPUT, SITE_OUT, SITE_REF, obj } from "../mcp/schemas";
+import { accessModeOf, appOrigin, createSite, describeSite, parseSettings, releaseSlug, renameSite, requireConfirm, siteUrl, createSiteWithDeploy, serializeSite } from "@dropway/core";
+import { CONFIRM_SLUG, SETTINGS_INPUT, SITE_OUT, SITE_REF, obj } from "../mcp/schemas";
 import { readJson } from "../routes/api";
 import { defineOperation } from "../operations";
-import { fromSchema, LIST, WRITE, CREATE, siteOut, str, settingsFrom, P, D, clientOf } from "./shared";
+import { fromSchema, LIST, WRITE, CREATE, DESTROY, siteOut, str, settingsFrom, P, D, clientOf } from "./shared";
 
 export const SITE_OPERATIONS = [
   defineOperation({
@@ -134,7 +134,8 @@ export const SITE_OPERATIONS = [
     summary: "Rename a site",
     toolset: "sites",
     scopes: ["sites:write"],
-    description: "Give a site a new slug, which changes its URL. The old URL stops working immediately (no redirect yet), so update any links you shared.",
+    description:
+      "Give a site a new slug, which changes its URL. The old URL answers 308 to the new URL (path and query kept) until redirectUntil, so links you already shared keep working.",
     input: fromSchema({
       type: "object",
       properties: {
@@ -154,6 +155,7 @@ export const SITE_OPERATIONS = [
           oldSlug: { type: "string" },
           slug: { type: "string" },
           url: { type: "string" },
+          redirectUntil: { type: ["string", "null"], description: "Until when the old URL 308s to the new one (ISO 8601); null when nothing was renamed." },
           site: SITE_OUT,
           warnings: LIST,
         },
@@ -163,17 +165,19 @@ export const SITE_OPERATIONS = [
     annotations: WRITE,
     async handler(a, { dw, principal }) {
       const out = await renameSite(dw, principal, a.site, a.newSlug);
+      const redirectUntil = out.redirectUntil ? new Date(out.redirectUntil).toISOString() : null;
       return {
         renamed: out.renamed,
         oldSlug: out.oldSlug,
         slug: out.site.slug,
         url: siteUrl(dw, out.site.slug),
+        redirectUntil,
         site: await siteOut(dw, out.site),
         warnings: out.renamed
           ? [
               {
-                code: "old_url_gone",
-                message: `${siteUrl(dw, out.oldSlug)} no longer works.`,
+                code: "old_url_redirects",
+                message: `${siteUrl(dw, out.oldSlug)} now redirects (308) to ${siteUrl(dw, out.site.slug)} until ${redirectUntil}.`,
               },
             ]
           : [],
@@ -192,6 +196,7 @@ export const SITE_OPERATIONS = [
           oldSlug: { type: "string" },
           slug: { type: "string" },
           url: { type: "string" },
+          redirectUntil: { type: ["string", "null"] },
           site: HTTP_SITE,
         },
       }),
@@ -203,6 +208,7 @@ export const SITE_OPERATIONS = [
           oldSlug: out.oldSlug,
           slug: out.site.slug,
           url: siteUrl(D(c), out.site.slug),
+          redirectUntil: out.redirectUntil ? new Date(out.redirectUntil).toISOString() : null,
           site: {
             ...(await describeSite(D(c), out.site)),
             access: { mode: accessModeOf(out.site) },
@@ -221,12 +227,88 @@ export const SITE_OPERATIONS = [
           oldSlug: "bright-otter-x7k2",
           slug: "renamed-page",
           url: "https://dropway.example/s/renamed-page/",
+          redirectUntil: "2027-10-24T00:00:00.000Z",
           site: {
             slug: "renamed-page",
             url: "https://dropway.example/s/bright-otter-x7k2/",
             currentVersionId: "ver_example",
           },
         },
+      },
+    ],
+  }),
+  defineOperation({
+    id: "release_slug",
+    method: "POST",
+    path: "/api/v1/slugs/release",
+    summary: "Release a held site name early",
+    toolset: "sites",
+    scopes: ["admin"],
+    description:
+      "Operator action: release a freed site name before its hold ends (for trademark disputes), with a required reason that is kept as the audit record. The name becomes free at once. Set confirm to the slug.",
+    input: fromSchema({
+      type: "object",
+      properties: {
+        slug: {
+          type: "string",
+          description: "The held name to release.",
+        },
+        reason: {
+          type: "string",
+          description: "Why the hold ends early (for example a trademark dispute reference). Kept as the audit record.",
+        },
+        confirm: CONFIRM_SLUG,
+      },
+      required: ["slug", "reason", "confirm"],
+      additionalProperties: false,
+    }),
+    output: fromSchema(
+      obj(
+        {
+          released: { type: "boolean" },
+          slug: { type: "string" },
+          redirectsReleased: { type: "number" },
+          holdsReleased: { type: "number" },
+          reason: { type: "string" },
+        },
+        ["released", "slug", "reason"],
+      ),
+    ),
+    annotations: DESTROY,
+    confirm: "slug",
+    async handler(a, { dw, principal }) {
+      return releaseSlug(dw, principal, a.slug, a.reason);
+    },
+    http: {
+      input: fromSchema({
+        type: "object",
+        required: ["slug", "reason", "confirm"],
+        properties: { slug: { type: "string" }, reason: { type: "string" }, confirm: { type: "string" } },
+      }),
+      output: fromSchema({
+        type: "object",
+        properties: {
+          released: { type: "boolean" },
+          slug: { type: "string" },
+          redirectsReleased: { type: "number" },
+          holdsReleased: { type: "number" },
+          reason: { type: "string" },
+        },
+      }),
+      handler: async (c) => {
+        const body = await readJson(c);
+        // Custom http handlers bypass the registry's declarative confirm check; enforce it here.
+        requireConfirm(body.confirm, String(body.slug ?? ""), "the slug");
+        return c.json(await releaseSlug(D(c), P(c), body.slug, body.reason));
+      },
+    },
+    tool: {
+      summarize: (r) => `Released the hold on ${r.slug}.`,
+    },
+    examples: [
+      {
+        input: { slug: "held-name", reason: "Trademark dispute #42", confirm: "held-name" },
+        output: { released: true, slug: "held-name", redirectsReleased: 0, holdsReleased: 1, reason: "Trademark dispute #42" },
       },
     ],
   }),
