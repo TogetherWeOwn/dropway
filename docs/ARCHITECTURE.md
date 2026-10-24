@@ -404,6 +404,57 @@ No public registration route or core migration is added.
   the real Worker inside workerd; `packages/cli/test` covers the rest, end to end against a local Worker.
   A new REST endpoint usually needs no CLI change: `kofra api <METHOD> <path>` reaches it.
 
+## Built-in member sign-in
+
+`services/sessions.ts` owns hashed login links (15 minutes, atomic one-use exchange),
+30-day sliding/revocable sessions, member authorization and the strict browser-write
+header check. `services/email-signin.ts` owns existing-member code challenges (five tries,
+15 minutes, HMAC hashes, no signup). `services/access-identity.ts` verifies RS256 Access
+assertions against configured team JWKS, issuer, audience and time claims before mapping
+an existing unique member email. Unsafe Access-derived REST/MCP requests require both
+exact app Origin and same-origin Fetch Metadata even when a proxy strips cookies.
+Explicit bearer credentials always take precedence and keep their non-browser contract.
+
+The default identity adapter still ignores cookies on ordinary REST resource routes and
+MCP. Thin `/api/v1/auth/*` browser-auth handlers explicitly resolve the built-in session;
+claim uses `GET /claim` plus `POST /claim`, calling the same core claim service as REST/MCP.
+Cookie writes require exact `Origin` AND `Sec-Fetch-Site: same-origin`, not SameSite alone.
+Session reads without both headers do not slide D1 expiry or refresh browser cookies.
+The session/claim script deliberately calls `POST /api/v1/auth/sessions/refresh`, which
+naturally carries Origin. It renews the same cookie and D1 authority together after an
+hour; before then it is a no-op. This cookie-only operation skips unrelated bearer
+identity resolution (and API-key last-use writes), not its core session/browser checks.
+Any `Sec-Fetch-*` header (even empty), or an explicit HTML/XHTML Accept entry (even
+`q=0`), selects read-only identity confirmation. Inspection never slides an existing
+session, even when both write headers are present. The confirmation form's guarded
+`POST /login/confirm` revalidates and consumes the unspent proof. Malformed/empty Accept
+is refused without mutation. Metadata-less GET requests with absent Accept or valid
+non-HTML Accept (including JSON and `*/*`) retain the real one-use issuer contract;
+absence of browser evidence is not universal browser/scanner attestation. Legacy
+browsers without the required write headers cannot confirm or claim. Token confirmation,
+its errors, claim and session pages use no-store/no-referrer. Token-free login uses
+no-store plus strict-origin-when-cross-origin for its native email forms. Auth forms have a 65,536-wire-byte
+ceiling with early declared-length refusal and streaming cancellation before proof, delivery,
+claim or session-refresh effects; JSON retains its separate 8MiB budget. Outer/auth error
+diagnostics and the missing-blob site diagnostic redact URL queries and credential tokens;
+this is not an all-log secrecy guarantee.
+Auth API operations are registered alongside other core operations, with browser-only
+MCP exclusions; the shared services enforce their real session or email proof.
+`/dashboard/sessions` lists/revokes sessions and signs out. The existing resource dashboard
+continues using API keys; no session is converted into a persistent API key. The claim
+script keeps fragment proof in tab storage across sign-in and sends it only in the claim
+POST. No user content runs on these pages. API-key sign-in remains cookie-free.
+
+`adapters.email.send(message, dw)` optionally overrides delivery. Without it, `EMAIL.send`
+(Cloudflare Email Service) delivers; without either, email options are hidden and the
+operations return `feature_unavailable`. Enabled email-code requests require both browser
+headers even without cookies, before challenge creation or delivery, for known and unknown
+emails alike. A consumed code permits a new challenge after the one-minute send
+cooldown; atomic reservation prevents simultaneous reissue deliveries. Unconsumed
+resends preserve their original deadline and remaining five-try budget. `EMAIL_FROM`
+sets the verified sender. Embedding
+cookie adapters and `uiSlots.session` remain separate and require their own security proof.
+
 ## Conventions
 
 - TypeScript strict, `verbatimModuleSyntax`; packages export TypeScript source

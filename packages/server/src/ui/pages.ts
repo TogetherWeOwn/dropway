@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { appOrigin, encodePath, isSetUp, looksLikeSlug, requestPathToFilePath, siteUrl, type DropwayContext } from "@dropway/core";
+import { appOrigin, emailAvailable, encodePath, isSetUp, looksLikeSlug, requestPathToFilePath, siteUrl, type DropwayContext } from "@dropway/core";
 import type { DropwayEnv } from "../env";
 import type { UiSlots } from "../extensions";
 import { escapeHtml, formatBytes } from "../html";
@@ -147,6 +147,9 @@ ${bootstrapField.replaceAll("%ID%", "dw-setup-secret")}
 <h1 class="dw-h1">Sign in to ${e(dw.config.instanceName)}</h1>
 <div id="dw-login-note"></div>
 ${sessionNote}${setup}
+${c.req.query("invalid") ? '<p role="alert">This login link is invalid, expired, already used, or belongs to another signed-in member. Ask for a new link or deliberately sign out first.</p>' : ""}
+<p>Existing members can use a one-time login link from the owner or an agent. <a href="/dashboard/sessions">Manage browser sessions</a>.</p>
+${emailAvailable(dw) ? `<section class="dw-section"><header><h2>Email code</h2></header><form class="dw-pad" method="post" action="/api/v1/auth/email-code"><label>Email <input name="email" type="email" autocomplete="email" required></label><button type="submit">Send sign-in code</button></form><form class="dw-pad" method="post" action="/api/v1/auth/email-code/verify"><label>Email <input name="email" type="email" autocomplete="email" required></label><label>Code <input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" required></label><button type="submit">Verify code</button></form><p>Codes expire in 15 minutes and allow five tries. Only existing members can sign in.</p></section>` : ""}
 <section class="dw-section"><header><h2>API key</h2></header><form class="dw-pad" id="dw-signin" method="post" action="/login">
 <div class="dw-field"><label class="dw-label" for="dw-key">API key</label><input class="dw-input dw-mono" id="dw-key" name="key" type="password" autocomplete="current-password" placeholder="dw_…" required spellcheck="false"></div>
 <label class="dw-check"><input type="checkbox" name="remember"><span>Keep me signed in on this browser<span class="dw-sub">Otherwise the key is forgotten when this tab closes.</span></span></label>

@@ -43,13 +43,42 @@
 - MCP discovery uses operation summaries to preserve the tool inventory budget;
   full descriptions remain in OpenAPI and the full agent reference.
 
+### Member browser sign-in
+
+- Add one-use 15-minute member login links, revocable 30-day sliding
+  `__Host-dw_session` cookies, optional email codes through `EmailAdapter`/`EMAIL`
+  (five tries, 15 minutes), RS256 Cloudflare Access identity for existing members,
+  and signed-in anonymous-site claiming. Ordinary REST resources remain bearer-only;
+  explicit browser auth and claim writes require exact app `Origin` **and**
+  `Sec-Fetch-Site: same-origin`. API-key sign-in stays cookie-free.
+- Any Fetch Metadata or explicit HTML/XHTML Accept selects read-only identity
+  confirmation before a login link is consumed; malformed Accept is refused. Real
+  metadata-less non-HTML programmatic exchanges remain supported. Confirmation
+  inspection cannot renew a session. Untrusted session reads cannot slide authority or refresh cookies;
+  first-party pages use a guarded POST to renew D1 and the same cookie after an hour.
+  Access-derived unsafe calls and enabled email-code requests enforce both browser
+  headers, regardless of Cookie presence. Explicit bearer clients remain independent.
+- Preserve proof on origin/transport refusal, redact diagnostic URL queries/tokens,
+  and let failed email delivery retry without resetting verification budgets.
+- Bound sign-in/claim URL-encoded forms at 65,536 wire bytes before proof, delivery,
+  ownership or session-refresh effects. Reject declared oversize before reading,
+  cancel streaming overflow, and preserve the separate JSON and disabled-email contracts.
+- Make token-free login explicitly no-store while retaining its native email form referrer
+  policy; keep token confirmation/claim/session pages no-referrer. Sanitize missing-blob
+  diagnostics with the same query/token redaction as outer errors.
+- Add migration `0004_sessions.sql`; apply it before upgrading the Worker.
+  Numbers 0002 and 0003 remain reserved for their separate roadmap features.
+
 ### Extension API
 
 - Bump `EXTENSION_API_VERSION` to 3: add optional `Limits.transferMaxExpiryDays`,
   `DropwayHooks.onEvent` for transfer lifecycle events, public transfer services
   and transfer expiry/purge counts in `CleanupReport`. Existing adapters keep
   working; omitted delivery limits use the instance ceiling.
-
+- Also in version 3: optional `EmailAdapter`, the optional Cloudflare Email Service
+  binding, and `emailFrom`, `accessTeamDomain`, `accessAud` configuration. Existing
+  identity overrides and embedding-session slots remain independent of built-in
+  browser auth; their deployments need their own cookie security verification.
 - Extend the version 2 contract with public core
   `AtomicWriteExtension`, `SiteNameMutation` and optional
   `PolicyAdapter.siteNameMutation`: every concrete site create/rename candidate

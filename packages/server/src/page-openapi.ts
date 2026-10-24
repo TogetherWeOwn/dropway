@@ -9,6 +9,27 @@ export const PAGE_PATHS: Json = {
     responses: { "200": { description: "Plain-text message and download links on the app origin." }, "303": { description: "Unlocked; redirect with a digest-bound cookie." }, "403": { description: "Password required." }, "410": { description: "Delivery closed." }, "451": { description: "Delivery unavailable." } },
   })])),
 
+  "/login/confirm": {
+    post: page("confirm_login_link", "Confirm browser sign-in as the member shown on the login page", {
+      tags: ["pages"], security: [], "x-mcp-exclude": "browser confirmation; use create_login_link",
+      description: "Submit the unconsumed login proof deliberately. Requires exact app Origin and Sec-Fetch-Site: same-origin; does not silently replace another member's session.",
+      requestBody: { required: true, content: { "application/x-www-form-urlencoded": { schema: { type: "object", properties: { token: { type: "string" } }, required: ["token"] } } } },
+      responses: { "303": { description: "Session issued; redirect to /dashboard/sessions." }, "400": { description: "Invalid login link." }, "401": { description: "Expired or used login link." }, "403": { description: "Browser intent or account mismatch refusal." }, "413": { description: "Form exceeds 65,536 wire bytes; no proof consumed." } },
+    }),
+  },
+  "/__dropway/auth.js": {
+    get: page("browser_auth_script", "First-party session management and claim script", {
+      tags: ["pages"], security: [], "x-mcp-exclude": "browser asset",
+      responses: { "200": { description: "JavaScript", content: { "text/javascript": { schema: { type: "string" } } } } },
+    }),
+  },
+  "/dashboard/sessions": {
+    get: page("sessions_page", "Your browser sessions", {
+      tags: ["pages"], security: [], "x-mcp-exclude": "browser page",
+      description: "Requires a real __Host-dw_session cookie. Ordinary navigation reads without refreshing authority; deliberate first-party activity may renew with both browser headers.",
+      responses: { "200": { description: "HTML", content: { "text/html": { schema: { type: "string" } } } }, "303": { description: "Sign in at /login." } },
+    }),
+  },
   "/mcp": {
     post: page("mcp", "Remote MCP server (Streamable HTTP, stateless)", {
       tags: ["agents"],
@@ -44,6 +65,12 @@ export const PAGE_PATHS: Json = {
     }),
   },
   "/claim": {
+    post: page("claim_browser_session", "Keep an anonymous site using member sign-in and claim proof", {
+      tags: ["pages"], security: [], "x-mcp-exclude": "browser page; use claim_site",
+      description: "Requires the real __Host-dw_session cookie, claimToken, exact app Origin and Sec-Fetch-Site: same-origin. Only the POST changes ownership; the fragment stays out of GET requests.",
+      requestBody: { required: true, content: { "application/x-www-form-urlencoded": { schema: { type: "object", properties: { slug: { type: "string" }, claimToken: { type: "string" } }, required: ["slug", "claimToken"] } } } },
+      responses: { "303": { description: "Claimed; redirect to /dashboard/sessions." }, "401": { description: "Sign in again." }, "403": { description: "Browser intent or proof refused." }, "413": { description: "Form exceeds 65,536 wire bytes; no claim or session renewal." } },
+    }),
     get: page("claim_page", "Claim page for anonymous sites (token in the URL fragment)", {
       tags: ["agents"],
       security: [],
@@ -77,7 +104,7 @@ export const PAGE_PATHS: Json = {
     }),
   },
   "/login": {
-    get: page("login_page", "Sign-in page (API key; first-run setup)", {
+    get: page("login_page", "Sign-in page, login-link confirmation and programmatic exchange", {
       tags: ["pages"],
       security: [],
       "x-mcp-exclude": "browser page",

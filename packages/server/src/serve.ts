@@ -24,6 +24,7 @@ import { MAX_CSS_REWRITE_BYTES, rewriteCss, rewriteHtml, type PathRewrite } from
 import { PATH_SHIM_VERSION, pathShimScript } from "./path-shim";
 import { injectReportLink, REPORT_LINK_VERSION } from "./report-link";
 import { serveTransfer } from "./transfers";
+import { diagnosticText } from "./diagnostics";
 
 /**
  * How a site is being served.
@@ -481,7 +482,7 @@ async function serveFile(
 }
 
 function blobMissing(dw: DropwayContext, req: Request, mode: ServeMode, live: LiveSite): Response {
-  console.error(JSON.stringify({ event: "blob_missing", slug: live.slug, version: live.versionId, url: req.url }));
+  console.error(JSON.stringify({ event: "blob_missing", slug: live.slug, version: live.versionId, url: diagnosticText(req.url) }));
   return systemResponse(dw, req, mode, live, 502, "502", "File unavailable", "This file is listed in the site but its contents could not be read. Try again shortly.");
 }
 
