@@ -26,6 +26,7 @@ import { bindUiSlots } from "./ui/shell";
 import { VIEWERS, type Viewer } from "./viewers";
 import { createMcpEndpoint } from "./mcp";
 import { CORE_MCP_TOOLS } from "./mcp/tools";
+import { acceptLegacyRequestHeaders, addLegacyResponseHeaders, legacyBrandHeaders } from "./legacy-brand";
 
 export interface Dropway {
   /** Worker fetch handler: export default { fetch: dropway.fetch, scheduled: dropway.scheduled }. */
@@ -50,8 +51,20 @@ export { CORE_MCP_TOOLS };
 
 const contexts = new WeakMap<Request, DropwayContext>();
 
+/** Download grants and recipient links are credentials, including in upstream errors. */
+function requestErrorDetails(request: Request, error: unknown) {
+  const url = new URL(request.url);
+  const safeUrl = `${url.origin}${url.pathname}`;
+  // Exceptions can echo credentials using any equivalent URL encoding, not just
+  // the spelling on this request. Do not serialize their message or stack here.
+  if (url.searchParams.has("grant") || url.searchParams.has("recipient")) {
+    return { url: safeUrl, error: "[redacted]" };
+  }
+  return { url: safeUrl, error: String(error), stack: (error as Error)?.stack };
+}
+
 /**
- * Build a Dropway Worker. The open-source entry (apps/worker) calls this with no
+ * Build a Kofra Worker. The open-source entry (apps/worker) calls this with no
  * options; a hosted layer passes adapters, hooks, routes, MCP tools and UI slots.
  */
 export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
@@ -93,6 +106,8 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
   for (const extend of opts.routes ?? []) extend({ api, app: appRoutes });
   installOperationRoutes(api, operations);
   const app = new Hono<DropwayEnv>();
+  // Former-name headers (legacy-brand.ts) here too, so the exported app matches fetch.
+  app.use("*", legacyBrandHeaders);
   app.use("*", async (c, next) => {
     c.set("dw", contexts.get(c.req.raw) ?? context(c.env, c.executionCtx, new URL(c.req.url)));
     c.set("requestId", c.req.header("cf-ray") ?? crypto.randomUUID());
@@ -116,11 +131,16 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
   });
   app.onError((err, c) => {
     if (c.req.path.startsWith("/api/")) return apiErrorResponse(c, err);
-    console.error(JSON.stringify({ event: "app_error", path: c.req.path, error: String(err), stack: (err as Error)?.stack }));
+    console.error(JSON.stringify({ event: "app_error", ...requestErrorDetails(c.req.raw, err) }));
     return c.text("Internal error", 500);
   });
 
+  // Clients from before the rename send and read the old header names (legacy-brand.ts).
   async function fetch(request: Request, env: ServerBindings, ctx: ExecutionContext): Promise<Response> {
+    return addLegacyResponseHeaders(await handle(acceptLegacyRequestHeaders(request), env, ctx));
+  }
+
+  async function handle(request: Request, env: ServerBindings, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const dw = context(env, ctx, url);
     try {
@@ -145,7 +165,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
         }
       }
     } catch (e) {
-      console.error(JSON.stringify({ event: "serve_error", url: request.url, error: String(e), stack: (e as Error)?.stack }));
+      console.error(JSON.stringify({ event: "serve_error", ...requestErrorDetails(request, e) }));
       return new Response("Internal error", { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
     }
   }

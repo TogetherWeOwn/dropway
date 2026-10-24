@@ -192,7 +192,7 @@ describe("R-03 complete validation errors", () => {
 
 async function publish(instance: Instance, slug: string, text: string, client: string) {
   const result = await instance.json("/api/v1/publish", {
-    method: "POST", key: instance.ownerKey, headers: { "X-Dropway-Client": client },
+    method: "POST", key: instance.ownerKey, headers: { "X-Kofra-Client": client },
     body: form({ "index.html": text }, { slug }),
   });
   expect([200, 201]).toContain(result.status);

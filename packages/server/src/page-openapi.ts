@@ -2,11 +2,18 @@
 type Json = Record<string, any>;
 const page = (operationId: string, summary: string, metadata: Json): Json => ({ operationId, summary, description: summary, ...metadata });
 export const PAGE_PATHS: Json = {
+  "/t/{slug}": Object.fromEntries(["get", "head", "post"].map((method) => [method, page(`transfer_page_${method}`, method === "post" ? "Unlock a file delivery" : "Open a file delivery", {
+    tags: ["pages"], security: [], "x-mcp-exclude": "browser page; use get_transfer for sender state",
+    parameters: [{ name: "slug", in: "path", required: true, schema: { type: "string" } }],
+    ...(method === "post" ? { requestBody: { required: true, content: { "application/x-www-form-urlencoded": { schema: { type: "object", properties: { password: { type: "string" } }, required: ["password"] } } } } } : {}),
+    responses: { "200": { description: "Plain-text message and download links on the app origin." }, "303": { description: "Unlocked; redirect with a digest-bound cookie." }, "403": { description: "Password required." }, "410": { description: "Delivery closed." }, "451": { description: "Delivery unavailable." } },
+  })])),
+
   "/mcp": {
     post: page("mcp", "Remote MCP server (Streamable HTTP, stateless)", {
       tags: ["agents"],
       description:
-        'JSON-RPC over Streamable HTTP (MCP 2026-07-28, and 2025-era clients through the stateless lane). Same API keys as REST. Narrow the tool list with ?toolsets=core,sites,versions,keys,members and ?read_only=1. Example: claude mcp add --transport http dropway <origin>/mcp --header "Authorization: Bearer dw_..."',
+        'JSON-RPC over Streamable HTTP (MCP 2026-07-28, and 2025-era clients through the stateless lane). Same API keys as REST. Narrow the tool list with ?toolsets=core,sites,versions,keys,members and ?read_only=1. Example: claude mcp add --transport http kofra <origin>/mcp --header "Authorization: Bearer dw_..."',
       requestBody: { required: true, content: { "application/json": { schema: { type: "object", description: "A JSON-RPC 2.0 request." } } } },
       "x-mcp-exclude": "this is the MCP endpoint itself",
       responses: {
@@ -54,6 +61,31 @@ export const PAGE_PATHS: Json = {
       security: [],
       "x-mcp-exclude": "browser page; use claim_site",
       responses: { "200": { description: "HTML", content: { "text/html": { schema: { type: "string" } } } } },
+    }),
+  },
+  "/__dropway/encrypted/{slug}": {
+    get: page("encrypted_page", "Decrypt a CLI-encrypted site locally (key only in URL fragment)", {
+      tags: ["pages"],
+      parameters: [{ name: "slug", in: "path", required: true, schema: { type: "string" }, description: "Site slug." }],
+      security: [],
+      "x-mcp-exclude": "browser-only WebCrypto; never send the share key to an API or MCP tool",
+      responses: { "200": { description: "First-party decryptor HTML", content: { "text/html": { schema: { type: "string" } } } } },
+    }),
+  },
+  "/__dropway/encrypted-loader.js": {
+    get: page("encrypted_script", "First-party encrypted-site decryptor", {
+      tags: ["pages"],
+      security: [],
+      "x-mcp-exclude": "static browser asset",
+      responses: { "200": { description: "JavaScript", content: { "text/javascript": { schema: { type: "string" } } } } },
+    }),
+  },
+  "/__dropway/encrypted-frame": {
+    get: page("encrypted_frame", "Opaque sandbox for authenticated decrypted content", {
+      tags: ["pages"],
+      security: [],
+      "x-mcp-exclude": "browser-only sandbox bootstrap",
+      responses: { "200": { description: "Isolated content runtime", content: { "text/html": { schema: { type: "string" } } } } },
     }),
   },
   "/login": {
@@ -236,7 +268,7 @@ export const PAGE_PATHS: Json = {
   "/.well-known/agent-skills/{name}/SKILL.md": {
     get: page("agent_skill_file", "A skill listed in the discovery index", {
       tags: ["agents"],
-      parameters: [{ name: "name", in: "path", required: true, schema: { type: "string" }, description: "Skill name (dropway)" }],
+      parameters: [{ name: "name", in: "path", required: true, schema: { type: "string" }, description: "Skill name (kofra)" }],
       security: [],
       "x-mcp-exclude": "discovery document",
       responses: { "200": { description: "Markdown", content: { "text/markdown": { schema: { type: "string" } } } } },
@@ -254,7 +286,7 @@ export const PAGE_PATHS: Json = {
   "/.well-known/skills/{name}/SKILL.md": {
     get: page("agent_skill_file_legacy", "A skill listed in the legacy index", {
       tags: ["agents"],
-      parameters: [{ name: "name", in: "path", required: true, schema: { type: "string" }, description: "Skill name (dropway)" }],
+      parameters: [{ name: "name", in: "path", required: true, schema: { type: "string" }, description: "Skill name (kofra)" }],
       security: [],
       deprecated: true,
       "x-mcp-exclude": "discovery document",

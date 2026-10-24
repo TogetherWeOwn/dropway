@@ -147,7 +147,7 @@ export async function fetchUrlSource(
   for (let hop = 0; ; hop++) {
     let res: Response;
     try {
-      res = await doFetch(current.href, { headers: { "User-Agent": "Dropway-Fetch/1 (+https://github.com/TogetherWeOwn/dropway)", ...opts.headers }, redirect: "manual", signal });
+      res = await doFetch(current.href, { headers: { "User-Agent": "Kofra-Fetch/1 (+https://github.com/TogetherWeOwn/dropway)", ...opts.headers }, redirect: "manual", signal });
     } catch (e) {
       const timedOut = signal.aborted;
       throw new ApiError(422, "fetch_failed", `Could not fetch ${current.href}: ${timedOut ? "timed out" : String((e as Error)?.message ?? e)}.`, "Check the URL is reachable from the public internet, or send the bytes another way.", {
@@ -292,7 +292,7 @@ export async function resolveFileInputs(
         throw tooLarge(
           "inline_too_large",
           `"${path}" is ${bytes.length} bytes; inline ${enc} content is limited to ${cap} bytes per file.`,
-          "Use a url source the server can fetch, or send sha256 + size and PUT the bytes to the returned upload link (or use the CLI: npx dropway publish <dir>).",
+          "Use a url source the server can fetch, or send sha256 + size and PUT the bytes to the returned upload link (or use the CLI: npx kofra publish <dir>).",
           { path, size: bytes.length, limit: cap },
         );
       }
@@ -432,7 +432,7 @@ function uploadItemsFor(dc: DropwayContext, entries: Array<{ path: string; sha25
       method: "PUT",
       url,
       headers: { "Content-Type": ct },
-      curl: `curl -fsS -X PUT ${shellQuote(url)} -H "Authorization: Bearer $DROPWAY_API_KEY" -H ${shellQuote(`Content-Type: ${ct}`)} --data-binary @${shellQuote(es[0]!.path)}`,
+      curl: `curl -fsS -X PUT ${shellQuote(url)} -H "Authorization: Bearer $KOFRA_API_KEY" -H ${shellQuote(`Content-Type: ${ct}`)} --data-binary @${shellQuote(es[0]!.path)}`,
     });
   }
   return items;

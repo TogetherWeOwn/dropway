@@ -23,6 +23,7 @@ import { renderListing } from "./viewers/listing";
 import { MAX_CSS_REWRITE_BYTES, rewriteCss, rewriteHtml, type PathRewrite } from "./path-rewrite";
 import { PATH_SHIM_VERSION, pathShimScript } from "./path-shim";
 import { injectReportLink, REPORT_LINK_VERSION } from "./report-link";
+import { serveTransfer } from "./transfers";
 
 /**
  * How a site is being served.
@@ -114,8 +115,8 @@ export function securityHeaders(h: Headers, live: LiveSite | null, mode: ServeMo
   else h.set("Access-Control-Allow-Origin", "*");
   h.set("X-Robots-Tag", live?.expiresAt ? "noindex" : "all");
   if (live) {
-    h.set("X-Dropway-Site", live.slug);
-    if (live.versionId) h.set("X-Dropway-Version", live.versionId);
+    h.set("X-Kofra-Site", live.slug);
+    if (live.versionId) h.set("X-Kofra-Version", live.versionId);
     if (live.crossOriginIsolation) {
       h.set("Cross-Origin-Opener-Policy", "same-origin");
       h.set("Cross-Origin-Embedder-Policy", "require-corp");
@@ -275,6 +276,13 @@ export async function serveSite(
   const started = Date.now();
   const url = new URL(req.url);
   const method = req.method.toUpperCase();
+  // Transfer gates never depend on an eventually consistent live manifest.
+  const transfer = await dw.env.DB.prepare("SELECT mode FROM sites WHERE slug = ? UNION ALL SELECT 'transfer' AS mode FROM transfer_slug_tombstones WHERE slug = ? AND NOT EXISTS (SELECT 1 FROM sites WHERE slug = ?) LIMIT 1").bind(slug, slug, slug).first<{ mode: string }>();
+  if (transfer?.mode === "transfer") {
+    const path = requestPathToFilePath(pathname);
+    if (path === null) return new Response("Not found", { status: 404 });
+    return serveTransfer(req, dw, slug, path);
+  }
   if (method === "OPTIONS") {
     // Password-protected sites are not readable cross-origin, so their preflights grant nothing.
     const gated = !!(await getLiveSite(dw, slug))?.passwordHash;
@@ -397,7 +405,7 @@ async function serveFile(
     out.set("ETag", etag);
     out.set("Cache-Control", live.passwordHash ? "private, no-store" : "public, max-age=0, must-revalidate");
     out.set("Vary", "Accept, Sec-Fetch-Dest");
-    out.set("X-Dropway-Viewer", viewer.id);
+    out.set("X-Kofra-Viewer", viewer.id);
     out.delete("Content-Length");
     securityHeaders(out, live, mode);
     let page = new Response(head ? null : rendered.body, { status, headers: out });
@@ -412,7 +420,7 @@ async function serveFile(
     const shim = rewriteKind === "html" && mode.sandbox;
     const etag = `W/"${rewriteKind ? "pm-" : ""}${sha256}${shim ? `-js${PATH_SHIM_VERSION}` : ""}${reportVariant}"`;
     const h = new Headers({ "Content-Type": contentType, ETag: etag, "Cache-Control": cacheControlFor(path, live) });
-    if (rewriteKind) h.set("X-Dropway-Rewritten", "path-prefix");
+    if (rewriteKind) h.set("X-Kofra-Rewritten", "path-prefix");
     securityHeaders(h, live, mode);
     if (etagMatches(req, etag)) return new Response(null, { status: 304, headers: h });
     if (head) return new Response(null, { status, headers: h });
@@ -437,7 +445,7 @@ async function serveFile(
   if (raw && (isTextual(contentType) || isHtml(contentType))) {
     // ?raw=1 shows the source: never let the browser render it.
     h.set("Content-Type", "text/plain; charset=utf-8");
-    h.set("X-Dropway-Original-Content-Type", contentType);
+    h.set("X-Kofra-Original-Content-Type", contentType);
   } else if (pre) {
     h.set("Content-Type", pre.contentType);
     h.set("Content-Encoding", pre.encoding);

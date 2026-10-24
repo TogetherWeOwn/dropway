@@ -1,5 +1,5 @@
 /**
- * Allowlist HTML sanitizer for user-authored markup that Dropway renders
+ * Allowlist HTML sanitizer for user-authored markup that Kofra renders
  * itself (raw HTML inside Markdown, notebook outputs). Built on HTMLRewriter,
  * the streaming HTML parser built into Workers, so it costs no bundle size.
  *

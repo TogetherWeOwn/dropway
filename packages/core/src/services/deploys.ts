@@ -33,10 +33,12 @@ export interface Warning {
 }
 
 export interface DeployOptions {
+  /** Internal first-version path; never parsed from an HTTP input. */
+  transferCreate?: boolean;
   message?: unknown;
   /** How the version was made: "api", "publish", "zip", "restore"... */
   source?: string;
-  /** Client attribution, from the X-Dropway-Client header (e.g. "claude-code/1.0"). */
+  /** Client attribution, from the X-Kofra-Client header (e.g. "claude-code/1.0"). */
   client?: string | null;
   /** Optimistic concurrency: fail with 409 version_conflict if the live version is no longer this one. */
   baseVersionId?: unknown;
@@ -160,6 +162,7 @@ function siteOwner(site: SiteRow) {
  * A byte-identical manifest returns { unchanged: true } and records nothing.
  */
 export async function createDeploy(dc: DropwayContext, p: Principal, site: SiteRow, files: unknown, opts: DeployOptions = {}) {
+  if (site.mode === "transfer" && !opts.transferCreate) throw conflict("transfer_immutable", "Transfer files cannot be replaced.", "Create a new transfer instead.");
   const lim = await dc.adapters.policy.limits(p, siteOwner(site), dc);
   const { entries, totalBytes } = validateManifest(files, lim);
   await dc.adapters.policy.beforeDeploy?.(p, { siteId: site.id, tenantId: site.tenant_id, fileCount: entries.length, totalBytes }, dc);
@@ -378,7 +381,8 @@ export async function uploadBlob(
 }
 
 /** Atomically make a pending version live. Retrying a finished finalize is safe. */
-export async function finalizeDeploy(dc: DropwayContext, p: Principal, site: SiteRow, versionId: string) {
+export async function finalizeDeploy(dc: DropwayContext, p: Principal, site: SiteRow, versionId: string, transferCreate = false) {
+  if (site.mode === "transfer" && !transferCreate) throw conflict("transfer_immutable", "Transfer files cannot be replaced.", "Create a new transfer instead.");
   const version = await getVersion(dc, site.id, versionId);
   if (!version) throw notFound("deploy_not_found", `No deploy ${versionId} on site ${site.slug}.`, "Start one with POST /api/v1/sites/:slug/deploys.");
   if (version.status === "ready") {
@@ -471,6 +475,7 @@ export async function listVersions(dc: DropwayContext, site: SiteRow, opts: { li
 
 /** Make an older finalized version live again (a pointer flip; no files are copied). */
 export async function restoreVersion(dc: DropwayContext, p: Principal, site: SiteRow, versionId: string) {
+  if (site.mode === "transfer") throw conflict("transfer_immutable", "Transfer files cannot be restored.", "Create a new transfer instead.");
   const version = await getVersion(dc, site.id, versionId);
   if (!version || version.status !== "ready") {
     throw notFound("version_not_found", `No finalized version ${versionId} on site ${site.slug}.`, "List versions with GET /api/v1/sites/:slug/versions.");
@@ -491,6 +496,7 @@ export async function restoreVersion(dc: DropwayContext, p: Principal, site: Sit
 
 /** Permanently delete one non-live version (for example one that leaked a secret). */
 export async function deleteVersion(dc: DropwayContext, site: SiteRow, versionId: string) {
+  if (site.mode === "transfer") throw conflict("transfer_immutable", "Transfer files cannot be deleted separately.", "Revoke the transfer; retained bytes are purged by cleanup when not held.");
   const version = await getVersion(dc, site.id, versionId);
   if (!version) throw notFound("version_not_found", `No version ${versionId} on site ${site.slug}.`);
   if (version.id === site.current_version_id) throw conflict("version_is_live", "You cannot delete the live version.", "Restore or publish another version first.");
@@ -534,6 +540,7 @@ export async function listFiles(dc: DropwayContext, site: SiteRow, versionId: st
 }
 
 export async function getFile(dc: DropwayContext, site: SiteRow, path: string, versionId?: string | null): Promise<FileRow | null> {
+  if (site.mode === "transfer") throw forbidden("Transfer bytes are only available as sites-host downloads.", "Use the transfer page's download links.", "transfer_download_required");
   const vid = versionId ?? site.current_version_id;
   if (!vid) return null;
   return dc.env.DB.prepare("SELECT path, sha256, size, content_type FROM version_files WHERE version_id = ? AND path = ?").bind(vid, path).first<FileRow>();

@@ -83,4 +83,4 @@ export const P = (c: Context<DropwayEnv>) => c.get("principal");
 
 export const D = (c: Context<DropwayEnv>) => c.get("dw");
 
-export const clientOf = (c: Context<DropwayEnv>) => c.req.header("x-dropway-client") ?? null;
+export const clientOf = (c: Context<DropwayEnv>) => c.req.header("x-kofra-client") ?? null;

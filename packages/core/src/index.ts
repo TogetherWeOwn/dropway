@@ -31,3 +31,5 @@ export * from "./services/cleanup";
 export * from "./services/idempotency";
 export * from "./services/site-ops";
 export * from "./services/sources";
+export * from "./services/transfers";
+export * from "./services/transfer-downloads";

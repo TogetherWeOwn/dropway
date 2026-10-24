@@ -14,7 +14,20 @@
   discovery. Generate docs/errors.md with npm run errors:sync; npm run check
   rejects stale output. Extension-specific error codes remain supported.
 - No server embedding option or extension signature changes; the extension API
-  remains version 2. ApiError's optional sixth argument supplies metadata.
+  remains version 3 after the file-delivery additions below. ApiError's optional
+  sixth argument supplies metadata.
+
+### Renamed: Dropway is now Kofra
+
+- User-visible names: product name, docs, UI copy, the default `INSTANCE_NAME` (`Kofra`), the CLI
+  command `kofra` (the `dropway` command stays as an alias), environment variables `KOFRA_*`,
+  response and request headers `X-Kofra-*`, the Agent Skill and MCP server name `kofra`.
+- Still accepted: `DROPWAY_*` variables (a `KOFRA_*` variable wins), `X-Dropway-*` request headers,
+  and the skill URLs under `dropway`. Responses send every `X-Kofra-*` header as `X-Dropway-*` too.
+- Unchanged on purpose: Worker, D1, R2, KV and Analytics names, database tables, cookie and storage
+  names, reserved paths (`/__dropway/`), CLI files (`dropway.json`, `.dropwayignore`,
+  `~/.config/dropway`), the `@dropway/*` workspace packages and `createDropway()`.
+- `scripts/rebrand.mjs` applies the rename and can be re-run after a rebase.
 
 ### Moving the app to a new origin
 
@@ -26,10 +39,47 @@
   New config fields `legacyAppOrigins` and `legacyDeprecatedAt`.
 - The CLI notes once per run when an instance answers with those headers, naming the new address.
 - The product name comes from `INSTANCE_NAME` in the served skill (heading, description, homepage),
-  both skills indexes and the MCP server instructions. The skill's `name` stays `dropway`.
+  both skills indexes and the MCP server instructions. The skill's `name` does not follow
+  `INSTANCE_NAME` (it is `kofra` after the rename above).
+
+### File deliveries
+
+- Add `create_transfer`, `get_transfer`, `update_transfer` and `revoke_transfers` to
+  the operation registry. `dropway api <operationId> --data ...` now uses the
+  advertised operation instead of treating its name as a URL.
+- Transfer messages and password forms stay on the app origin; immutable files
+  download from a separate sites host, with attachment, nosniff and no-store headers.
+  Password grants expire after 15 minutes and are bound to the current digest.
+- Add sender-owned slug reservations, per-file and recipient counts, conditional
+  lifecycle mutations, hourly expiry claims and held-byte retention. Revocation
+  does not release storage; manifest purge does, once, after a 24-hour retention.
+- `TRANSFER_MAX_EXPIRY_DAYS` defaults to 30 and is capped at 3,650. Policy adapters
+  may lower it. Transfer creation is refused without an isolated sites origin.
+- MCP discovery uses operation summaries to preserve the tool inventory budget;
+  full descriptions remain in OpenAPI and the full agent reference.
 
 ### Extension API
 
+- Bump `EXTENSION_API_VERSION` to 3: add optional `Limits.transferMaxExpiryDays`,
+  `DropwayHooks.onEvent` for transfer lifecycle events, public transfer services
+  and transfer expiry/purge counts in `CleanupReport`. Existing adapters keep
+  working; omitted delivery limits use the instance ceiling.
+
+- Extend the version 2 contract with public core
+  `AtomicWriteExtension`, `SiteNameMutation` and optional
+  `PolicyAdapter.siteNameMutation`: every concrete site create/rename candidate
+  composes core and extension SQL in one same-D1 batch. SQL refusal rolls back
+  all statements; only precise 409 `slug_taken` conflicts retry generated names.
+  Legacy `beforeCreateSite` remains a non-atomic, once-per-create preflight.
+- Fence rename identity/previous name inside its batch; stale preparation fails
+  with 409 `site_changed`, without extension residue or cache changes.
+- Export `createTenantWithOwner`, `CreateTenantWithOwnerInput` and
+  `CreateTenantWithOwnerOptions` for low-level atomic tenant/owner/extension SQL.
+  Existing helpers retain field rules; setup uses the new helper. Key minting,
+  setup admission races and cross-database/storage/network effects are excluded.
+- Pin the additive types, deterministic competing-writer/rollback/cache behavior
+  and version in independent disposable workerd/D1 acceptance tests. No core
+  schema changes or additional public routes.
 - Bump `EXTENSION_API_VERSION` to 2: add `defineOperation()`, typed operation
   definitions/contexts, `createDropway({ operations })` and `dropway.operations`.
   Operation input/output schemas drive REST validation, OpenAPI 3.1, MCP tools,
@@ -51,9 +101,8 @@
   including tenant/site restrictions, role and scopes. Older member records
   expire unused; retries spanning the upgrade may execute again.
 
-- Export `EXTENSION_API_VERSION = 1` from `@dropway/server`, identifying the
-  current public embedding contract. Extension API changes must update this
-  version and this section.
+- Introduced `EXTENSION_API_VERSION` in `@dropway/server` at version 1.
+  Extension API changes must update this version and this section.
 - Cover existing identity, policy limits and refusals, all five metering events,
   all three hooks, API middleware, route overrides and app routes, contexts,
   MCP tools and endpoint replacement, UI slots, viewers and scheduled work in

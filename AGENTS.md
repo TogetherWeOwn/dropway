@@ -18,4 +18,4 @@ Read `docs/ARCHITECTURE.md` first. The short version:
   `scripts/open-core-allowlist.txt` with a reason.
 - Before committing: `npm run check` (guard, typecheck, all tests).
 - Do not deploy the root `wrangler.jsonc` to an account that also runs a hosted
-  Dropway (names collide). Test instances use their own config.
+  Kofra (names collide). Test instances use their own config.

@@ -1,6 +1,6 @@
-# Self-hosting Dropway
+# Self-hosting Kofra
 
-Dropway runs on your own Cloudflare account: one Worker plus a D1 database, an R2 bucket and a KV
+Kofra runs on your own Cloudflare account: one Worker plus a D1 database, an R2 bucket and a KV
 namespace (Analytics Engine creates its dataset on the first write). It is a single-tenant product:
 you (the owner) plus the members and API keys you create. There is no signup and no billing.
 
@@ -59,14 +59,36 @@ Name clashes: Wrangler connects to an existing D1 database or R2 bucket with the
 of creating one. If your account already has a `dropway` database or a `dropway-files` bucket that
 belongs to something else, change `name`, `database_name` and `bucket_name` in `wrangler.jsonc` first.
 
+## File deliveries
+
+Deliveries require a separate files origin (`SITES_ORIGIN`, or subdomain serving);
+shared-origin `/s/` mode cannot create them. Optional password grants last 15 minutes
+and are bound to the current password digest. Recipient links attribute download
+counts but do not verify email identity. Messages are plain text. Expiry ranges
+from one hour to the configured maximum: `TRANSFER_MAX_EXPIRY_DAYS` defaults to 30
+and is capped at 3,650 days; an embedding policy can lower it. No email is sent.
+
+Set a strong `SIGNING_SECRET` before enabling password deliveries. The app's
+HttpOnly cookie is not shared with the files host: after unlock, the app page
+renders signed download links, valid for at most 15 minutes. Treat their query
+strings as bearer credentials and do not log or share them. Every request still
+checks current expiry, revocation, takedown, limit and password digest in D1.
+
+Delivery file manifests are immutable. Ordinary site publishing, settings and
+version APIs cannot replace them or change their password. Use `update_transfer`
+for permitted metadata changes and `revoke_transfers` to stop downloads at once.
+Cleanup claims expiry hourly, retains closed bytes for 24 hours, then removes
+manifest references only if there is no hold or takedown. Storage accounting is
+released once at purge, never at revoke. Sender metadata remains readable.
+
 ## First run: create the owner
 
 With the CLI (it saves the owner key in `~/.config/dropway/credentials.json`, mode 0600):
 
 ```sh
-DROPWAY_BOOTSTRAP_KEY=<your bootstrap key> npx dropway setup --api https://<worker>.<you>.workers.dev --email you@example.com
-npx dropway whoami
-npx dropway publish ./some-folder
+KOFRA_BOOTSTRAP_KEY=<your bootstrap key> npx kofra setup --api https://<worker>.<you>.workers.dev --email you@example.com
+npx kofra whoami
+npx kofra publish ./some-folder
 ```
 
 With curl:
@@ -81,7 +103,7 @@ curl -X POST https://<worker>/api/v1/setup \
 Setup works once. If you lose the owner key, `POST /api/v1/setup/recover` with the bootstrap key mints
 a new one. Add people with `POST /api/v1/members` (each gets their own key) and create narrower keys
 (for CI or an MCP client) with `POST /api/v1/keys`, e.g.
-`npx dropway api POST /keys --data '{"name":"ci","scopes":["sites:read","sites:write"]}'`.
+`npx kofra api POST /keys --data '{"name":"ci","scopes":["sites:read","sites:write"]}'`.
 
 ## Configuration
 
@@ -91,7 +113,7 @@ Variables go in `vars` in `wrangler.jsonc`; secrets with `npx wrangler secret pu
 |---|---|---|
 | `ADMIN_BOOTSTRAP_KEY` (secret) | none | Creates the owner on first run; mints recovery owner keys |
 | `SIGNING_SECRET` (secret) | bootstrap key | HMAC secret for password cookies and IP hashing |
-| `INSTANCE_NAME` | `Dropway` | Shown in pages and API responses |
+| `INSTANCE_NAME` | `Kofra` | Shown in pages and API responses |
 | `APP_ORIGIN` | request origin | Public origin of the app and API |
 | `LEGACY_APP_ORIGINS` | empty | Former app origins (comma-separated), after a move to a new `APP_ORIGIN`. See [Moving the app](#moving-the-app-to-a-new-origin) |
 | `LEGACY_DEPRECATED_AT` | none | Date of that move (ISO 8601 or Unix seconds), sent as `Deprecation: @<seconds>`; unset = no `Deprecation` header (the successor `Link` is still sent) |
@@ -141,7 +163,7 @@ state before changing it, so running it twice is safe.
 ### C. Subdomain mode with your own domain
 
 Use a domain for sites that is a different registrable domain from the app (for example the app on
-`dropway.<you>.workers.dev` or `dropway.example.com`, sites on `example-sites.com`), so a published page
+`dropway.<you>.workers.dev` or `kofra.example.com`, sites on `example-sites.com`), so a published page
 can never set or read the app's cookies.
 
 1. **Add the domain** to your Cloudflare account (a full zone, so Cloudflare serves its DNS).
@@ -166,7 +188,7 @@ can never set or read the app's cookies.
    It must be a route, not a Custom Domain: Custom Domains
    ["do not support wildcard DNS records"](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/).
 4. **Deploy**: `npm run deploy`, or push to your copy if you used the button.
-5. **Check**: `curl -sI https://anything.example-sites.com/` answers from Dropway (404, no such site),
+5. **Check**: `curl -sI https://anything.example-sites.com/` answers from Kofra (404, no such site),
    and a new publish returns `https://<name>.example-sites.com/`. Old `/s/<name>/` links on the app
    redirect to the new URLs. If sites were on a second Worker before (option B), set
    `LEGACY_SITES_ORIGINS` to its old origin so `<old origin>/<name>/...` links redirect too, and
@@ -187,7 +209,7 @@ Site names are single labels, so `<name>.example-sites.com` is covered. Do not u
 certificate.
 
 To put the app itself on your domain too, add a Custom Domain route such as
-`{ "pattern": "dropway.example.com", "custom_domain": true }` and set `APP_ORIGIN` to match.
+`{ "pattern": "kofra.example.com", "custom_domain": true }` and set `APP_ORIGIN` to match.
 
 ### Moving the app to a new origin
 
@@ -216,6 +238,6 @@ Keep `"workers_dev": true`, set `APP_ORIGIN` to the new origin and list the old 
 ## Verify a deployment
 
 ```sh
-npx dropway whoami --api https://<worker>          # instance reachable, key accepted
+npx kofra whoami --api https://<worker>          # instance reachable, key accepted
 curl -s https://<worker>/openapi.json | head -c 200  # the API describes itself
 ```

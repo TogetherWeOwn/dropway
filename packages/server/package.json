@@ -1,7 +1,7 @@
 {
   "name": "@dropway/server",
   "version": "0.1.0",
-  "description": "Dropway HTTP layer: createDropway() Hono app factory with extension points (adapters, hooks, routes, MCP tools, UI slots), site serving and viewers.",
+  "description": "Kofra HTTP layer: createDropway() Hono app factory with extension points (adapters, hooks, routes, MCP tools, UI slots), site serving and viewers.",
   "license": "MIT",
   "type": "module",
   "repository": {

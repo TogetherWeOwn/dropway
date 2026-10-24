@@ -195,7 +195,8 @@ export function operationTools(operations: readonly OperationDefinition[]): McpT
       ...op.tool,
       name: op.id,
       title: op.summary,
-      description: op.description,
+      // Schemas carry field guidance; full prose stays in OpenAPI and llms-full.txt.
+      description: op.summary,
       toolset: op.toolset,
       scopes: op.scopes,
       annotations: op.annotations,
@@ -261,7 +262,7 @@ export function installOperationRoutes(api: Hono<DropwayEnv>, operations: readon
           dw: c.get("dw"),
           principal: c.get("principal"),
           request: c.req.raw,
-          client: c.req.header("x-dropway-client") ?? null,
+          client: c.req.header("x-kofra-client") ?? null,
           idempotencyKey: validateIdempotencyKey(c.req.header("idempotency-key")),
           transport: "rest",
         };

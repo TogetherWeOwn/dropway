@@ -116,7 +116,7 @@ export function dropwayClient() {
     var headers = new Headers(opts.headers || {});
     var key = opts.key !== undefined ? opts.key : getKey();
     if (key) headers.set("Authorization", "Bearer " + key);
-    headers.set("X-Dropway-Client", "dashboard/1");
+    headers.set("X-Kofra-Client", "dashboard/1");
     var body = opts.body;
     var isRaw = typeof Blob !== "undefined" && body instanceof Blob;
     if (body !== undefined && body !== null && !isRaw && typeof body !== "string") {
@@ -563,7 +563,7 @@ export function dropwayClient() {
       try {
         res = await fetch(localPath(item.url), {
           method: "PUT",
-          headers: Object.assign(key ? { Authorization: "Bearer " + key } : {}, { "Content-Type": (item.headers && item.headers["Content-Type"]) || "application/octet-stream", "X-Dropway-Client": "dashboard/1" }),
+          headers: Object.assign(key ? { Authorization: "Bearer " + key } : {}, { "Content-Type": (item.headers && item.headers["Content-Type"]) || "application/octet-stream", "X-Kofra-Client": "dashboard/1" }),
           body: file,
         });
       } catch (e) {
@@ -1381,8 +1381,8 @@ export function dropwayClient() {
         var k = await api("/keys", { method: "POST", body: body });
         add(
           created,
-          secretBlock("Key “" + (k.name || k.prefix) + "” created", k.key, "Shown once. Give it to the agent or person as DROPWAY_API_KEY."),
-          h("pre", { class: "dw-snippet", text: "export DROPWAY_URL=" + boot.origin + "\nexport DROPWAY_API_KEY=" + k.key }),
+          secretBlock("Key “" + (k.name || k.prefix) + "” created", k.key, "Shown once. Give it to the agent or person as KOFRA_API_KEY."),
+          h("pre", { class: "dw-snippet", text: "export KOFRA_URL=" + boot.origin + "\nexport KOFRA_API_KEY=" + k.key }),
         );
         form.reset();
         loadKeys();
@@ -1784,7 +1784,7 @@ export function dropwayClient() {
   async function probeSession() {
     if (!SESSION || getKey()) return;
     try {
-      var res = await fetch(boot.api + "/me", { headers: { "X-Dropway-Client": "dashboard/1" } });
+      var res = await fetch(boot.api + "/me", { headers: { "X-Kofra-Client": "dashboard/1" } });
       if (res.ok) {
         var m = await res.json();
         sessionOk = !!m && m.principal === "member";

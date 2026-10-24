@@ -10,6 +10,8 @@ Version conflicts include liveVersionId, liveVersionNumber, liveVersionClient an
 Partial-update conflicts also retain optional yourBase, yourBaseNumber and liveClient fields.
 A missing delay on 429/503 defaults to one second. Other errors have a null delay unless supplied.
 Follow next calls to reconcile conflicts; retryable does not authorize replaying a changed request.
+Delivery unlock throttles use rate_limited (429); invalid operation shapes use invalid_request (400), and permanent slug reservations use slug_taken (409).
+A delivery takedown response never includes its private reason.
 Extension adapters can add codes and override guidance without changing built-in codes; unknown codes link to the catalog root unless docs is supplied.
 
 | Code | HTTP status | Retryable | Hint |
@@ -64,6 +66,10 @@ Extension adapters can add codes and override guidance without changing built-in
 | `invalid_site` | 400 | false | Use a site slug, site ID or a URL returned by this instance; list sites to find valid references. |
 | `invalid_size` | 400 | false | Set size to the file's non-negative integer byte length. |
 | `invalid_slug` | 400 | false | Use 3–56 lowercase letters, digits and single hyphens, starting and ending with a letter or digit. |
+| `invalid_transfer` | 400 | false | Correct the delivery fields and retry. |
+| `invalid_transfer_expiry` | 400 | false | Choose a deadline from one hour to the effective expiry ceiling. |
+| `invalid_transfer_password` | 400 | false | Use 8-1,024 characters without NUL, or empty for no password. |
+| `invalid_transfer_range` | 416 | false | Request one satisfiable byte range. |
 | `invalid_zip` | 400 | false | Send a standard .zip using deflate or stored entries. |
 | `key_limit` | 409 | false | Revoke unused keys with DELETE /api/v1/keys/:id. |
 | `key_not_found` | 404 | false | List revocable keys with GET /api/v1/keys. |
@@ -77,7 +83,7 @@ Extension adapters can add codes and override guidance without changing built-in
 | `not_available` | 403 | false | Use the instance's supported owner recovery process. |
 | `not_set_up` | 404 | false | Call POST /api/v1/setup with the bootstrap key first. |
 | `password_required` | 400 | false | Call again with a password of 4–200 characters. |
-| `path_required` | 400 | false | Add a path query parameter or X-Dropway-Path header to name the raw file. |
+| `path_required` | 400 | false | Add a path query parameter or X-Kofra-Path header to name the raw file. |
 | `rate_limited` | 429 | true | Wait retryAfterSeconds before retrying; update an existing anonymous site using its claim token. |
 | `request_too_large` | 413 | false | Split the request or use manifest/upload/finalize instead of embedding file bytes. |
 | `route_not_found` | 404 | false | See /openapi.json for supported methods and endpoints. |
@@ -92,6 +98,16 @@ Extension adapters can add codes and override guidance without changing built-in
 | `temporarily_unavailable` | 503 | true | Retry the request after the indicated delay. |
 | `tenant_not_found` | 404 | false | Check the tenant associated with the credential; ask the instance operator if it is missing. |
 | `too_many_files` | 400 | false | Split content across sites or trim build output; never silently drop files. |
+| `transfer_conflict` | 409 | false | Read the transfer again; closed or notified deliveries cannot be edited. |
+| `transfer_download_required` | 403 | false | Use the transfer page's sites-host download links. |
+| `transfer_gone` | 410 | false | Ask the sender for a new delivery. |
+| `transfer_immutable` | 409 | false | Use transfer operations, or create a new delivery for changed files. |
+| `transfer_locked` | 403 | false | Unlock the delivery on its app-origin page. |
+| `transfer_not_found` | 404 | false | Check the reference and use its sender's key. |
+| `transfer_origin_required` | 409 | false | Configure a separate sites origin. |
+| `transfer_password_proof_required` | 403 | false | Send currentPassword together with the new password. |
+| `transfer_unavailable` | 451 | false | Contact the sender. |
+| `transfer_unlock_unavailable` | 503 | true | Retry later. |
 | `unauthorized` | 401 | false | Send Authorization: Bearer dw_...; the instance owner creates keys through /api/v1/keys or /api/v1/members. |
 | `version_conflict` | 409 | false | Call get_site, reconcile the change, and retry using its live version ID as baseVersionId. |
 | `version_is_live` | 409 | false | Restore or publish another version before deleting this one. |

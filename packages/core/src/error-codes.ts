@@ -35,7 +35,7 @@ export const ERROR_CODES: Readonly<Record<string, ErrorCode>> = {
   invalid_slug: { status: 400, retryable: false, hint: "Use 3–56 lowercase letters, digits and single hyphens, starting and ending with a letter or digit." },
   invalid_zip: { status: 400, retryable: false, hint: "Send a standard .zip using deflate or stored entries." },
   password_required: { status: 400, retryable: false, hint: "Call again with a password of 4–200 characters." },
-  path_required: { status: 400, retryable: false, hint: "Add a path query parameter or X-Dropway-Path header to name the raw file." },
+  path_required: { status: 400, retryable: false, hint: "Add a path query parameter or X-Kofra-Path header to name the raw file." },
   size_mismatch: { status: 400, retryable: false, hint: "Recheck the file bytes, manifest size and Content-Length; send the raw file body." },
   slug_reserved: { status: 400, retryable: false, hint: "Pick another name, or omit the slug to get a generated one." },
   too_many_files: { status: 400, retryable: false, hint: "Split content across sites or trim build output; never silently drop files." },
@@ -89,6 +89,20 @@ export const ERROR_CODES: Readonly<Record<string, ErrorCode>> = {
   blob_missing: { status: 502, retryable: true, hint: "Retry shortly; report the requestId if the contents remain unavailable." },
   slug_generation_failed: { status: 503, retryable: true, hint: "Retry the request after the indicated delay." },
   temporarily_unavailable: { status: 503, retryable: true, hint: "Retry the request after the indicated delay." },
+  invalid_transfer: { status: 400, retryable: false, hint: "Correct the delivery fields and retry." },
+  invalid_transfer_password: { status: 400, retryable: false, hint: "Use 8-1,024 characters without NUL, or empty for no password." },
+  invalid_transfer_expiry: { status: 400, retryable: false, hint: "Choose a deadline from one hour to the effective expiry ceiling." },
+  transfer_not_found: { status: 404, retryable: false, hint: "Check the reference and use its sender's key." },
+  transfer_conflict: { status: 409, retryable: false, hint: "Read the transfer again; closed or notified deliveries cannot be edited." },
+  transfer_origin_required: { status: 409, retryable: false, hint: "Configure a separate sites origin." },
+  transfer_immutable: { status: 409, retryable: false, hint: "Use transfer operations, or create a new delivery for changed files." },
+  transfer_password_proof_required: { status: 403, retryable: false, hint: "Send currentPassword together with the new password." },
+  transfer_locked: { status: 403, retryable: false, hint: "Unlock the delivery on its app-origin page." },
+  transfer_download_required: { status: 403, retryable: false, hint: "Use the transfer page's sites-host download links." },
+  transfer_unavailable: { status: 451, retryable: false, hint: "Contact the sender." },
+  transfer_gone: { status: 410, retryable: false, hint: "Ask the sender for a new delivery." },
+  transfer_unlock_unavailable: { status: 503, retryable: true, hint: "Retry later." },
+  invalid_transfer_range: { status: 416, retryable: false, hint: "Request one satisfiable byte range." },
 };
 
 /** Shared by the checked-in Markdown generator and the instance's /docs/errors.md. */
@@ -108,6 +122,8 @@ export function errorCatalogMarkdown(): string {
     "Partial-update conflicts also retain optional yourBase, yourBaseNumber and liveClient fields.",
     "A missing delay on 429/503 defaults to one second. Other errors have a null delay unless supplied.",
     "Follow next calls to reconcile conflicts; retryable does not authorize replaying a changed request.",
+    "Delivery unlock throttles use rate_limited (429); invalid operation shapes use invalid_request (400), and permanent slug reservations use slug_taken (409).",
+    "A delivery takedown response never includes its private reason.",
     "Extension adapters can add codes and override guidance without changing built-in codes; unknown codes link to the catalog root unless docs is supplied.", "",
     "| Code | HTTP status | Retryable | Hint |", "| --- | --- | --- | --- |", ...rows, "",
   ].join("\n");

@@ -83,8 +83,8 @@ export function buildOpenApi(origin: string, instanceName: string, anonymousOrOp
                             type === "application/json"
                               ? Object.fromEntries(Object.entries(example.input as Record<string, unknown>).filter(([name]) => Object.hasOwn(props, name)))
                               : type === "multipart/form-data"
-                                ? { "index.html": "Hello from Dropway" }
-                                : "Hello from Dropway",
+                                ? { "index.html": "Hello from Kofra" }
+                                : "Hello from Kofra",
                         }
                       : {}),
                   },
@@ -97,7 +97,7 @@ export function buildOpenApi(origin: string, instanceName: string, anonymousOrOp
         success.content = {
           [op.http.responseType]: {
             schema: { type: "string", format: "binary" },
-            example: "Hello from Dropway",
+            example: "Hello from Kofra",
           },
         };
       const status = op.http?.status ?? 200;
