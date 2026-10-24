@@ -1,3 +1,4 @@
+import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { appFooter, appHeader, siteFooter } from "../packages/server/src/ui/chrome";
 import { CLIENT_SCRIPT } from "../packages/server/src/ui/assets";
@@ -214,5 +215,31 @@ describe("footers never change height when the fonts arrive (G9 at 320)", () => 
     expect(appFooter({ name: "Kofra", domains: d })).toContain(want);
     expect(siteFooter({ name: "Kofra", appOrigin: "https://kofra.test", domains: d })).toContain(want);
     for (const css of [APP_CSS, SITE_CSS]) expect(css).toContain(".k-foot .k-dom{flex-basis:100%}.k-foot .k-dom>span{display:block}.k-foot .k-dom>.k-dom-sep{display:none}");
+  });
+});
+
+describe("pinned behaviour of earlier fixes (Paperclip Review round 3)", () => {
+  it("a navigation that hits a failing database gets the per-request platform 500: its mode, fonts and both actions", async () => {
+    const dw = await freshInstance({ appOrigin: ORIGIN, sitesMode: "subdomain", sitesDomain: "sites.test" });
+    await env.DB.prepare("DROP TABLE version_files").run();
+    await env.DB.prepare("DROP TABLE sites").run();
+    const res = await dw.call("https://anything.sites.test/?theme=dark", { headers: { Accept: "text/html", "Sec-Fetch-Dest": "document" } });
+    expect(res.status).toBe(500);
+    expect(res.headers.get("content-security-policy")).toContain(`font-src ${ORIGIN}`);
+    const html = await res.text();
+    expect(html).toContain('<html lang="en" data-theme="dark">');
+    expect(html).toContain("<h1>Something went wrong on our side</h1>");
+    expect(html).toContain(`src:url(${ORIGIN}/__dropway/fonts/`);
+    const acts = /<div class="k-acts">(.*?)<\/div>/.exec(html)![1]!;
+    expect(acts).toMatch(/^<a class="k-btn" href="https:\/\/anything\.sites\.test\/">Try again<\/a><a class="k-btn k-ghost" href="https:\/\/dropway\.test">Home<\/a>$/);
+  });
+
+  it("the viewer bar's checksum is a keyboard disclosure with the full SHA-256 at every width", async () => {
+    const { call } = await siteFixture();
+    const html = await (await call("/src/app.py")).text();
+    const m = /<span class="k-sum k-mini">(.*?)<\/span><\/div>/s.exec(html);
+    expect(m, "viewer bar seal and checksum").toBeTruthy();
+    expect(m![0]).not.toContain("k-hide-sm");
+    expect(m![1]).toMatch(/<details class="k-checksum"><summary>SHA-256 [0-9a-f]{12}…<\/summary><code>[0-9a-f]{64}<\/code><\/details>$/);
   });
 });

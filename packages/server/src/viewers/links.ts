@@ -28,8 +28,8 @@ export function carryLink(siteBase: string, path: string, c: LinkCarry): string 
 
 /**
  * Relative links inside a rendered document (Markdown, notebook) that point at other files of the same site
- * go through carryLink. Links with a scheme, protocol-relative links, fragments and links that leave the
- * site are left alone. `pagePath` is the path of the page the document is shown on.
+ * go through carryLink, keeping their #fragment. Links with a scheme, protocol-relative links, same-page
+ * fragments and links that leave the site are left alone. `pagePath` is the path of the page the document is shown on.
  */
 export async function carryDocLinks(html: string, pagePath: string, siteBase: string, c: LinkCarry): Promise<string> {
   if (!carries(c)) return html;
@@ -46,8 +46,9 @@ export async function carryDocLinks(html: string, pagePath: string, siteBase: st
           return;
         }
         if (u.origin !== base.origin || !u.pathname.startsWith(siteBase)) return;
-        // setAttribute writes the value as given: escape the ampersands between the query parameters.
-        el.setAttribute("href", carryLink(siteBase, u.pathname + u.search, c).replaceAll("&", "&amp;"));
+        // The fragment goes on the hop's own URL: browsers keep it across the fragment-less 303 to the target, so
+        // b.md#setup still lands on #setup. setAttribute writes the value as given: escape the ampersands.
+        el.setAttribute("href", (carryLink(siteBase, u.pathname + u.search, c) + u.hash).replaceAll("&", "&amp;"));
       },
     })
     .transform(new Response(html))

@@ -37,6 +37,8 @@ describe("links between Kofra pages keep the mode and the embed (J29 frame navig
     const html = '<p><a href="b.md">b</a> <a href="../x/">x</a> <a href="https://e.test/">e</a> <a href="//e.test/">p</a> <a href="#h">h</a> <a href="mailto:a@b.c">m</a></p>';
     const out = await carryDocLinks(html, "/docs/a.md", "/", { theme: "dark", embed: true });
     expect(out).toContain('href="/__dropway/open?next=%2Fdocs%2Fb.md&amp;embed=1&amp;theme=dark"');
+    // A link to a section of another page keeps its fragment (on the hop; the 303 to the page inherits it).
+    expect(await carryDocLinks('<a href="b.md#setup">s</a>', "/docs/a.md", "/", { theme: "dark", embed: false })).toBe('<a href="/__dropway/open?next=%2Fdocs%2Fb.md&amp;theme=dark#setup">s</a>');
     expect(out).toContain('href="/__dropway/open?next=%2Fx%2F&amp;embed=1&amp;theme=dark"');
     for (const kept of ['href="https://e.test/"', 'href="//e.test/"', 'href="#h"', 'href="mailto:a@b.c"']) expect(out).toContain(kept);
     // Outside the site's base (path mode) nothing changes; nothing to carry, nothing changes.
