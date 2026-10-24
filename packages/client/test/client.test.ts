@@ -91,7 +91,7 @@ describe("DropwayClient transport", () => {
     const req = fetch.requests[0]!;
     expect(req.headers.get("Authorization")).toBe("Bearer dw_x");
     expect(req.headers.get("X-Kofra-Client")).toBe("probe/1");
-    expect(req.headers.get("X-Dropway-Client")).toBe("probe/1");
+    expect(req.headers.get("X-Dropway-Client")).toBe("probe/1"); // rebrand:keep (legacy header compat)
   });
 
   it("defaults the client name to the package version", async () => {
