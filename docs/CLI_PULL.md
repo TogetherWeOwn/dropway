@@ -69,6 +69,10 @@ The live pointer can move at any time (another publish, a restore). Every
 pull pins the version before downloading anything:
 
 1. Resolve `--version` (default `live`) to a version id via `get_version`.
+   Require `version.status === "ready"` and that `missing` is an empty array
+   before reading the manifest or any bytes. Otherwise stop with
+   `version_not_ready` (exit 6), download nothing, and leave the destination
+   untouched. A pending version is refused even if all its blobs are uploaded.
 2. Pass that id as `?version=<id>` on the manifest read and on every byte
    read. Never re-resolve `live` mid-run.
 3. Check every byte response's `X-Kofra-Version` against the pinned id. On
@@ -83,8 +87,9 @@ pull pins the version before downloading anything:
 no directories, no network writes, and never a mutation. Unlike `publish
 --dry-run`, which contacts nothing because its inputs are local, pull's
 inputs are remote, so `--dry-run` **does** perform read-only discovery:
-one `get_version` call plus one manifest read. It must not download any
-file bytes. The plan lists, in manifest order: pinned version (id,
+one `get_version` call plus, only when the readiness check in section 3
+passes, one manifest read. It must not download any file bytes. The plan
+lists, in manifest order: pinned version (id,
 number, manifest hash), file count, total bytes, bounds checks, and every
 file path with size and sha256. With `--json`, `--dry-run` prints the
 same receipt schema as a real run (section 6) with `dryRun: true` and no
@@ -143,6 +148,7 @@ pull-specific codes:
 | `path_unsafe` | 2 (usage) | A manifest path fails containment (section 7); nothing is downloaded |
 | `path_collision` | 2 (usage) | Two manifest paths collide after case folding; nothing is downloaded |
 | `too_many_files` / `pull_too_large` | 6 (invalid) | Manifest exceeds `--max-files` / `--max-bytes` |
+| `version_not_ready` | 6 (invalid) | Resolved version is not ready or reports missing blobs; no manifest/byte reads or disk writes; hint: retry `kofra pull <site> <new-destination> --version <id>` after that version is finalized, or select a ready version |
 | `version_mismatch` | 1 (error) | A byte response named another version; stopped, partial tree kept |
 | `hash_mismatch` / `size_mismatch` | 1 (error) | Verified bytes disagree after retries; the file is removed, run stops |
 | `pull_cancelled` | 1 (error) | SIGINT/SIGTERM: in-flight file discarded, verified files kept |
@@ -266,13 +272,19 @@ touched.
 5. Pull into a non-empty directory: exit 2, `destination_not_empty`, the
    directory is untouched.
 6. Hostile manifests from the stub server (each in a fresh directory):
-   every row of the matrix below exits 2 with `path_unsafe` or
-   `path_collision`, downloads nothing, and leaves the destination empty.
+   rows 1–8 exit 2 with `path_unsafe` or `path_collision`; row 9 exits 6
+   with `too_many_files` or `pull_too_large`. Every row downloads nothing
+   and leaves the destination empty.
 7. Corrupting stub (flips one byte, or lies in `X-Kofra-Version`): the
    run stops with `hash_mismatch` / `size_mismatch` / `version_mismatch`,
    the bad file is absent, verified files keep matching hashes.
 8. SIGINT mid-run (large fixture, slow stub): exit 1 `pull_cancelled`,
    no `.kofra-part-*` files remain.
+9. `get_version` returns a pending version (both with missing blobs and
+   with `missing: []`), or a synthetic ready version with non-empty
+   `missing`: normal and dry-run pulls exit 6 `version_not_ready` with
+   the remediation hint. Assert that only `get_version` was called, no
+   manifest or byte reads occurred, and the destination was untouched.
 
 Hostile fixture matrix (synthetic; these names cannot be produced through
 normal publish because the server rejects them — that is why the stub
@@ -284,7 +296,7 @@ server exists):
 | 2 | `/abs.txt` | `path_unsafe` |
 | 3 | `C:/win.txt`, `C:\win.txt`, `\\srv\share` | `path_unsafe` |
 | 4 | `a%2fb.txt`, `a%252fb.txt`, `a%5cb.txt` | `path_unsafe` |
-| 5 | `nul.txt`, `COM1`, `aux.html`, `trailing. ` | `path_unsafe` |
+| 5 | `nul.txt`, `COM1`, `aux.html`, `trailing.` followed by U+0020 (space) | `path_unsafe` |
 | 6 | `README.md` + `readme.md`, `A/x` + `a/X` | `path_collision` |
 | 7 | Destination ancestor pre-replaced by a symlink | `path_unsafe`, no write through it |
 | 8 | 300-segment deep path, 2000-char name | `path_unsafe` (length) |
