@@ -13,8 +13,13 @@
     ".": "./src/index.ts"
   },
   "files": [
-    "src"
+    "src",
+    "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "dependencies": {
     "@dropway/core": "^0.1.0",
     "@modelcontextprotocol/server": "2.3.1",
