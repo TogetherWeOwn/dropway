@@ -216,6 +216,10 @@ export function dropwayClient() {
     }
     return v.toFixed(v < 10 ? 1 : 0) + " " + u[i];
   }
+  function exactBytes(n) {
+    if (n === null || n === undefined) return "";
+    return n.toLocaleString("en-US") + (n === 1 ? " byte" : " bytes");
+  }
   function ago(iso) {
     if (!iso) return "";
     var t = new Date(iso).getTime();
@@ -1198,32 +1202,60 @@ export function dropwayClient() {
         : h("div", { class: "dw-empty" }, h("h3", { text: "Nothing published yet" }), h("a", { class: "dw-btn primary", href: "/dashboard/publish?site=" + encodeURIComponent(slug), text: "Publish files" })),
     );
 
+    var filesReq = 0;
     async function showFiles(v) {
+      var my = ++filesReq;
       clear(filesSection);
       add(filesSection, h("header", {}, h("h2", { text: "Files in v" + v.number + (v.live ? " (live)" : "") })), skeleton(3));
+      var data;
       try {
-        files = await api("/sites/" + encodeURIComponent(slug) + "/files" + (v.live ? "" : "?version=" + encodeURIComponent(v.id)));
+        // Always pin the selected version by immutable ID: a live-row snapshot
+        // may already be stale by the time this request lands.
+        data = await api("/sites/" + encodeURIComponent(slug) + "/files?version=" + encodeURIComponent(v.id));
       } catch (e) {
+        if (my !== filesReq) return;
         clear(filesSection);
         add(filesSection, h("div", { class: "dw-pad" }, errorBox(e, "Could not load files")));
         return;
       }
+      if (my !== filesReq) return;
+      // Identity comes from the response, never the clicked row: the live
+      // pointer may have moved between selection and retrieval.
+      var mv = (data && data.version) || { id: v.id, number: v.number, live: v.live };
+      var rows = (data && data.files) || [];
       var filter = h("input", { class: "dw-input", type: "search", placeholder: "Filter files", "aria-label": "Filter files" });
+      var copyStatus = h("p", { class: "dw-pad dw-small", style: "margin:0", role: "status", text: "" });
       var tb = h("tbody");
-      files.files.forEach(function (f) {
+      rows.forEach(function (f) {
         tb.appendChild(
           h(
             "tr",
             { "data-search": f.path.toLowerCase() },
-            h("td", { class: "dw-mono" }, v.live ? h("a", { href: "/v/" + encodeURIComponent(slug) + "/" + encodePath(f.path), text: f.path }) : h("span", { text: f.path })),
+            h("td", { class: "dw-mono" }, mv.live ? h("a", { href: "/v/" + encodeURIComponent(slug) + "/" + encodePath(f.path), text: f.path }) : h("span", { text: f.path })),
             h("td", { class: "dw-hide-sm" }, h("span", { class: "dw-badge", text: f.kind })),
-            h("td", { class: "num dw-small", text: bytes(f.size) }),
+            h("td", { class: "num dw-small" }, h("span", { text: exactBytes(f.size) }), f.size >= 1024 ? h("span", { class: "dw-sub", text: bytes(f.size) }) : null),
+            h("td", {}, h("code", { class: "dw-mono dw-digest", text: f.sha256 })),
             h(
               "td",
               { class: "act" },
-              v.live ? h("a", { class: "dw-btn small", href: f.url, target: "_blank", rel: "noopener", text: "Open" }) : null,
+              mv.live ? h("a", { class: "dw-btn small", href: f.url, target: "_blank", rel: "noopener", text: "Open" }) : null,
               " ",
-              h("button", { type: "button", class: "dw-btn small", text: "Download", onclick: function (ev) { downloadFile(slug, f.path, v.live ? null : v.id, ev.currentTarget); } }),
+              h("button", {
+                type: "button",
+                class: "dw-btn small",
+                text: "Copy SHA-256",
+                "aria-label": "Copy SHA-256 for " + f.path,
+                onclick: function (ev) {
+                  var btn = ev.currentTarget;
+                  copyText(f.sha256, btn).then(function (ok) {
+                    copyStatus.textContent = ok
+                      ? "Copied SHA-256 for " + f.path + "."
+                      : "Copy failed for " + f.path + ". Select the checksum and copy it yourself.";
+                  });
+                },
+              }),
+              " ",
+              h("button", { type: "button", class: "dw-btn small", text: "Download", onclick: function (ev) { downloadFile(slug, f.path, mv.live ? null : mv.id, ev.currentTarget); } }),
             ),
           ),
         );
@@ -1237,9 +1269,11 @@ export function dropwayClient() {
       clear(filesSection);
       add(
         filesSection,
-        h("header", {}, h("h2", { text: "Files in v" + v.number + (v.live ? " (live)" : "") }), h("div", { class: "dw-row" }, h("span", { class: "dw-small dw-muted", text: plural(files.files.length, "file") }), filter)),
-        h("div", { class: "dw-scroll" }, h("table", { class: "dw-table" }, h("thead", {}, h("tr", {}, h("th", { text: "Path" }), h("th", { class: "dw-hide-sm", text: "Kind" }), h("th", { class: "num", text: "Size" }), h("th", {}))), tb)),
-        v.live ? null : h("p", { class: "dw-pad dw-small dw-muted", style: "margin:0", text: "Older versions are not served publicly. Restore this version to view it on the site, or download single files." }),
+        h("header", {}, h("h2", { text: "Files in v" + mv.number + (mv.live ? " (live)" : "") }), h("div", { class: "dw-row" }, h("span", { class: "dw-small dw-muted", text: plural(rows.length, "file") }), filter)),
+        h("p", { class: "dw-pad dw-small dw-muted", style: "margin:0", text: "SHA-256 manifest checksums for the selected version (v" + mv.number + ", " + mv.id + "). A checksum is not proof of authenticity, provenance, safe content, or independent verification, and does not show the current live download matches — compare it against a trusted source you already have." }),
+        h("div", { class: "dw-scroll" }, h("table", { class: "dw-table" }, h("thead", {}, h("tr", {}, h("th", { text: "Path" }), h("th", { class: "dw-hide-sm", text: "Kind" }), h("th", { class: "num", text: "Size" }), h("th", { text: "SHA-256" }), h("th", {}))), tb)),
+        copyStatus,
+        mv.live ? null : h("p", { class: "dw-pad dw-small dw-muted", style: "margin:0", text: "Older versions are not served publicly. Restore this version to view it on the site, or download single files." }),
       );
     }
 
