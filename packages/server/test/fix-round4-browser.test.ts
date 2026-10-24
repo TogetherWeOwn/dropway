@@ -185,5 +185,39 @@ describe("F2: a site's name never splits at a hyphen", () => {
         await context.close();
       }
     });
+
+    it(`publish result at ${width}px: the address breaks only at <wbr>; a name longer than a phone line may break inside itself`, async () => {
+      const { context, page } = await open({ key: owner, width });
+      try {
+        // 39 characters, a name a member may choose (up to 56): longer than the 24 a 320px line holds.
+        const slug = `a-long-member-site-name-for-phones-w${width}`;
+        expect(slug.length).toBe(39);
+        await page.goto(`${APP}/dashboard/publish`);
+        await page.waitForSelector(".k-dropzone");
+        await page.locator("#dw-publish input[type=file]:not([webkitdirectory])").setInputFiles([{ name: "index.html", mimeType: "text/html", buffer: Buffer.from(`<h1>${slug}</h1>`) }]);
+        await page.fill("#dw-pub-slug", slug);
+        await page.click("text=Publish >> nth=-1");
+        await page.waitForSelector("#dw-publish .k-keyout-row code.k-brk a");
+        await page.evaluate(async () => void (await document.fonts.ready));
+        // The parts in order: nowrap spans for the short ones, the long name as a bare text node, <wbr> between them.
+        const parts = await page.evaluate(() =>
+          [...document.querySelector("#dw-publish .k-keyout-row code.k-brk a").childNodes].map((n: any) => (n.nodeType === 3 ? `text:${n.textContent}` : `${n.localName}:${n.textContent}`)),
+        );
+        expect(parts).toEqual(["span:https://", "wbr:", `text:${slug}`, "wbr:", "span:.kofra-sites", "wbr:", "span:.test/"]);
+        expect(await split(page, "#dw-publish .k-keyout-row code.k-brk span")).toEqual([]);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        // The address stays inside its dashed box: it wraps rather than running past the box's right edge.
+        expect(
+          await page.evaluate(() => {
+            const code = document.querySelector("#dw-publish .k-keyout-row code.k-brk");
+            const box = code.getBoundingClientRect();
+            return [...code.getClientRects()].every((r: any) => r.right <= box.right + 0.5) && code.scrollWidth <= code.clientWidth;
+          }),
+        ).toBe(true);
+      } finally {
+        await context.close();
+        await api(`/sites/${encodeURIComponent(`a-long-member-site-name-for-phones-w${width}`)}`, { method: "DELETE", key: owner }).catch(() => {});
+      }
+    });
   }
 });
