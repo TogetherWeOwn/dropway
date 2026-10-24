@@ -9,6 +9,7 @@ import {
   noopMetering,
   resolveConfig,
   runCleanup,
+  snapshotUsage,
   type DropwayAdapters,
   type DropwayConfig,
   type DropwayContext,
@@ -170,6 +171,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
   async function scheduled(controller: ScheduledController, env: ServerBindings, ctx: ExecutionContext): Promise<void> {
     const dw = context(env, ctx, null);
     await runCleanup(dw);
+    if (controller.cron === "0 0 * * *") await snapshotUsage(dw);
     await opts.scheduled?.(dw, controller);
   }
 

@@ -161,7 +161,7 @@ Full matrix in section 10.
 |---|---|---|---|
 | ID-01 | First-run setup with the `ADMIN_BOOTSTRAP_KEY` secret creates the owner and a full-scope key; recovery mints a new owner key | P0 | Done (browser setup page in R-16) |
 | ID-02 | Members with roles `owner`, `admin`, `member` | P1 | Done (REST); tools R-25; dashboard R-22 |
-| ID-03 | Scoped API keys: named, scopes, optional single-site restriction, optional path prefix, optional expiry, last-used time; shown once, stored as SHA-256; 50 per member | P0 | Done (path prefix R-32; new scopes R-17) |
+| ID-03 | Scoped API keys: named, scopes, optional single-site restriction, optional path prefix, optional expiry, last-used time; shown once, stored as SHA-256; 50 per member | P0 | Done (new scopes R-17; path prefix R-32) |
 | ID-04 | Claim tokens (`dwc_`) for anonymous sites | P0 | Done |
 | ID-05 | Upload tokens (`dwu_`) scoped to one pending version | P0 | R-04 |
 | ID-06 | Dashboard sign-in: one-time login links minted by the owner, an agent or the CLI; email codes when an email binding exists; optional Cloudflare Access identity; revocable sessions | P1 | R-21 |
@@ -213,7 +213,7 @@ Full matrix in section 10.
 | AX-05 | Local stdio MCP (`npx kofra mcp`) with local-path sources | P1 | R-26 |
 | AX-06 | Discovery: `llms.txt` v2, a skill templated with the instance's own URLs, `/.well-known/agent-skills/index.json`, `/.well-known/api-catalog`, `/connect` | P0 | Partial (`llms.txt`, OpenAPI); R-11 |
 | AX-07 | Error envelope with `code`, `hint`, `retryable`, `retryAfterSeconds`, `docs`, `next`, `details.fields` | P0 | Partial; R-03 |
-| AX-08 | `whoami` reports principal, instance, capabilities, limits and usage | P0 | Partial; R-06, R-17 |
+| AX-08 | `whoami` reports principal, instance, capabilities, limits and usage | P0 | R-17 policy/usage done; extended instance metadata in R-06 |
 | AX-09 | `check_site`: broken links, missing assets, path-mode traps, optional screenshot | P1 | R-20 |
 | AX-10 | `call_api` (any operation by method and path) and `search_docs` | P1 | R-25 |
 | AX-11 | Code Mode endpoint `/mcp/code` (`search` + `execute` over the OpenAPI) | P2 | R-43 |
@@ -270,12 +270,12 @@ Full matrix in section 10.
 |---|---|---|---|
 | OPS-01 | Deploy to Cloudflare button: provisions D1, R2, KV and Analytics Engine, applies migrations, prompts for secrets | P0 | Done (fresh-account check in R-16) |
 | OPS-02 | Hourly cleanup cron: expired anonymous sites, deleted sites, stale uploads, orphan blobs | P0 | Done |
-| OPS-03 | Optional features switch off cleanly when their binding is absent and report it in `whoami.capabilities` | P0 | R-17 |
+| OPS-03 | Optional features switch off cleanly when their binding is absent and report it in `whoami.capabilities` | P0 | Done (R-17) |
 | OPS-04 | Runtime instance settings (anonymous publish, limits) editable without a redeploy | P2 | R-42 |
 | OPS-05 | Rate limits with `RateLimit-Policy` / `RateLimit` / `Retry-After` headers | P1 | R-36 |
 | OPS-06 | Abuse reports, owner takedown, blocked-hash list | P1 | R-37 |
 | OPS-07 | Upgrade by re-running the deploy (migrations first); restore D1 with Time Travel (30 days) | P0 | Done |
-| OPS-08 | Versioned extension API, contract tests and a testing kit for embedding apps | P0/P1 | R-01 done: version 1 and existing-point contracts; testing kit and future-point contracts R-18 |
+| OPS-08 | Versioned extension API, contract tests and a testing kit for embedding apps | P0/P1 | Version 3: operations and policy/usage contracts done; testing kit and future-point contracts R-18 |
 
 ### File deliveries
 
@@ -717,7 +717,7 @@ run before core viewers. Section 10 lists core viewers.
 
 ### 6.9 Testing kit and contract (R-01 done, R-18 remaining)
 
-- `@dropway/server` exports `EXTENSION_API_VERSION = 1`; extension API changes update that value and
+- `@dropway/server` exports `EXTENSION_API_VERSION = 3`; extension API changes update that value and
   the Extension API section in `CHANGELOG.md`.
 - `test/extension-contract.test.ts` builds `createDropway()` with fake adapters and exercises every
   existing point: identity and scopes, policy limits and refusals, all five metering event kinds,
@@ -1195,7 +1195,7 @@ are sampled, not written one by one. Reads use the SQL API when the operator set
 | GET | `/api/v1/folders` | `list_folders` | `sites:read` | P1 | R-28 |
 | POST | `/api/v1/folders` | `create_folder` | `sites:write` | P1 | R-28 |
 | PATCH | `/api/v1/folders/{folder}` | `rename_folder` | `sites:write` | P1 | R-28 |
-| DELETE | `/api/v1/folders/{folder}` | `delete_folder` | `sites:delete` | P1 | R-28 |
+| DELETE | `/api/v1/folders/{folder}` | `delete_folder` | `sites:delete` | P1 | Done (delete only; organizer operations R-28) |
 
 **Keys, members, sign-in**
 
@@ -1322,6 +1322,8 @@ Initial catalog (R-03 makes it complete and generates `/docs/errors.md`):
 | `limit_reached` | 403 (adapters may choose) | no | `details: { limit, used, resetsAt? }` plus adapter links |
 | `rate_limited` | 429 | yes | Wait `retryAfterSeconds` |
 | `feature_unavailable` | 501 | no | `details.requires` names the binding or setting |
+| `invalid_policy_quota` | 500 | no | Adapter must return null or a non-negative integer |
+| `folder_not_found` | 404 | no | No folder accessible to this credential; list and retry |
 | `blob_missing`, `service_unavailable` | 502/503 | yes | Retry after `Retry-After` |
 | `internal_error` | 500 | once | Retry; report `requestId` if it repeats |
 
@@ -1624,8 +1626,8 @@ allow-orientation-lock`), never `allow-same-origin`.
 | OAuth tokens | issued by `workers-oauth-provider` | hashed in `OAUTH_KV` | access 1 h, refresh rotates, grant 30 days |
 | Bootstrap secret | `ADMIN_BOOTSTRAP_KEY` secret | Worker secret | setup and recovery only |
 
-Scopes: `sites:read`, `sites:write`, `keys:write`, `members:write` (exist); `sites:delete`, `data:write`,
-`secrets:write`, `admin` (R-17; migration 0002 gives `sites:delete` to existing `sites:write` keys).
+Scopes: `sites:read`, `sites:write`, `keys:write`, `members:write`, `sites:delete`, `data:write`,
+`secrets:write`, `admin` (implemented; migration `0003_scopes_usage.sql` gives `sites:delete` to existing `sites:write` keys after the transfer schema in `0002_transfers.sql`).
 Roles: `owner` and `admin` may hold every scope; `member` may hold `sites:read`, `sites:write`,
 `sites:delete`, `keys:write`, `data:write`. A key can never be wider than its member; a member can never
 grant more than they hold. Keys can be limited to one site and, for drives, a path prefix.

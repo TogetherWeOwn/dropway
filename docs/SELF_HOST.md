@@ -131,6 +131,40 @@ Variables go in `vars` in `wrangler.jsonc`; secrets with `npx wrangler secret pu
 | `MAX_SITE_BYTES` | 10 GB | Largest version |
 | `ONESHOT_MAX_BYTES` | 25 MB | Largest one-shot `POST /api/v1/publish` body (bigger sites use the manifest flow, which the CLI always uses) |
 
+### Resource quotas and scope upgrades
+
+`QUOTA_SITES` and `QUOTA_STORAGE_BYTES` set optional tenant resource limits. Use
+non-negative integers: unset/empty means unlimited; `0` refuses new resources.
+Ordinary site storage counts each hash once across active sites' ready versions,
+including history; pending uploads are not charged. Deleting an ordinary site or
+non-live version frees bytes only when no other ready version on an active ordinary
+site references them. Claiming an anonymous site checks the receiving tenant's
+sites and storage quotas first.
+
+Deliveries use the existing reservation model: each transfer's full manifest bytes
+are charged separately until purge, including revoked, expired, deleted or held
+deliveries. Reusing a hash across an ordinary site and a transfer, or across two
+transfers, does not reduce that reservation. A transfer's initial deploy adds no
+further bytes (`newBytes: 0`) because creation already reserved them. Transfers
+also occupy site slots while their site rows remain active; purge retains the
+sender-readable transfer record and site unless the sender deleted the site.
+
+`GET /api/v1/me` (MCP `whoami`) reports `capabilities`, `limits` and `usage`.
+Other `QUOTA_*` names follow the exported `QUOTA_KEYS` vocabulary; resource-specific
+features enforce their corresponding quotas when implemented. Optional features
+without their required binding report `feature_unavailable`, even if a custom
+policy allows them. The default config runs usage reconciliation at midnight UTC
+and cleanup hourly; custom Worker configs must preserve both cron entries.
+
+The `0003_scopes_usage.sql` migration (after `0002_transfers.sql`) preserves deletion on existing `sites:write`
+keys by adding `sites:delete`. New keys must explicitly include `sites:delete` to
+delete; read/write-only automation stays non-destructive. Owners and admins may
+hold all scopes; members may hold `sites:read`, `sites:write`, `sites:delete`,
+`keys:write` and `data:write`, but not `secrets:write` or `admin`. A claim token
+retains read/write/delete control of its own anonymous site only; claiming the
+site invalidates that token. Repeating the member's successful claim is retry-safe
+and does not charge the site's usage twice.
+
 ## Where sites are served
 
 | | A. Path mode (default) | B. Second Worker on workers.dev | C. Subdomain mode (your domain) |

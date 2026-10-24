@@ -1,5 +1,5 @@
 import { HTTP_SCOPES } from "./http-schemas";
-import { createApiKey, listApiKeys, resolveSiteSlug, revokeApiKey } from "@dropway/core";
+import { ALL_SCOPES, createApiKey, listApiKeys, resolveSiteSlug, revokeApiKey } from "@dropway/core";
 import { obj } from "../mcp/schemas";
 import { readJson } from "../routes/api";
 import { defineOperation } from "../operations";
@@ -51,7 +51,7 @@ export const KEY_OPERATIONS = [
     toolset: "keys",
     scopes: ["keys:write"],
     description:
-      "Create a scoped API key, for example a read-only key or a key limited to one site to hand to another agent. Scopes: sites:read, sites:write, keys:write, members:write (never wider than your own key). The secret `key` is shown ONCE in this result; store it. A replayed idempotent call returns key: null.",
+      "Create a key with a subset of your scopes, optionally restricted to one site. See scopes' enum for all supported permissions; deletion needs sites:delete, not sites:write. Store the secret `key`: it is shown ONCE and replay returns key: null.",
     input: fromSchema({
       type: "object",
       properties: {
@@ -60,7 +60,7 @@ export const KEY_OPERATIONS = [
           type: "array",
           items: {
             type: "string",
-            enum: ["sites:read", "sites:write", "keys:write", "members:write"],
+            enum: [...ALL_SCOPES],
           },
           description: "Default: all scopes you hold.",
         },

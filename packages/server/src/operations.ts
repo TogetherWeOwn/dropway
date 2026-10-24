@@ -3,7 +3,10 @@ import type { Context, Hono } from "hono";
 import {
   ApiError,
   requireMember,
+  requireCapability,
   requireConfirm,
+  type Capability,
+  type OperationMeta,
   idempotencyScope,
   validateIdempotencyKey,
   withIdempotency,
@@ -32,6 +35,7 @@ export interface OperationDefinition<I extends z.ZodType = z.ZodType, O extends 
   path: string;
   aliases?: { method: string; path: string }[];
   scopes: Scope[];
+  capability?: Capability;
   anonymous?: boolean;
   /** REST-only setup/recovery; only the bootstrap principal may dispatch. */
   bootstrap?: boolean;
@@ -59,7 +63,11 @@ export interface OperationDefinition<I extends z.ZodType = z.ZodType, O extends 
   http?: {
     input?: z.ZodType;
     output?: z.ZodType;
-    handler?: (c: Context<DropwayEnv>) => Response | Promise<Response>;
+    handler?: (c: Context<DropwayEnv>, input: any) => Response | Promise<Response>;
+    /** Parse a raw transport once, before policy; the handler receives this validated input. */
+    parseInput?: (c: Context<DropwayEnv>) => unknown | Promise<unknown>;
+    /** A REST-only transport may share its logical operation's policy identity. */
+    policyId?: string;
     status?: number;
     statuses?: number[];
     responseType?: string;
@@ -139,7 +147,7 @@ function validateOperationInput(op: OperationDefinition, input: unknown): any {
 }
 
 export function requireOperationScopes(principal: Principal, scopes: readonly Scope[], operation: string): void {
-  const held: readonly Scope[] = principal.kind === "member" ? principal.scopes : principal.kind === "claim" ? ["sites:read", "sites:write"] : [];
+  const held: readonly Scope[] = principal.kind === "member" ? principal.scopes : principal.kind === "claim" ? ["sites:read", "sites:write", "sites:delete"] : [];
   for (const scope of scopes) {
     if (!held.includes(scope))
       throw new ApiError(
@@ -163,9 +171,22 @@ function authorizeOperation(op: OperationDefinition, ctx: OperationContext): voi
   if (ctx.principal.kind === "member" || ctx.principal.kind === "claim") requireOperationScopes(ctx.principal, op.scopes, op.id);
 }
 
-export async function executeOperation(op: OperationDefinition, input: unknown, ctx: OperationContext): Promise<any> {
+async function prepareOperation(op: OperationDefinition, input: unknown, ctx: OperationContext): Promise<any> {
   authorizeOperation(op, ctx);
-  return runOperation(op, validateOperationInput(op, input), ctx);
+  const parsed = validateOperationInput(op, input);
+  await checkOperationPolicy(op, parsed, ctx);
+  return parsed;
+}
+
+export async function executeOperation(op: OperationDefinition, input: unknown, ctx: OperationContext): Promise<any> {
+  return runOperation(op, await prepareOperation(op, input, ctx), ctx);
+}
+
+async function checkOperationPolicy(op: OperationDefinition, input: unknown, ctx: OperationContext, id = op.id): Promise<void> {
+  const p = ctx.principal;
+  if (op.capability) await requireCapability(ctx.dw, p, op.capability, { siteId: p.kind === "claim" ? p.siteId : p.kind === "member" ? p.siteId : null, tenantId: p.kind === "member" ? p.tenantId : null });
+  const meta: OperationMeta = { id, toolset: op.toolset, method: op.method, path: op.path, scopes: op.scopes };
+  await ctx.dw.adapters.policy.beforeOperation?.(p, meta, input, ctx.dw);
 }
 
 async function runOperation(op: OperationDefinition, parsed: unknown, ctx: OperationContext): Promise<any> {
@@ -203,6 +224,7 @@ export function operationTools(operations: readonly OperationDefinition[]): McpT
       alwaysLoad: op.mcp && "alwaysLoad" in op.mcp ? op.mcp.alwaysLoad : false,
       inputSchema: schemaJson(op.input),
       outputSchema: schemaJson(op.output, "output"),
+      beforeReplay: async (args, ctx) => { await prepareOperation(op, args, { ...ctx, transport: "mcp" }); },
       handler: (args, ctx) => executeOperation(op, args, { ...ctx, transport: "mcp" }),
     }));
 }
@@ -241,8 +263,8 @@ function decodeUrlInput(values: Record<string, string>, schema: Record<string, a
   }));
 }
 
-async function requestInput(c: Context<DropwayEnv>, op: OperationDefinition) {
-  const schema = schemaJson(op.input);
+async function requestInput(c: Context<DropwayEnv>, op: OperationDefinition, inputSchema = op.input) {
+  const schema = schemaJson(inputSchema);
   const query = decodeUrlInput(c.req.query(), schema);
   const path = decodeUrlInput(c.req.param(), schema);
   const body = op.rawBody || ["GET", "HEAD"].includes(c.req.method) ? {} : await readJson(c, op.jsonBodyMaxBytes);
@@ -268,8 +290,16 @@ export function installOperationRoutes(api: Hono<DropwayEnv>, operations: readon
         };
         // Authorization runs for both adapters, before parsing or cached replay.
         authorizeOperation(op, ctx);
-        if (op.http?.handler) return op.http.handler(c);
+        if (op.http?.handler) {
+          const schema = op.http.input ?? op.input;
+          const input = op.http.parseInput ? await op.http.parseInput(c) : op.rawBody
+            ? await requestInput(c, op, schema)
+            : validate(schema, await requestInput(c, op, schema), op.id);
+          await checkOperationPolicy(op, input, ctx, op.http.policyId ?? op.id);
+          return op.http.handler(c, input);
+        }
         const input = validateOperationInput(op, await requestInput(c, op));
+        await checkOperationPolicy(op, input, ctx);
         const { result, replayed } = await withIdempotency(
           ctx.dw,
           {

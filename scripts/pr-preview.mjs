@@ -10,10 +10,13 @@ import { promisify } from "node:util";
 class PreviewError extends Error {}
 const fail = (message) => { throw new PreviewError(message); };
 
-function httpUrl(value) {
+function httpUrl(value, { secure = false } = {}) {
   const url = new URL(value);
   if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || /\s/.test(value)) {
     fail("Use an HTTP(S) URL without credentials or whitespace.");
+  }
+  if (secure && url.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
+    fail("Use HTTPS for the Kofra instance (plain HTTP is allowed only for loopback).");
   }
   return url;
 }
@@ -46,7 +49,7 @@ async function preview() {
   if (major < 22 || (major === 22 && minor < 18) || !process.features.typescript) {
     fail("The Kofra action requires Node 22.18+ with native TypeScript support; use actions/setup-node.");
   }
-  const api = httpUrl(apiInput);
+  const api = httpUrl(apiInput, { secure: true });
   if (api.pathname !== "/" || api.search || api.hash) fail("api must be the Kofra instance origin.");
   const githubApi = httpUrl(process.env.GITHUB_API_URL ?? "https://api.github.com");
   if (githubApi.search || githubApi.hash) fail("Invalid GitHub API URL.");

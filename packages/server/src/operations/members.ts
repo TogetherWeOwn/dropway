@@ -1,5 +1,5 @@
 import { HTTP_SCOPES } from "./http-schemas";
-import { createMember, listMembers, removeMember, requireConfirm, updateMember } from "@dropway/core";
+import { ALL_SCOPES, createMember, listMembers, removeMember, requireConfirm, updateMember } from "@dropway/core";
 import { obj } from "../mcp/schemas";
 import { readJson } from "../routes/api";
 import { defineOperation } from "../operations";
@@ -69,7 +69,7 @@ export const MEMBER_OPERATIONS = [
           type: "array",
           items: {
             type: "string",
-            enum: ["sites:read", "sites:write", "keys:write", "members:write"],
+            enum: [...ALL_SCOPES],
           },
         },
       },
