@@ -189,13 +189,13 @@ export async function createMember(dc: DropwayContext, p: Principal, input: { em
   const caller = requireMember(p, "members:write");
   const role = cleanRole(input.role, "member");
   if (role === "owner" && caller.role !== "owner") throw forbidden("Only owners can add owners.");
+  const scopes = parseScopes(input.scopes, ROLE_SCOPES[role].filter((s) => caller.scopes.includes(s)));
   const member = await insertMember(dc, {
     tenantId: caller.tenantId,
     email: cleanEmail(input.email),
     name: input.name == null ? null : String(input.name),
     role,
   });
-  const scopes = parseScopes(input.scopes, ROLE_SCOPES[role].filter((s) => caller.scopes.includes(s)));
   const apiKey = await mintApiKey(dc, {
     tenantId: caller.tenantId,
     memberId: member.id,

@@ -159,7 +159,6 @@ export async function createDeploy(dc: DropwayContext, p: Principal, site: SiteR
   const { entries, totalBytes } = validateManifest(files, lim);
   await validateStoredSizes(dc, site, entries);
   const newBytes = site.mode === "transfer" ? 0 : await incrementalBytes(dc, site.tenant_id, site.id, entries);
-  await requireQuota(dc, p, "storage_bytes", owner, (await getUsage(dc, site.tenant_id)).storage_bytes, newBytes);
   await dc.adapters.policy.beforeDeploy?.(p, { siteId: site.id, tenantId: site.tenant_id, fileCount: entries.length, totalBytes, newBytes }, dc);
 
   const baseVersionId = opts.baseVersionId == null || opts.baseVersionId === "" ? null : String(opts.baseVersionId);
@@ -180,6 +179,8 @@ export async function createDeploy(dc: DropwayContext, p: Principal, site: SiteR
       };
     }
   }
+
+  await requireQuota(dc, p, "storage_bytes", owner, (await getUsage(dc, site.tenant_id)).storage_bytes, newBytes);
 
   const now = Date.now();
   const version: VersionRow = {

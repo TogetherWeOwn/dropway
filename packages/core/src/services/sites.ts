@@ -460,7 +460,8 @@ export async function claimSite(dc: DropwayContext, p: Principal, slug: string, 
   ]);
   if (!claimed?.meta.changes) {
     const fresh = await findSite(dc, slug);
-    if (fresh?.tenant_id === p.tenantId) return fresh;
+    if (!fresh) throw notFound("site_not_found", "The anonymous site is no longer available.");
+    if (fresh.tenant_id === p.tenantId) return fresh;
     if (fresh?.tenant_id) throw conflict("already_claimed", "This site already belongs to an account.");
     if (siteQuota !== null && (await getUsage(dc, p.tenantId)).sites >= siteQuota) throw quotaExceeded("sites", siteQuota);
     if (storageQuota !== null) throw quotaExceeded("storage_bytes", storageQuota);

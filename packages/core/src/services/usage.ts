@@ -87,9 +87,13 @@ export async function snapshotUsage(dc: DropwayContext): Promise<void> {
   for (;;) {
     const { results } = await dc.env.DB.prepare("SELECT id FROM tenants WHERE id > ? ORDER BY id LIMIT 100").bind(cursor).all<{ id: string }>();
     for (const tenant of results) {
-      const usage = await recomputeUsage(dc, tenant.id);
-      meter(dc, { type: "storage_snapshot", tenantId: tenant.id, bytes: usage.storage_bytes, at: Date.now() });
       cursor = tenant.id;
+      try {
+        const usage = await recomputeUsage(dc, tenant.id);
+        meter(dc, { type: "storage_snapshot", tenantId: tenant.id, bytes: usage.storage_bytes, at: Date.now() });
+      } catch (e) {
+        console.error(JSON.stringify({ event: "usage_snapshot_failed", tenantId: tenant.id, error: String(e) }));
+      }
     }
     if (results.length < 100) return;
   }
