@@ -52,7 +52,7 @@ import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import { chromium } from "playwright-core";
-import { filmstrip, SETTLE } from "./shared.mjs";
+import { dominantColours, filmstrip, SETTLE, textSpacingLoss } from "./shared.mjs";
 
 const ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 const args = process.argv.slice(2);
@@ -214,7 +214,10 @@ const SITE_FILES = () => ({
   "media/photo.png": png(480, 320, 5),
   "media/logo.svg": svg("logo", 200),
   "media/tone.wav": wav(),
-  "media/clip.webm": Buffer.from("not a real video"),
+  // A real one-second clip (fixtures/README.md: drawn by the harness's own canvas, so licence-clean), and a file that
+  // is not a video at all, for the "cannot play" state.
+  "media/clip.webm": readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures/clip.webm")),
+  "media/broken.webm": Buffer.from("not a real video"),
   "fonts/Mono.woff2": FONT,
   "bin/blob.bin": Buffer.from(Array.from({ length: 600 }, (_, i) => (i * 37) % 256)),
   "logs/big.log": longLog(),
@@ -486,7 +489,8 @@ function screens(fx) {
     app("J44", "A26 Not found", "/nope", { auth: false, status: 404 }),
     // Each response gets a new request ID; only that field is masked for the Auto identity comparison.
     app("J45", "A27 Server error", "/__harness/server-error", { auth: false, status: 500, mask: [".k-state .k-small .k-mono"] }),
-    s("J73", "S07 Separate-origin path-mode viewer", `${SEPARATE}/fx-site/README.md`, { worker: "separate" }),
+    s("J73", "S07 Sites home (separate sites origin)", `${SEPARATE}/`, { worker: "separate" }),
+    s("J76", "S05 Markdown on a separate sites origin (path mode)", `${SEPARATE}/fx-site/README.md`, { worker: "separate" }),
     // A second, empty instance: not set up yet, then set up with no sites, then a broken database.
     app("J04", "A02 Self-host home, not set up", "/", { auth: false, worker: "fresh" }),
     app("J11", "A07 API-key sign-in, not set up", "/login", { auth: false, worker: "fresh" }),
@@ -516,9 +520,11 @@ function screens(fx) {
     s("J60", "S05 CSV", site("fx-site", "data/table.csv")),
     s("J61", "S05 SVG", site("fx-site", "media/logo.svg")),
     s("J62", "S05 Image", site("fx-site", "media/photo.png")),
-    s("J63", "S05 PDF", site("fx-site", "docs/report.pdf")),
-    // The browser's own video control animates while it gives up on the (invalid) clip: masked for G6.
-    s("J64", "S05 Video", site("fx-site", "media/clip.webm"), { expectConsole: true, mask: ["video"] }),
+    // The headless shell has no PDF viewer, so the judged state is the page's no-viewer fallback (Open, Download).
+    s("J63", "S05 PDF (headless: the no-viewer fallback is the judged state)", site("fx-site", "docs/report.pdf")),
+    // The player's frame and controls can differ between two loads: masked for G6.
+    s("J64", "S05 Video", site("fx-site", "media/clip.webm"), { mask: ["video"] }),
+    s("J75", "S05 Video the browser cannot play", site("fx-site", "media/broken.webm"), { expectConsole: true, wait: "#dw-verr:not([hidden])" }),
     s("J65", "S05 Audio", site("fx-site", "media/tone.wav")),
     s("J66", "S05 Font", site("fx-site", "fonts/Mono.woff2")),
     s("J67", "S05 Code", site("fx-site", "src/app.py")),
@@ -527,6 +533,7 @@ function screens(fx) {
     s("J70", "S05 HTML page in the viewer frame", site("fx-site", "page.html?view=1")),
     s("J71", "S05 Truncated note", site("fx-site", "logs/big.log")),
     s("J72", "S06 Report link on an anonymous page", site(fx.anonLive), { userPage: true }),
+    s("J77", "S06 Report this site (where the Report abuse link goes)", site(fx.anonLive, "__dropway/report")),
   ];
 }
 
@@ -610,10 +617,12 @@ async function main() {
       console.log(`${sc.id} ${cell.pass === "matrix" ? "" : `${cell.pass} `}${mode} ${width}: ${bad.length ? `FAIL ${bad.join(",")}` : "ok"}`);
     };
     const failCell = (sc, mode, width, pass) => (e) => ({ screen: sc.id, title: sc.title, pass, mode, width, file: null, gates: { harness: { pass: false, detail: String(e).slice(0, 300) } } });
-    // Every screen: the 12 matrix cells, then (extra passes) Light at 320 px and, for FORCED, forced colours.
+    // Every screen: the 12 matrix cells, then (extra passes) Light at 320 px, normal motion, text spacing (WCAG 1.4.12,
+    // Light at 390 and 1440 px) and, for FORCED, forced colours.
     const jobsFor = (sc) => [
       ...MODES.flatMap((mode) => WIDTHS.map((width) => [sc, mode, width, "matrix"])),
       ...(EXTRA ? [[sc, "light", 320, "reflow"], [sc, "light", 1440, "motion"]] : []),
+      ...(EXTRA && !sc.userPage ? [390, 1440].map((width) => [sc, "light", width, "spacing"]) : []),
       ...(EXTRA && FORCED.has(sc.id) ? [390, 1440].map((width) => [sc, "light", width, "forced"]) : []),
     ];
     const runOn = (worker, ctx) => async ([sc, mode, width, pass]) =>
@@ -713,7 +722,7 @@ export function exitCodeFor(matrix, checks = {}) {
   return matrix.length && !failed.length && !switchFailed.length ? 0 : 1;
 }
 
-const PASSES = ["matrix", "reflow", "motion", "forced"];
+const PASSES = ["matrix", "reflow", "motion", "forced", "spacing"];
 
 /**
  * G13 in the browser: the switch works with no script (form POST, 303 back, mode rendered by the server),
@@ -779,7 +788,7 @@ async function themeSwitchChecks(browser, mf, fx) {
       const pressed = await page.getAttribute('.k-mode-switch button[value="dark"]', "aria-pressed");
       record(
         "no-script",
-        scripts === 0 && hop?.location === "/nope?x=1#dw-mode" && (await theme(page)) === "dark" && c?.value === "dark" && c.secure && c.path === "/" && c.sameSite === "Lax" && !c.httpOnly && c.expires > Date.now() / 1000 + 364 * 86400 && pressed === "true",
+        scripts === 0 && hop?.location === "/nope?x=1#dw-mode-dark" && (await theme(page)) === "dark" && c?.value === "dark" && c.secure && c.path === "/" && c.sameSite === "Lax" && !c.httpOnly && c.expires > Date.now() / 1000 + 364 * 86400 && pressed === "true",
         { scripts, hop, cookie: c, pressed },
       );
 
@@ -791,8 +800,9 @@ async function themeSwitchChecks(browser, mf, fx) {
       await context.close();
     }
   }
-  // 1b. No script, as a browser follows it: the 303 is a real navigation to next#dw-mode (a meta refresh here, so
-  //     Chromium routes it), and the next Tab lands on the switch, not on "Skip to content", with the page unscrolled.
+  // 1b. No script, as a browser follows it: the 303 is a real navigation to next#dw-mode-dark (a meta refresh here, so
+  //     Chromium routes it), and the next Tab lands on the button that was pressed (Dark), not on "Skip to content" or
+  //     the switch's first button, with the page unscrolled.
   {
     const context = await browser.newContext(ctxOpts);
     await context.route("**/*", async (route) => {
@@ -821,13 +831,13 @@ async function themeSwitchChecks(browser, mf, fx) {
     const page = await context.newPage();
     try {
       await page.goto(`${APP}/nope?x=1`);
-      await Promise.all([page.waitForURL((u) => u.hash === "#dw-mode", { waitUntil: "load" }), page.click('.k-mode-switch button[value="dark"]')]);
+      await Promise.all([page.waitForURL((u) => u.hash === "#dw-mode-dark", { waitUntil: "load" }), page.click('.k-mode-switch button[value="dark"]')]);
       // The returned page has settled (it is the :target's document, focused) before the key goes in.
-      await page.waitForFunction(() => document.readyState === "complete" && document.hasFocus() && document.querySelector(":target")?.id === "dw-mode");
+      await page.waitForFunction(() => document.readyState === "complete" && document.hasFocus() && document.querySelector(":target")?.id === "dw-mode-dark");
       await page.waitForTimeout(100);
       await page.keyboard.press("Tab");
       const resumed = await page.evaluate(() => ({ url: location.pathname + location.search + location.hash, theme: document.documentElement.getAttribute("data-theme"), focused: document.activeElement?.getAttribute("value") ?? document.activeElement?.tagName, inSwitch: !!document.activeElement?.closest(".k-mode-switch"), scrollY }));
-      record("no-script-focus-resumes", resumed.url === "/nope?x=1#dw-mode" && resumed.theme === "dark" && resumed.inSwitch && resumed.scrollY === 0, resumed);
+      record("no-script-focus-resumes", resumed.url === "/nope?x=1#dw-mode-dark" && resumed.theme === "dark" && resumed.inSwitch && resumed.focused === "dark" && resumed.scrollY === 0, resumed);
     } catch (e) {
       record("no-script-focus-resumes", false, String(e).slice(0, 300));
     } finally {
@@ -927,6 +937,73 @@ async function themeSwitchChecks(browser, mf, fx) {
       record("frame-nav", good(before) && good(after), { before, after });
     } catch (e) {
       record("frame-nav", false, String(e).slice(0, 300));
+    } finally {
+      await context.close();
+    }
+  }
+  // 4. G7 inside the app viewer (J28): every frame the compositor paints while the preview frame loads its next page
+  //    stays dark in Dark: a click on a file in the tree (explicit Dark with the OS light, and Auto with the OS dark),
+  //    and the in-place switch from Light to Dark, which reloads the frame with &theme=dark. A white frame here is the
+  //    frame's own backing showing through before the next page paints (the frame's backing is the mode's paper).
+  for (const [name, o] of [
+    ["frame-flash-tree", { cookie: "dark", os: "light", act: (page) => page.click('.k-tree a[data-path="docs/guide.md"]') }],
+    ["frame-flash-tree-auto", { cookie: null, os: "dark", act: (page) => page.click('.k-tree a[data-path="docs/guide.md"]') }],
+    ["frame-flash-switch", { cookie: "light", os: "light", act: (page) => page.click('.k-mode-switch button[value="dark"]') }],
+  ]) {
+    const context = await browser.newContext({ ...ctxOpts, colorScheme: o.os });
+    await context.route("**/*", async (route) => {
+      const req = route.request();
+      const url = req.url();
+      if (!/^https:\/\/([a-z0-9-]+\.)?kofra(-sites|-separate)?\.test\//.test(url)) return route.abort();
+      const res = await mf.dispatchFetch(url, { method: req.method(), headers: await req.allHeaders(), redirect: "manual" });
+      const location = res.headers.get("location");
+      if (location && res.status >= 300 && res.status < 400 && req.isNavigationRequest()) {
+        const to = new URL(location, url).href.replace(/[&"<>]/g, (c) => ({ "&": "&amp;", '"': "&quot;", "<": "&lt;", ">": "&gt;" })[c]);
+        return route.fulfill({ status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }, body: `<!doctype html><meta http-equiv="refresh" content="0;url=${to}">` });
+      }
+      const headers = {};
+      res.headers.forEach((v, k) => {
+        headers[k] = v;
+      });
+      await route.fulfill({ status: res.status, headers, body: Buffer.from(await res.arrayBuffer()) });
+    });
+    if (o.cookie) await context.addCookies([{ name: "__Host-dw_theme", value: o.cookie, url: `${APP}/`, secure: true, sameSite: "Lax" }]);
+    await context.addInitScript((key) => location.hostname === "kofra.test" && sessionStorage.setItem("dropway.key", key), fx.owner);
+    const page = await context.newPage();
+    try {
+      await page.goto(`${APP}/v/fx-site/README.md`, { waitUntil: "load" });
+      await page.waitForSelector('.k-tree a[aria-current]', { timeout: 15000 });
+      await page.waitForTimeout(800);
+      const cdp = await context.newCDPSession(page);
+      const frames = [];
+      cdp.on("Page.screencastFrame", (f) => {
+        frames.push(f.data);
+        cdp.send("Page.screencastFrameAck", { sessionId: f.sessionId }).catch(() => {});
+      });
+      await cdp.send("Page.startScreencast", { format: "png", everyNthFrame: 1, maxWidth: 360, maxHeight: 225 });
+      await page.waitForTimeout(200);
+      await o.act(page);
+      await page.waitForTimeout(1500);
+      await cdp.send("Page.stopScreencast").catch(() => {});
+      const colours = await dominantColours(browser, frames);
+      const lum = ([r, g, b]) => (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+      // The switch starts in Light: its frames count from the first dark one (once the page has switched), and from
+      // then on not one frame may be light.
+      const firstDark = colours.findIndex((c) => lum(c) <= 0.25);
+      const wrong = firstDark < 0 ? colours : colours.slice(firstDark).filter((c) => lum(c) > 0.25);
+      const dark = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+      record(name, frames.length > 1 && firstDark >= 0 && wrong.length === 0 && dark === PAPER.dark, { frames: frames.length, firstDark, wrong: wrong.length, colours: [...new Set(colours.map((c) => `rgb(${c.join(",")})`))].slice(0, 6), page: dark });
+      // 5. The site's own HTML (page.html, no colours of its own) still gets a white canvas in the dark app (E2).
+      if (name === "frame-flash-tree") {
+        await page.click('.k-tree a[data-path="page.html"]');
+        await page.waitForTimeout(1500);
+        const box = await page.locator("#dw-frame").boundingBox();
+        const shot = box ? await page.screenshot({ clip: { x: box.x + box.width / 2, y: box.y + box.height - 60, width: 40, height: 40 } }) : null;
+        const [c] = shot ? await dominantColours(browser, [shot.toString("base64")]) : [];
+        record("frame-user-html-white", !!c && c.every((v) => v >= 238), { colour: c ? `rgb(${c.join(",")})` : null });
+      }
+    } catch (e) {
+      record(name, false, String(e).slice(0, 300));
     } finally {
       await context.close();
     }
@@ -1222,6 +1299,17 @@ async function fontShift(browser, mf, fx, sc, contextOptions, url, explicit) {
   }
 }
 
+/** /api/v1 as the seeded owner, for a mutating cell's clean-up. */
+const ownerApi = (mf, fx) => async (path, init = {}) => {
+  const res = await mf.dispatchFetch(`${APP}/api/v1${path}`, { ...init, headers: { Authorization: `Bearer ${fx.owner}`, ...(init.headers ?? {}) } });
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+};
+
 async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
   const explicit = mode === "light" || mode === "dark" ? mode : null;
   const os = explicit ? (explicit === "dark" ? "light" : "dark") : mode.replace("auto-", "");
@@ -1350,8 +1438,17 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
   }
   // Full-page captures (and their masks) are taken from the top of the page.
   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
-  const tag = pass === "forced" ? `forced-${width}` : pass === "motion" ? `motion-${width}` : `${mode}-${width}`;
+  const tag = pass === "forced" ? `forced-${width}` : pass === "motion" ? `motion-${width}` : pass === "spacing" ? `spacing-${width}` : `${mode}-${width}`;
   const file = `${sc.id}-${tag}.png`;
+  // 1.4.12 text spacing: the page with the standard override applied; the cell's one gate is the text it cut off
+  // (nothing may be lost that was not already cut off without it). The capture shows the page with the override.
+  if (pass === "spacing") {
+    const lost = await textSpacingLoss(page).catch((e) => [{ el: "harness", text: String(e).slice(0, 160) }]);
+    const png = await page.screenshot({ path: join(OUT, file), fullPage: !sc.viewportOnly }).catch(() => page.screenshot({ path: join(OUT, file) }));
+    await context.close();
+    if (sc.after) await sc.after(ownerApi(mf, fx), state).catch(() => {});
+    return { screen: sc.id, title: sc.title, pass, mode, width, file, sha256: createHash("sha256").update(png).digest("hex"), masked: null, ms: Date.now() - t0, gates: { spacing: { pass: lost.length === 0, detail: lost.slice(0, 6) }, status: { pass: !sc.status || status === sc.status, detail: status } }, axeReview: [], fontEnv: [] };
+  }
   // Capture the complete document, including the truncation note and trust footer.
   const shot = (o = {}) => page.screenshot({ fullPage: !sc.viewportOnly, ...o }).catch(() => page.screenshot(o));
   const png = await shot({ path: join(OUT, file) });
@@ -1442,18 +1539,7 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
   const walk = sc.userPage || pass === "reflow" ? null : await focusWalk(page, { settle: pass === "motion" }).catch((e) => ({ error: String(e).slice(0, 200), stops: [] }));
   await context.close();
   const g9 = sc.userPage ? { cls: 0, shifts: [] } : await fontShift(browser, mf, fx, sc, contextOptions, url, explicit).catch((e) => ({ cls: 1, shifts: [`harness: ${String(e).slice(0, 160)}`] }));
-  if (sc.after) {
-    const api = async (path, init = {}) => {
-      const res = await mf.dispatchFetch(`${APP}/api/v1${path}`, { ...init, headers: { Authorization: `Bearer ${fx.owner}`, ...(init.headers ?? {}) } });
-      const text = await res.text();
-      try {
-        return JSON.parse(text);
-      } catch {
-        return text;
-      }
-    };
-    await sc.after(api, state).catch((e) => consoleMsgs.push(`harness clean-up: ${String(e).slice(0, 200)}`));
-  }
+  if (sc.after) await sc.after(ownerApi(mf, fx), state).catch((e) => consoleMsgs.push(`harness clean-up: ${String(e).slice(0, 200)}`));
   // Each failed request is "<METHOD> <path> <status>". An expected failure names the method and the exact path,
   // and optionally the status; a screen that expects a status allows only its own navigation with that status.
   const unexpected = unexpectedFailures(failed, sc);
@@ -1544,7 +1630,7 @@ async function filmstripChecks(browser, mf, fx) {
 
 function gallery(list, matrix, checks = {}, source = {}) {
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-  const label = (c) => (c.pass === "forced" ? `forced colours · ${c.width}px` : `${c.mode} · ${c.width}px${c.pass === "reflow" ? " (reflow)" : c.pass === "motion" ? " (normal motion)" : ""}`);
+  const label = (c) => (c.pass === "forced" ? `forced colours · ${c.width}px` : `${c.mode} · ${c.width}px${c.pass === "reflow" ? " (reflow)" : c.pass === "motion" ? " (normal motion)" : c.pass === "spacing" ? " (text spacing, WCAG 1.4.12)" : ""}`);
   const rows = list
     .map((sc) => {
       const cells = matrix.filter((c) => c.screen === sc.id);

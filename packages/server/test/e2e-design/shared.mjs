@@ -114,3 +114,48 @@ export async function dominantColours(browser, frames) {
     await context.close();
   }
 }
+
+/**
+ * WCAG 2.1 SC 1.4.12 Text Spacing: the standard override (line height 1.5, letter spacing 0.12em, word spacing
+ * 0.16em, paragraph spacing 2em), as the W3C's text-spacing bookmarklet applies it.
+ */
+export const TEXT_SPACING_CSS = "*{line-height:1.5!important;letter-spacing:.12em!important;word-spacing:.16em!important}p{margin-bottom:2em!important}";
+
+/**
+ * Text cut off by its box (run in the page): every visible element with text whose content is wider (or taller)
+ * than a box that clips it (overflow hidden or clip, or an ellipsis). Scroll boxes (overflow auto) are not clipped:
+ * their content can be reached. Each element keeps an id across calls, so a harness can list what an override
+ * newly cut off: run it, apply TEXT_SPACING_CSS, run it again, and compare the ids (textSpacingLoss does that).
+ */
+export const CLIPPED_TEXT = () => {
+  const out = [];
+  let n = 0;
+  for (const el of document.body ? document.body.querySelectorAll("*") : []) {
+    n++;
+    if (el.closest("svg, iframe, video, audio, canvas, select, textarea, input, script, style, noscript, [aria-hidden=true], .k-sr, .k-skip")) continue;
+    const cs = getComputedStyle(el);
+    if (cs.display === "none" || cs.visibility === "hidden") continue;
+    const clipX = cs.overflowX === "hidden" || cs.overflowX === "clip";
+    const clipY = cs.overflowY === "hidden" || cs.overflowY === "clip";
+    const ellipsis = cs.textOverflow === "ellipsis";
+    if (!clipX && !clipY && !ellipsis) continue;
+    const text = (el.innerText || "").trim();
+    if (!text) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 2 || r.height <= 2) continue;
+    const overX = (clipX || ellipsis) && el.scrollWidth > el.clientWidth + 1;
+    const overY = clipY && el.scrollHeight > el.clientHeight + 1;
+    if (!overX && !overY) continue;
+    el.__kclip ??= `t${n}`;
+    out.push({ id: el.__kclip, el: `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}${typeof el.className === "string" && el.className ? `.${el.className.trim().split(/\s+/).join(".")}` : ""}`.slice(0, 80), text: text.slice(0, 40), x: overX ? `${el.scrollWidth}>${el.clientWidth}` : null, y: overY ? `${el.scrollHeight}>${el.clientHeight}` : null });
+  }
+  return out;
+};
+
+/** 1.4.12 on a loaded page: what TEXT_SPACING_CSS newly cuts off ([] = nothing lost). The override stays applied. */
+export async function textSpacingLoss(page) {
+  const before = new Set((await page.evaluate(CLIPPED_TEXT)).map((c) => c.id));
+  await page.addStyleTag({ content: TEXT_SPACING_CSS });
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  return (await page.evaluate(CLIPPED_TEXT)).filter((c) => !before.has(c.id));
+}
