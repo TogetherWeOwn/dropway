@@ -334,7 +334,7 @@ export function connectSections(origin: string): ConnectSection[] {
     {
       title: "CLI",
       intro: "Hashes locally and uploads only files the server does not have yet.",
-      snippets: [{ title: "Sign in, then publish", code: `npx kofra login --url ${origin}\nnpx kofra publish ./dist` }],
+      snippets: [{ title: "Sign in, then publish", code: `npx kofra login --api ${origin}\nnpx kofra publish ./dist` }],
     },
     {
       title: "REST",

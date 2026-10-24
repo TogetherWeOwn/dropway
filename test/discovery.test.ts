@@ -181,7 +181,7 @@ describe("/connect, /connect.md, the api-catalog and robots.txt (R-11)", () => {
     expect(md).toContain(CLAUDE);
     expect(md).toContain("[mcp_servers.kofra]");
     expect(md).toContain(`npx skills add ${ORIGIN} -g`);
-    expect(md).toContain(`npx kofra login --url ${ORIGIN}`);
+    expect(md).toContain(`npx kofra login --api ${ORIGIN}`);
     expect(md).toContain(`curl ${ORIGIN}/api/v1/publish`);
     // every snippet on the HTML page appears verbatim in the Markdown: the two cannot drift
     const html = await (await dw.call("/connect")).text();
