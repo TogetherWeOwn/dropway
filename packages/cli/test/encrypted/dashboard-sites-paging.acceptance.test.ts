@@ -122,9 +122,10 @@ afterAll(async () => {
   if (work) await rm(work, { recursive: true, force: true });
 });
 
-async function open(steps: Step[]) {
+async function open(steps: Step[], controlledClock = false) {
   const context = await browser.newContext({ serviceWorkers: "block" });
   const page = await context.newPage();
+  if (controlledClock) await page.clock.install();
   page.setDefaultTimeout(2500);
   const wire: Wire[] = [];
   const violations: string[] = [];
@@ -414,6 +415,24 @@ describe("Sites dashboard: non-destructive failure and accessible retry", () => 
     await loaded(f, ["needle-first", "needle-retry", "needle-last"]);
     await terminal(f);
     expect(f.wire.map(request => request.cursor)).toEqual([null, cursorA, cursorA, cursorB]);
+  });
+
+  // Break: timer-driven retries or delayed prefetch without a fresh activation.
+  it("does not fetch ahead or automatically retry a failed page as browser timers advance", async () => {
+    const f = await open([
+      pageOf([site("first", "First")], cursorA),
+      unavailable(),
+      pageOf([site("unrequested", "Must require an explicit retry")], null),
+    ], true);
+    await loaded(f, ["first"]);
+    await f.page.clock.fastForward(60_000);
+    await settled(f);
+    expect(f.wire.map(request => request.cursor), "one initial page, no delayed fetch-all loop").toEqual([null]);
+    await more(f).click();
+    await expect.poll(() => f.page.locator("#dw-main").innerText()).toMatch(/could not|failed|unable|unavailable/i);
+    await f.page.clock.fastForward(60_000);
+    await settled(f);
+    expect(f.wire.map(request => request.cursor), "failed cursors may only retry on explicit user action").toEqual([null, cursorA]);
   });
 
   it("distinguishes an empty successful first page from a failed first page", async () => {
