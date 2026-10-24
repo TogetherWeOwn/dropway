@@ -532,7 +532,11 @@ async function main() {
   const tmp = mkdtempSync(join(tmpdir(), "kofra-shots-"));
   const maskDir = join(tmp, "masked");
   mkdirSync(maskDir, { recursive: true });
-  const { mf, db } = await startWorker(tmp);
+  // The temporary directories are this run's: removed on every path out, including a failed start.
+  const { mf, db } = await startWorker(tmp).catch((e) => {
+    rmSync(tmp, { recursive: true, force: true });
+    throw e;
+  });
   const fx = await seed(mf, db);
   const list = screens(fx).filter((s) => !ONLY || ONLY.has(s.id));
   // Fresh-instance screens run last, in order: not set up, then set up (no sites), then a broken database.
@@ -574,7 +578,13 @@ async function main() {
     for (const sc of fresh) {
       if (!second) {
         const dir = mkdtempSync(join(tmpdir(), "kofra-shots-fresh-"));
-        second = { ...(await startWorker(dir)), dir };
+        second = {
+          ...(await startWorker(dir).catch((e) => {
+            rmSync(dir, { recursive: true, force: true });
+            throw e;
+          })),
+          dir,
+        };
       }
       if (sc.needsOwner && !second.owner) {
         const r = await second.mf.dispatchFetch(`${APP}/api/v1/setup`, { method: "POST", headers: { Authorization: `Bearer ${BOOT}`, "Content-Type": "application/json" }, body: JSON.stringify({ email: "new@kofra.test" }) });

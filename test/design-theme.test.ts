@@ -158,7 +158,7 @@ describe("server-rendered colour mode (no flash, no script)", () => {
     // A mode written into `next` never reaches the site's own page.
     expect(await location(`${base}?theme=dark`)).toBe(base);
     // Only paths on this site.
-    for (const bad of ["//evil.test/", "https://evil.test/", "/elsewhere/", `${base}\\evil`]) expect(await location(bad)).toBe(base);
+    for (const bad of ["//evil.test/", "https://evil.test/", "/elsewhere/", `${base}\\evil`, `${base}../other-site/`, `${base}..//evil.test/`]) expect(await location(bad)).toBe(base);
 
     // The viewer page frames a folder through it in an explicit mode, and directly in Auto.
     const frameSrc = async (path: string, cookie?: string) => /<iframe id="dw-frame"[^>]* src="([^"]+)"/.exec(await (await dw.call(path, { headers: cookie ? { Cookie: cookie } : {} })).text())![1]!.replaceAll("&amp;", "&");
