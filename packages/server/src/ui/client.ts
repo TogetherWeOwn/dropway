@@ -174,7 +174,8 @@ export function dropwayClient(motifsFactory) {
         else if (k === "text") el.textContent = v;
         else if (k.indexOf("on") === 0 && typeof v === "function") el.addEventListener(k.slice(2), v);
         else if (k === "value") el.value = v;
-        else if (k === "checked") el.checked = !!v;
+        // The default too, so form.reset() goes back to it (the key form's scopes start all ticked again).
+        else if (k === "checked") el.checked = el.defaultChecked = !!v;
         else if (v === true) el.setAttribute(k, "");
         else el.setAttribute(k, String(v));
       }
@@ -247,13 +248,17 @@ export function dropwayClient(motifsFactory) {
     if (hr < 24) return hr + " h ago";
     var days = Math.round(hr / 24);
     if (days < 30) return days + (days === 1 ? " day ago" : " days ago");
-    return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    return new Date(iso).toISOString().slice(0, 10);
   }
   function encodePath(p) {
     return p.split("/").map(encodeURIComponent).join("/");
   }
   function plural(n, one, many) {
     return n + " " + (n === 1 ? one : many || one + "s");
+  }
+  /** How a version was published, in words ("via the API"); an unknown kind shows nothing rather than a raw token. */
+  function sourceLabel(src) {
+    return { publish: "one-call publish", zip: "zip upload", api: "via the API", mcp: "via MCP", cli: "via the CLI", url: "from URLs", browser: "from the browser" }[src] || "";
   }
   /** A file kind as people read it ("Markdown", "Table"): the same labels as the site viewer bar (boot.kindLabels). */
   function kindLabel(kind) {
@@ -284,17 +289,14 @@ export function dropwayClient(motifsFactory) {
               : h("span", { class: "k-th-doc" }, h("i"), h("b"), h("b", { class: "k-s" }));
     return h("span", { class: "k-thumb", "aria-hidden": "true" }, inner);
   }
-  /** Date and time in the reader's time zone, with the zone named (DESIGN.md: times always show a zone). */
+  /**
+   * A date and time in UTC, with the zone named ("2026-10-24 09:44 UTC"): one format on every page, the same as the
+   * hosted pages (which run no script and cannot know the reader's zone), never "GMT+0" here and "UTC" there.
+   */
   function localTime(iso) {
     if (!iso) return "";
-    try {
-      // Explicit fields: dateStyle/timeStyle cannot be combined with timeZoneName (that throws a TypeError).
-      return new Date(iso).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
-    } catch (e) {
-      // Still name the zone if the engine rejects the options or the date.
-      const d = new Date(iso);
-      return isNaN(d.getTime()) ? String(iso) : d.toISOString().slice(0, 16).replace("T", " ") + " UTC";
-    }
+    var t = new Date(iso);
+    return isNaN(t.getTime()) ? String(iso) : t.toISOString().slice(0, 16).replace("T", " ") + " UTC";
   }
   function reducedMotion() {
     return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -1195,7 +1197,8 @@ export function dropwayClient(motifsFactory) {
             ),
           );
           search.hidden = true;
-          if (count) count.textContent = "No sites yet.";
+          // The empty state below says "No sites yet"; the subline only counts.
+          if (count) count.textContent = plural(0, "site") + ".";
           return;
         }
         if (!loaded) add(body, table);
@@ -1244,6 +1247,9 @@ export function dropwayClient(motifsFactory) {
     }
     d.title = (site.title || site.slug) + " · " + boot.instanceName;
     clear(root);
+    var hasLive = versions.some(function (v) {
+      return v.live;
+    });
     var filesSection = h("section", { class: "k-blk", id: "files", "aria-label": "Files" });
     var head = h(
       "div",
@@ -1255,13 +1261,16 @@ export function dropwayClient(motifsFactory) {
         h("p", {}, h("span", { class: "k-url" }, h("a", { href: site.url, target: "_blank", rel: "noopener", text: site.url }), copyButton(site.url, "Copy site URL"))),
         site.description ? h("p", { text: site.description }) : null,
       ),
-      h(
-        "div",
-        { class: "k-btnrow" },
-        h("a", { class: "k-btn k-ghost", href: "/v/" + encodeURIComponent(slug) + "/", text: "Browse files" }),
-        h("a", { class: "k-btn k-ghost", href: "/dashboard/publish?site=" + encodeURIComponent(slug), text: "Publish update" }),
-        h("a", { class: "k-btn", href: site.url, target: "_blank", rel: "noopener", text: "Open site" }),
-      ),
+      // With nothing live there is nothing to browse or open: the Versions block offers the one action (Publish files).
+      hasLive
+        ? h(
+            "div",
+            { class: "k-btnrow" },
+            h("a", { class: "k-btn k-ghost", href: "/v/" + encodeURIComponent(slug) + "/", text: "Browse files" }),
+            h("a", { class: "k-btn k-ghost", href: "/dashboard/publish?site=" + encodeURIComponent(slug), text: "Publish update" }),
+            h("a", { class: "k-btn", href: site.url, target: "_blank", rel: "noopener", text: "Open site" }),
+          )
+        : null,
     );
 
     var vList = h("ol", { class: "k-versions", "aria-label": "Versions, newest first" });
@@ -1275,7 +1284,7 @@ export function dropwayClient(motifsFactory) {
             "div",
             { class: "k-vmsg" },
             h("span", { class: "k-chips" }, v.live ? h("span", { class: "k-chip k-ok", text: "Live" }) : null, h("span", { class: v.message ? null : "k-muted", text: v.message || "No message" })),
-            h("span", { class: "k-sub", title: v.finalizedAt || v.createdAt, text: [plural(v.fileCount, "file") + " · " + bytes(v.totalBytes), ago(v.finalizedAt || v.createdAt), v.client, v.source].filter(Boolean).join(" · ") }),
+            h("span", { class: "k-sub", title: localTime(v.finalizedAt || v.createdAt), text: [plural(v.fileCount, "file") + " · " + bytes(v.totalBytes), ago(v.finalizedAt || v.createdAt), sourceLabel(v.source), v.client].filter(Boolean).join(" · ") }),
           ),
           h(
             "div",
@@ -1326,10 +1335,10 @@ export function dropwayClient(motifsFactory) {
     });
     var versionsSection = blk(
       "Versions",
-      h("span", { class: "k-small", text: versions.length ? plural(versions.length, "version") + ". Restoring is instant: it only moves the live pointer." : "No versions yet." }),
+      versions.length ? h("span", { class: "k-small", text: plural(versions.length, "version") + ". Restoring is instant: it only moves the live pointer." }) : null,
       versions.length
         ? vList
-        : h("div", { class: "k-empty" }, h("h3", { text: "Nothing published yet" }), h("p", { text: "This site exists but has no live version yet." }), h("a", { class: "k-btn", href: "/dashboard/publish?site=" + encodeURIComponent(slug), text: "Publish files" })),
+        : h("div", { class: "k-empty" }, h("h3", { text: "Nothing published yet" }), h("p", { text: "Publish files to this site and they go live at its address." }), h("a", { class: "k-btn", href: "/dashboard/publish?site=" + encodeURIComponent(slug), text: "Publish files" })),
     );
 
     async function showFiles(v) {
@@ -1539,7 +1548,7 @@ export function dropwayClient(motifsFactory) {
         add(
           created,
           secretBlock("Key “" + (k.name || k.prefix) + "” created", k.key, "Give it to the agent or person as KOFRA_API_KEY."),
-          h("div", { class: "k-codeblock" }, h("div", { class: "k-codeblock-h" }, h("span", { class: "k-k", text: "Environment" })), h("pre", { tabindex: "0", role: "region", "aria-label": "Environment", text: "export KOFRA_URL=" + boot.origin + "\nexport KOFRA_API_KEY=" + k.key })),
+          h("div", { class: "k-codeblock" }, h("div", { class: "k-codeblock-h" }, h("span", { class: "k-k", text: "Environment" })), h("pre", { class: "k-wrapped", tabindex: "0", role: "region", "aria-label": "Environment", text: "export KOFRA_URL=" + boot.origin + "\nexport KOFRA_API_KEY=" + k.key })),
         );
         form.reset();
         loadKeys();
@@ -1635,9 +1644,9 @@ export function dropwayClient(motifsFactory) {
           "dl",
           { class: "k-kv" },
           h("dt", { text: "Signed in as" }), h("dd", { text: m.member.email || m.member.name || m.member.id }),
-          h("dt", { text: "Role" }), h("dd", { text: m.member.role }),
+          h("dt", { text: "Role" }), h("dd", { text: m.member.role.charAt(0).toUpperCase() + m.member.role.slice(1) }),
           h("dt", { text: "Key scopes" }), h("dd", { class: "k-mono", text: m.scopes.join(" ") }),
-          h("dt", { text: "Key limited to a site" }), h("dd", { text: m.siteRestriction ? "yes" : "no" }),
+          h("dt", { text: "Sites this key reaches" }), h("dd", { text: m.siteRestriction ? "One site only" : "Every site" }),
         ),
       );
     }
@@ -1856,6 +1865,9 @@ export function dropwayClient(motifsFactory) {
       var url = "/v/" + encodeURIComponent(slug) + "/" + encodePath(p) + (mode !== "view" ? "?mode=" + mode : "");
       if (push) history.pushState({ p: p, mode: mode }, "", url);
       d.title = (p.split("/").pop() || slug) + " · " + slug + " · " + boot.instanceName;
+      // The page's (visually hidden) h1 names the file or folder shown, like the title.
+      var vh = d.getElementById("dw-vh");
+      if (vh) vh.textContent = p.split("/").filter(Boolean).pop() || slug;
     }
 
     function buildTree(files) {

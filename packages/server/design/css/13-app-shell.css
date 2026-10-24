@@ -79,6 +79,8 @@ html:has(.toast){scroll-padding-bottom:7rem}
 .pubbar .fwarn{margin:6px 0 0}
 .rowchips{margin-top:6px}
 .center{text-align:center}
+/* A phrase that must stay on one line (a kicker segment, an address, a date with its zone). */
+.nowrap{white-space:nowrap}
 .spread{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;justify-content:space-between}
 .spread>p{margin:0;max-width:44em}
 .pwrow{margin-top:18px}

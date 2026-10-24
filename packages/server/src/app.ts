@@ -76,8 +76,10 @@ export function createAppRouter(opts: { app: Hono<DropwayEnv>; uiSlots: UiSlots;
       code: "CLAIM",
       heading: "Keep this site",
       message: `Anonymous sites expire. To keep <code>${escapeHtml(slug)}</code>, call the API with an API key of this instance and the claim token (the part of this link after <code>#token=</code>):`,
-      extra: `<div class="k-codeblock"><div class="k-codeblock-h"><span class="k-k">Claim with curl</span></div><pre tabindex="0" role="region" aria-label="Claim with curl">${escapeHtml(curl)}</pre></div>`,
+      // No script on this page, so no Copy button: the command wraps (all of it shows) and one click selects it.
+      extra: `<div class="k-codeblock"><div class="k-codeblock-h"><span class="k-k">Claim with curl</span><span class="k-small">One click selects the command</span></div><pre class="k-wrapped k-pick" tabindex="0" role="region" aria-label="Claim with curl">${escapeHtml(curl)}</pre></div>`,
       signIn: uiSlotsOf(c).session?.signInPath,
+      footerLinks: uiSlotsOf(c).footerLinks,
     });
     return c.html(html, 200, pageHeaders());
   });

@@ -62,10 +62,11 @@ describe("one <main> and a skip link on every site-origin page (WCAG 2.4.1)", ()
 });
 
 describe("end states share one component and one button order", () => {
-  it("an empty site is a .k-state panel (kicker EMPTY), Publish files first, then Home", async () => {
+  it("an empty site is a .k-state panel (kicker EMPTY), Publish files first, then Home (inside the app's viewer)", async () => {
     const dw = await freshInstance({ sitesMode: "subdomain", sitesDomain: "sites.test" });
     expect((await dw.json("/api/v1/sites", { method: "POST", key: dw.ownerKey, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug: "empty-one" }) })).status).toBe(201);
-    const res = await dw.call("https://empty-one.sites.test/", { headers: { Accept: "text/html" } });
+    // Round 3: "Publish files" is for the owner, so it shows inside the app's file viewer (&embed=1) only.
+    const res = await dw.call("https://empty-one.sites.test/?embed=1", { headers: { Accept: "text/html" } });
     expect(res.status).toBe(404);
     const html = await res.text();
     expect(html).toContain('<div class="k-state k-nostamp">');
@@ -112,9 +113,11 @@ describe("text never breaks inside a token", () => {
     expect(CLIENT_SCRIPT).toMatch(/"data-label":\s*"Added"/);
   });
 
-  it("urlCode wraps a URL only after / and before ., never at a hyphen or after ?", () => {
-    expect(urlCode("https://SITE.kofra-sites.test/")).toBe('<code class="k-brk"><span>https://</span><wbr><span>SITE</span><wbr><span>.kofra-sites</span><wbr><span>.test/</span></code>');
-    expect(urlCode("npx skills add https://a.test")).toBe('<code class="k-brk"><span>npx</span> <span>skills</span> <span>add</span> <span>https://</span><wbr><span>a</span><wbr><span>.test</span></code>');
+  it("urlCode wraps a long URL only after / and before ., never at a hyphen or after ?", () => {
+    // Round 3: under 40 characters the code never breaks at all (it moves to the next line whole).
+    expect(urlCode("https://SITE.kofra-sites.test/")).toBe('<code class="k-tok">https://SITE.kofra-sites.test/</code>');
+    expect(urlCode("https://SITE.long-sites-domain.example.com/p/")).toBe('<code class="k-brk"><span>https://</span><wbr><span>SITE</span><wbr><span>.long-sites-domain</span><wbr><span>.example</span><wbr><span>.com/</span><wbr><span>p/</span></code>');
+    expect(urlCode("npx skills add https://kofra.example.com")).toBe('<code class="k-brk"><span>npx</span> <span>skills</span> <span>add</span> <span>https://</span><wbr><span>kofra</span><wbr><span>.example</span><wbr><span>.com</span></code>');
     expect(APP_CSS).toContain("code.k-tok,code.k-brk>span{white-space:nowrap}");
   });
 
@@ -155,16 +158,18 @@ describe("forms", () => {
 });
 
 describe("the no-script mode switch returns to itself", () => {
-  it("POST /__dropway/theme answers 303 to next#dw-mode, and the switch form carries that id", async () => {
+  it("POST /__dropway/theme answers 303 to next#dw-mode-<choice>, and the switch carries those markers", async () => {
     const dw = await freshInstance();
     const res = await dw.call("/__dropway/theme", {
       method: "POST",
       body: new URLSearchParams({ theme: "dark", next: "/dashboard" }),
       headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: ORIGIN },
     });
-    expect(res.headers.get("location")).toBe("/dashboard#dw-mode");
+    expect(res.headers.get("location")).toBe("/dashboard#dw-mode-dark");
     const page = await (await dw.call("/dashboard")).text();
     expect(page).toContain('<form class="k-mode-switch" id="dw-mode"');
+    // The marker sits just before its button, so the next Tab after the redirect lands on the button that was pressed.
+    expect(page).toContain('<span id="dw-mode-dark"></span><button type="submit" name="theme" value="dark"');
   });
 });
 

@@ -1,7 +1,9 @@
-/* App header (ui/chrome.ts), one layout at every width, in the same order as the markup: the first row is the
-   wordmark, the tag, the account area and the colour mode switch; the navigation is the row under it. So the
-   keyboard order is the visual order (left to right, then down), the header keeps the same rows whether or not
-   the account area has filled in (no layout shift), and the switch never drops to a row of its own. */
+/* App header (ui/chrome.ts). The markup order is the wordmark, the tag, the account area, the colour mode switch
+   and the navigation. Under 1000px that is also the screen order: the first row is the wordmark, the tag, the account
+   area and the switch, and the navigation is the row under it (so focus moves left to right, then down, never back
+   up the screen, and the header keeps the same rows whether or not the account area has filled in). From 1000px the
+   header is one row, as in the gallery: the wordmark and tag on the left, then the navigation, the account area and
+   the switch on the right (the navigation moves up with `order`). The switch never drops to a row of its own. */
 .top{border-bottom:1px solid var(--rule);background:var(--paper)}
 .top>.wrap{display:flex;align-items:center;gap:10px var(--s5);min-height:60px;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}
 .top .wm{font-size:22px;line-height:1.2}
@@ -14,8 +16,15 @@
 .acct{display:flex;align-items:center;gap:10px;font-size:13.5px;color:var(--ink-2);white-space:nowrap;margin-left:auto}
 .acct .who{max-width:14rem;overflow:hidden;text-overflow:ellipsis}
 .acct form{margin:0}
+/* Pages with no switch (they answer a POST or show a secret once): the account area ends flush with the content edge. */
+.noswitch .acct .btn.quiet:last-child{margin-right:-5px}
 .slotbanner{border-bottom:1px solid var(--rule-soft);background:var(--paper-2)}
 .slotbanner>.wrap{padding-top:10px;padding-bottom:10px;font-size:14.5px}
+@media (min-width:1000px){
+  .top .nav{flex-basis:auto;flex-wrap:nowrap;order:1;margin-left:auto;white-space:nowrap}
+  .acct{order:2;margin-left:0}
+  .top .mode-switch{order:3}
+}
 @media (max-width:720px){
   .top>.wrap{gap:10px 12px}
   .top .tag{display:none}

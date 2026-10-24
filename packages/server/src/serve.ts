@@ -13,6 +13,7 @@ import {
   readBlob,
   readBlobRange,
   requestPathToFilePath,
+  siteUrl,
   verifyPassword,
   type DropwayContext,
   type LiveSite,
@@ -50,6 +51,8 @@ export const SITE_SANDBOX =
   "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-pointer-lock allow-presentation allow-orientation-lock";
 
 const PASSWORD_PATH = "__dropway/password";
+/** The Report abuse link on anonymous sites (report-link.ts) opens this page on the site's own origin. */
+export const REPORT_PATH = "__dropway/report";
 /** The app's file viewer opens folders and a site's own pages in its frame through this address (see openInFrame). */
 export { OPEN_PATH };
 
@@ -146,6 +149,7 @@ export function systemResponse(
   title: string,
   message: string,
   extra = "",
+  primary = "",
 ): Response {
   const h = new Headers({ "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
   h.set("Content-Security-Policy", siteSystemCsp(dw));
@@ -163,14 +167,59 @@ export function systemResponse(
           code,
           title,
           message: message.replace("{app}", `<a href="${escapeHtml(origin)}"${out}>${escapeHtml(dw.config.instanceName)}</a>`),
-          // One order on every end state: the primary action first, then Home.
-          extra: extra + (code === "PASSWORD" ? "" : `<div class="k-acts">${code === "EMPTY" && live ? `<a class="k-btn" href="${escapeHtml(origin)}/dashboard/publish?site=${escapeHtml(encodeURIComponent(live.slug))}"${out}>Publish files</a>` : status === 502 ? `<a class="k-btn" href="${escapeHtml(req.url)}">Try again</a>` : ""}<a class="k-btn k-ghost" href="${escapeHtml(origin)}"${out}>Home</a></div>`),
+          extra: extra + (code === "PASSWORD" ? "" : endStateActions(origin, req, live, status, code, embed, out, primary)),
           // Only terminal lifecycle states get a stamp.
           stamp: status === 410 ? { text: "Expired" } : undefined,
           variant: code === "PASSWORD" ? "panel" : "state",
           embed,
         });
   return new Response(body, { status, headers: h });
+}
+
+/**
+ * The actions of a site-origin end state, in one order everywhere: the primary action first (filled), then Home as a
+ * ghost button; when Home is the only action it is the filled one (the same emphasis as the app's not-found page).
+ * "Publish files" on an empty site is for its owner, so it shows only inside the app's file viewer (&embed=1, where
+ * the person is signed in); a visitor gets Home.
+ */
+function endStateActions(origin: string, req: Request, live: LiveSite | null, status: number, code: string, embed: boolean, out: string, given = ""): string {
+  const primary =
+    given ||
+    (code === "EMPTY" && live && embed
+      ? `<a class="k-btn" href="${escapeHtml(origin)}/dashboard/publish?site=${escapeHtml(encodeURIComponent(live.slug))}"${out}>Publish files</a>`
+      : status === 502
+        ? `<a class="k-btn" href="${escapeHtml(req.url)}">Try again</a>`
+        : "");
+  return `<div class="k-acts">${primary}<a class="k-btn${primary ? " k-ghost" : ""}" href="${escapeHtml(origin)}"${out}>Home</a></div>`;
+}
+
+/**
+ * GET <site>/__dropway/report: how to report this site. Kofra does not review sites before they go live, so the page
+ * names the site's address and points at the instance's abuse contact (ABUSE_CONTACT: an email address, opened as a
+ * prefilled email, or an https form), else asks people to tell whoever runs the instance.
+ */
+function reportPage(dw: DropwayContext, req: Request, mode: ServeMode, live: LiveSite): Response {
+  const address = siteUrl(dw, live.slug);
+  const contact = dw.config.abuseContact;
+  const mail = contact && !contact.startsWith("https:") ? contact : null;
+  const primary = mail
+    ? `<a class="k-btn" href="${escapeHtml(`mailto:${mail}?subject=${encodeURIComponent(`Report: ${address}`)}&body=${encodeURIComponent(`Site: ${address}\nWhat is wrong with it:\n`)}`)}">Email a report</a>`
+    : contact
+      ? `<a class="k-btn" href="${escapeHtml(contact)}" rel="noopener">Report it</a>`
+      : "";
+  const how = contact ? "Report it with its address:" : "Tell the people who run {app}, with its address:";
+  return systemResponse(
+    dw,
+    req,
+    mode,
+    live,
+    200,
+    "REPORT",
+    "Report this site",
+    `Sites here are not reviewed before they go live. If this one is harmful (phishing, malware, someone's private data), ${how}`,
+    `<p><code>${escapeHtml(address)}</code></p>`,
+    primary,
+  );
 }
 
 /** `&embed=1` on the request: the page is drawn inside the app's file viewer frame. */
@@ -280,7 +329,11 @@ function passwordForm(dw: DropwayContext, req: Request, live: LiveSite, mode: Se
 <label class="k-label" for="dw-pw">Password</label>
 <div class="k-field"><input class="k-input" id="dw-pw" type="password" name="password" autocomplete="current-password" required${failed ? ' aria-invalid="true" aria-describedby="dw-pw-err"' : ""}><button class="k-btn" type="submit">Open</button></div>
 ${failed ? '<p class="k-msgline k-err" id="dw-pw-err" role="alert">That password is not right.</p>' : ""}</form>`;
-  const r = systemResponse(dw, req, mode, live, 401, "PASSWORD", "This site is password protected", "Enter the password to view it.", extra);
+  // Inside the app's file viewer the owner sees the gate too: the preview shows the site as its visitors see it.
+  const message = isEmbedded(req)
+    ? "Enter the password to view it. This preview shows the site as visitors see it, so it asks you for the password too."
+    : "Enter the password to view it.";
+  const r = systemResponse(dw, req, mode, live, 401, "PASSWORD", "This site is password protected", message, extra);
   // Only the app (its file viewer) may frame the form; X-Frame-Options covers browsers without CSP 2.
   r.headers.set("Content-Security-Policy", `${r.headers.get("Content-Security-Policy")}; frame-ancestors ${appOrigin(dw)}`);
   r.headers.set("X-Frame-Options", "DENY");
@@ -379,6 +432,7 @@ export async function serveSite(
       return systemResponse(dw, req, mode, live, 403, "403", "Not available here", "This site is password protected, so other sites cannot load it.");
     }
   }
+  if (filePath === REPORT_PATH && (method === "GET" || method === "HEAD")) return reportPage(dw, req, mode, live);
   const gate = await handlePassword(dw, req, live, mode, filePath);
   if (gate) return gate;
 
@@ -386,7 +440,7 @@ export async function serveSite(
     return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD, OPTIONS" } });
   }
   if (filePath === OPEN_PATH) return openInFrame(dw, req, url, live, mode, viewers);
-  if (!live.versionId) return systemResponse(dw, req, mode, live, 404, "EMPTY", "Nothing published yet", "This site exists but has no live version yet.");
+  if (!live.versionId) return systemResponse(dw, req, mode, live, 404, "EMPTY", "Nothing published yet", "The owner of this site has not published anything on it yet.");
 
   const resolved = resolvePath(live, filePath, req, mode);
   let response: Response;

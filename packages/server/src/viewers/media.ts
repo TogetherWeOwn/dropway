@@ -1,6 +1,6 @@
 import { extname } from "@dropway/core";
 import { escapeHtml, formatBytes } from "../html";
-import { standardTabs, viewerCsp, viewerPage, type ViewerTab } from "./chrome";
+import { scriptHash, standardTabs, viewerCsp, viewerPage, type ViewerTab } from "./chrome";
 import type { ViewMode, Viewer, ViewerContext } from "./index";
 
 /**
@@ -23,7 +23,9 @@ const MEDIA_CSS = `
 .dw-video{max-width:100%;max-height:calc(100vh - 9rem);background:var(--paper-3)}
 .dw-audio{width:min(40rem,100%);margin-top:18vh}
 .dw-fallback{max-width:34rem;margin:0 auto;padding:15vh var(--s5) 0;text-align:center;color:var(--muted)}
+.dw-media>.dw-fallback{padding:10vh var(--s5) 0}
 @media (max-width:720px){.dw-fallback{padding:10vh var(--s4) 0}}
+@media (max-width:600px){.dw-stage{min-height:0}}
 `;
 
 /** Pixel size from the first bytes of a PNG, GIF, JPEG, WebP or BMP file. */
@@ -143,16 +145,26 @@ function subtitleTracks(vc: ViewerContext): string {
   return tracks.join("");
 }
 
+/**
+ * A video the browser cannot play (a damaged file, an unsupported codec) says so, like the PDF viewer, instead of a
+ * player that spins for ever: one hashed inline script swaps the player for the message on the video's error event.
+ */
+const VIDEO_ERROR_SCRIPT = `(function(){var v=document.querySelector(".dw-video"),f=document.getElementById("dw-verr");if(!v||!f)return;function e(){v.hidden=true;f.hidden=false}if(v.error)e();else v.addEventListener("error",e)})();`;
+
 export const videoViewer: Viewer = {
   id: "video",
+  version: 2,
   maxBytes: Number.MAX_SAFE_INTEGER,
   matches: (file, _live, mode) => file.kind === "video" && topLevelOnly(mode),
   async render(vc) {
+    const fallback = `<div class="dw-fallback" id="dw-verr" hidden><p>This browser cannot play this video.</p><p><a class="k-btn k-sm k-ghost" href="${escapeHtml(vc.rawUrl)}" rel="nofollow">Open the video</a> <a class="k-btn k-sm k-ghost" href="${escapeHtml(vc.downloadUrl)}" rel="nofollow" download>Download</a></p></div>`;
     return viewerPage(vc, {
       tabs: mediaTabs(vc, "Video"),
       css: MEDIA_CSS,
-      body: `<div class="dw-media"><video class="dw-video" controls playsinline preload="metadata" src="${escapeHtml(vc.fileUrl)}">${subtitleTracks(vc)}<a href="${escapeHtml(vc.downloadUrl)}">Download the video</a></video>
+      body: `<div class="dw-media"><video class="dw-video" controls playsinline preload="metadata" src="${escapeHtml(vc.fileUrl)}">${subtitleTracks(vc)}<a href="${escapeHtml(vc.downloadUrl)}">Download the video</a></video>${fallback}
 <p class="k-small">${escapeHtml(`${formatBytes(vc.file.size)} · ${vc.file.contentType.split(";")[0]}`)}</p></div>`,
+      script: VIDEO_ERROR_SCRIPT,
+      csp: viewerCsp({ scriptHashes: [await scriptHash(VIDEO_ERROR_SCRIPT)] }),
     });
   },
 };

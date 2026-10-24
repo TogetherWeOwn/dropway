@@ -6,6 +6,7 @@ import { escapeHtml, formatBytes } from "../html";
 import { TRUST_LINE } from "./chrome";
 import { renderAppPage, sitesCspSource, uiSlotsOf } from "./shell";
 import { themeOf, type ThemePref } from "./theme";
+import { SOURCE_REPO } from "../repo";
 
 const e = escapeHtml;
 
@@ -25,11 +26,15 @@ const NOSCRIPT = `<noscript><p class="k-pad k-small">The dashboard loads its dat
 /** Inline code that never breaks inside itself: a query, a scope, a secret's name (short tokens). */
 const tok = (t: string) => `<code class="k-tok">${e(t)}</code>`;
 
+/** Inline code shorter than this never wraps (a short URL or command moves to the next line whole). */
+export const SHORT_CODE = 40;
+
 /**
- * A URL or command as inline code that may wrap only after "/", before "." and at spaces (<wbr>), never inside a
- * name such as "kofra-sites", and never after a "?".
+ * A URL or command as inline code. Short ones (under SHORT_CODE characters) never break; longer ones may wrap only
+ * after "/", before "." and at spaces (<wbr>), never inside a name such as "kofra-sites", and never after a "?".
  */
 export function urlCode(t: string): string {
+  if (t.length < SHORT_CODE) return tok(t);
   const html = t
     .split(/(\s+)/)
     .map((word) => {
@@ -58,9 +63,12 @@ function sitesWhere(dw: DropwayContext): string {
   return `On this origin under ${tok(`${c.sitesPathPrefix}/`)}, sandboxed: ${urlCode(example)}`;
 }
 
-/** A code block with a kicker and a Copy button (shown once the dashboard script runs). */
+/**
+ * A code block with a kicker and a Copy button (shown once the dashboard script runs). The commands and settings on
+ * the home page wrap (`k-wrapped`), so the whole of each shows at every width; Copy copies the text as written.
+ */
 function codeblock(id: string, label: string, text: string): string {
-  return `<div class="k-codeblock"><div class="k-codeblock-h"><span class="k-k">${e(label)}</span><button type="button" class="k-btn k-sm k-ghost" data-copy="#${id}" aria-label="Copy: ${e(label)}" hidden>Copy</button></div><pre id="${id}" tabindex="0" role="region" aria-label="${e(label)}">${e(text)}</pre></div>`;
+  return `<div class="k-codeblock"><div class="k-codeblock-h"><span class="k-k">${e(label)}</span><button type="button" class="k-btn k-sm k-ghost" data-copy="#${id}" aria-label="Copy: ${e(label)}" hidden>Copy</button></div><pre id="${id}" class="k-wrapped" tabindex="0" role="region" aria-label="${e(label)}">${e(text)}</pre></div>`;
 }
 
 // ------------------------------------------------------------------ home
@@ -122,12 +130,13 @@ export async function homePage(c: Context<DropwayEnv>): Promise<Response> {
     ["Versions, not overwrites", "Each publish is immutable. Restoring an old one is instant: only the live pointer moves."],
     ["Only new bytes travel", "Files are stored once by SHA-256. A republish uploads only what changed."],
     ["Every file type viewable", `Add ${tok("?raw=1")} for the stored bytes, ${tok("?view=source")} for highlighted source.`],
-    ["Sites", `${sitesWhere(dw)}.`],
+    // No full stop after the address: it would read as part of the URL.
+    ["Sites", sitesWhere(dw)],
     [
       "Publishing",
       `${anon ? `With an API key, or anonymously (anonymous sites expire after ${Math.round(dw.config.anonymous.ttlMs / 3600_000)} hours).` : "With an API key from this instance's owner. Anonymous publishing is off."} Files up to ${formatBytes(lim.maxFileBytes)}, ${lim.maxFiles.toLocaleString("en-US")} files per version.`,
     ],
-    ["Yours", `Runs on its owner's Cloudflare account. <a href="https://github.com/TogetherWeOwn/dropway">Open source</a>, MIT licensed.`],
+    ["Yours", `Runs on its owner's Cloudflare account. <a href="${SOURCE_REPO}">Open source</a>, MIT licensed.`],
   ];
   const setup = setUp
     ? ""
@@ -137,7 +146,7 @@ export async function homePage(c: Context<DropwayEnv>): Promise<Response> {
         `curl -X POST ${o}/api/v1/setup \\\n  -H "Authorization: Bearer $ADMIN_BOOTSTRAP_KEY" \\\n  -H "Content-Type: application/json" -d '{"email":"you@example.com"}'`,
       )}</div></div>`;
   const body = `<section class="k-hero" aria-labelledby="dw-home-h"><div class="k-wrap"><div>
-<p class="k-k">Self-hosted · single tenant · on Cloudflare</p>
+<p class="k-k"><span class="k-nowrap">Self-hosted</span> · <span class="k-nowrap">single tenant</span> · <span class="k-nowrap">on Cloudflare</span></p>
 <h1 id="dw-home-h">${e(name)}</h1>
 <p class="k-lede">Publish a file, a folder or a whole site to a live URL in one call. Every publish is a version you can roll back to, and every file opens in the browser as what it is: pages, Markdown, code, data, images, PDFs and media.</p>
 <div class="k-btnrow" id="dw-home-cta"><a class="k-btn" href="/login">Sign in</a><a class="k-btn k-ghost" href="#dw-agents">Connect an agent</a></div>
@@ -272,10 +281,11 @@ export async function settingsPage(c: Context<DropwayEnv>, slots: UiSlots): Prom
       return block({ id: s.id, title: s.title, body: `<div class="k-pad">${html}</div>` });
     }),
   );
-  const body = `${pageHead("Settings", "How this instance is set up. Change it in wrangler.jsonc and redeploy.")}
+  // Members are edited here; only the instance's own settings live in wrangler.jsonc (said on that block alone).
+  const body = `${pageHead("Settings", "Your account, the members who can sign in, and how this instance is set up.")}
 ${block({ title: "Your account", titleId: "dw-me-h", body: `<div class="k-pad" id="dw-me">${NOSCRIPT}</div>` })}
 ${block({ title: "Members", titleId: "dw-members-h", tools: '<span class="k-small">People and agents who can sign in. Each gets their own keys.</span>', body: `<div id="dw-members">${NOSCRIPT}</div>` })}
-${block({ title: "This instance", titleId: "dw-instance-h", body: `<div class="k-pad"><dl class="k-kv">${rows.map(([k, v]) => `<dt>${e(k)}</dt><dd>${v}</dd>`).join("")}</dl></div>` })}
+${block({ title: "This instance", titleId: "dw-instance-h", tools: `<span class="k-small">Read-only here: change these in ${tok("wrangler.jsonc")} and redeploy.</span>`, body: `<div class="k-pad"><dl class="k-kv">${rows.map(([k, v]) => `<dt>${e(k)}</dt><dd>${v}</dd>`).join("")}</dl></div>` })}
 ${extra.join("")}`;
   return renderAppPage(c, { title: "Settings", page: "settings", active: "/dashboard/settings", body });
 }
@@ -327,6 +337,7 @@ export function viewerPage(c: Context<DropwayEnv>): Response | Promise<Response>
     : `<nav class="k-seg" aria-label="View">${tab("Rendered", withViewerTheme(`${fileUrl}?view=1&embed=1`, pref), mode !== "source" && mode !== "raw")}${tab("Source", withViewerTheme(`${fileUrl}?view=source&embed=1`, pref), mode === "source")}${tab("Raw", `${fileUrl}?raw=1`, mode === "raw")}</nav><a class="k-btn k-sm k-ghost" href="${e(`${fileUrl}?download=1`)}">Download</a><a class="k-btn k-sm k-ghost" href="${e(fileUrl)}" target="_blank" rel="noopener">Open</a>`;
   const body = `<div class="k-vapp"><aside class="k-vside" id="dw-tree" aria-label="Files"><div class="k-vside-h"><a class="k-title" href="/dashboard/sites/${e(encodeURIComponent(slug))}">${e(slug)}</a>${NOSCRIPT}</div></aside>
 <section class="k-vcenter" aria-label="Preview">
+<h1 class="k-sr" id="dw-vh">${e(path.split("/").filter(Boolean).pop() ?? slug)}</h1>
 <div class="k-toolbar"><div class="k-vfile" id="dw-fileinfo"><span class="k-crumbs"><span aria-current="page">${e(path || "/")}</span></span></div><div class="k-tools" id="dw-tools">${tools}</div></div>
 <p class="k-trust">${TRUST_LINE}</p>
 <iframe id="dw-frame" name="dw-frame" class="k-frame" src="${e(src)}" sandbox="${sandbox}" allow="clipboard-write; fullscreen; autoplay; encrypted-media; picture-in-picture" referrerpolicy="no-referrer" title="${e(`Preview of ${path || slug}`)}"></iframe>

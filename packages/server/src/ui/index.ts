@@ -37,7 +37,7 @@ export function installUi(app: Hono<DropwayEnv>, slots: UiSlots) {
 }
 
 export { homePage } from "./pages";
-export { renderAppPage, bindUiSlots, appScriptCsp, CORE_NAV, CORE_FOOTER_LINKS, APP_CSS, type AppPageOptions } from "./shell";
+export { renderAppPage, bindUiSlots, appScriptCsp, CORE_NAV, CORE_FOOTER_LINKS, SOURCE_REPO, APP_CSS, type AppPageOptions } from "./shell";
 export { renderDocument, appStylesheetUrl, fontFaceCss, type DocumentOptions } from "./document";
 export { accountArea, appChrome, appHeader, appFooter, identityTag, modeSwitch, siteHeader, siteFooter, GUILLOCHE_BAND, SKIP_LINK, TRUST_LINE, type AccountAreaOptions, type AppChromeOptions, type AppHeaderOptions, type AppFooterOptions, type ChromeNavItem } from "./chrome";
 export { THEME_COOKIE, THEME_PATH, bindRequestTheme, themeOf, requestTheme, themeFromCookie, themeFromQuery, themeSetCookie, themeMetas, themeAttr, safeNext, type ThemePref, type ThemeMode } from "./theme";

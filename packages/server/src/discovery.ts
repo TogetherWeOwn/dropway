@@ -2,6 +2,7 @@ import { appOrigin, sha256Hex, siteUrl, type DropwayConfig, type DropwayContext 
 import type { McpToolDefinition } from "./extensions";
 import { buildOpenApi } from "./openapi";
 import type { OperationDefinition } from "./operations";
+import { SOURCE_REPO, SOURCE_REPO_SLUG } from "./repo";
 
 /**
  * Agent discovery documents, all generated from the same sources so they cannot drift:
@@ -47,7 +48,7 @@ name: ${SKILL_NAME}
 description: ${skillDescription(product)}
 license: MIT
 metadata:
-  homepage: ${instance ? instance.origin : "https://github.com/TogetherWeOwn/dropway"}
+  homepage: ${instance ? instance.origin : SOURCE_REPO}
 ---
 
 # ${product}
@@ -189,8 +190,8 @@ ${mcpLines(origin)}
 
 - [Full reference](${origin}/llms-full.txt): every endpoint, every MCP tool with its input schema, error codes
 - [OpenAPI 3.1](${origin}/openapi.json): x-mcp-tool names available MCP twins; x-mcp-exclude explains REST-only operations
-- [Agent Skill](${origin}/skill.md): install with \`npx skills add ${origin}\` or \`npx skills add TogetherWeOwn/dropway\`
-- [Source (MIT)](https://github.com/TogetherWeOwn/dropway)
+- [Agent Skill](${origin}/skill.md): install with \`npx skills add ${origin}\` or \`npx skills add ${SOURCE_REPO_SLUG}\`
+- [Source (MIT)](${SOURCE_REPO})
 
 ## REST endpoints
 

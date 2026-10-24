@@ -23,8 +23,14 @@ const LABELS: Record<ThemePref, [string, string]> = {
 /** The trust line, verbatim (DESIGN.md section 10). Kofra never claims a file is safe. */
 export const TRUST_LINE = "Kofra does not scan files; open files only from people you trust.";
 
-/** id of the switch form: the no-script switch returns to `next#dw-mode`, so focus resumes at the switch. */
+/** id of the switch form. */
 export const MODE_SWITCH_ID = "dw-mode";
+
+/**
+ * id of the empty marker just before a button of the switch: the no-script switch returns to `next#dw-mode-<choice>`,
+ * so the next Tab lands on the button that was pressed (a fragment on the button itself would move the next Tab past it).
+ */
+export const modeMarkerId = (v: ThemePref) => `${MODE_SWITCH_ID}-${v}`;
 
 /**
  * Auto / Light / Dark as submit buttons posting to /__dropway/theme: works on pages with no script at
@@ -35,7 +41,7 @@ export function modeSwitch(pref: ThemePref, next: string): string {
   const buttons = (["auto", "light", "dark"] as const)
     .map((v) => {
       const [label, title] = LABELS[v];
-      return `<button type="submit" name="theme" value="${v}" aria-pressed="${pref === v}" title="${title}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">${ICONS[v]}</svg><span data-label="${label}">${label}</span></button>`;
+      return `<span id="${modeMarkerId(v)}"></span><button type="submit" name="theme" value="${v}" aria-pressed="${pref === v}" title="${title}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">${ICONS[v]}</svg><span data-label="${label}">${label}</span></button>`;
     })
     .join("");
   return `<form class="k-mode-switch" id="${MODE_SWITCH_ID}" method="post" action="${THEME_PATH}"><input type="hidden" name="next" value="${e(next)}"><div role="group" aria-label="Colour theme">${buttons}</div></form>`;
@@ -96,9 +102,11 @@ export interface AppHeaderOptions {
 }
 
 /**
- * The header in reading order, which is also the visual order at every width: the first row is the wordmark,
- * the tag, the account area and the mode switch; the navigation is the row under it. So keyboard focus moves
- * left to right, then down, never back up the screen.
+ * The header in reading order: the wordmark, the tag, the account area, the mode switch, then the navigation. Under
+ * 1000px that is the screen order too (the navigation is the row under the others), so keyboard focus moves left to
+ * right, then down, never back up the screen. From 1000px the header is one row, with the navigation before the
+ * account area on screen (10-top.css). Pages with no switch get `k-noswitch`, so the account area ends flush with
+ * the content edge.
  */
 export function appHeader(o: AppHeaderOptions): string {
   const nav = o.nav?.length
@@ -106,7 +114,7 @@ export function appHeader(o: AppHeaderOptions): string {
         .map((n) => `<a href="${e(n.href)}"${n.href === o.active ? ' aria-current="page"' : ""}>${e(n.label)}</a>`)
         .join("")}</nav>`
     : "";
-  return `<header class="k-top"><div class="k-wrap"><a class="k-wm" href="${e(o.home ?? "/")}">${e(o.name)}</a>${o.tag || o.tagId ? `<span class="k-tag"${o.tagId ? ` id="${e(o.tagId)}"` : ""}>${e(o.tag ?? "")}</span>` : ""}<div class="k-acct"${o.accountId ? ` id="${e(o.accountId)}"` : ""}>${o.account ?? ""}</div>${o.modeSwitch === false ? "" : modeSwitch(o.theme, o.next)}${nav}</div></header>`;
+  return `<header class="k-top${o.modeSwitch === false ? " k-noswitch" : ""}"><div class="k-wrap"><a class="k-wm" href="${e(o.home ?? "/")}">${e(o.name)}</a>${o.tag || o.tagId ? `<span class="k-tag"${o.tagId ? ` id="${e(o.tagId)}"` : ""}>${e(o.tag ?? "")}</span>` : ""}<div class="k-acct"${o.accountId ? ` id="${e(o.accountId)}"` : ""}>${o.account ?? ""}</div>${o.modeSwitch === false ? "" : modeSwitch(o.theme, o.next)}${nav}</div></header>`;
 }
 
 export interface AppFooterOptions {

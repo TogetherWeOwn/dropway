@@ -37,6 +37,11 @@ export type SitesMode = "path" | "subdomain";
 export interface DropwayConfig {
   /** Shown in pages and API responses. */
   instanceName: string;
+  /**
+   * Where people report an abusive site (the Report abuse link on anonymous sites opens a page that points here): an
+   * email address (mailto) or an https URL. null: the page asks people to tell whoever runs the instance.
+   */
+  abuseContact: string | null;
   /** Public origin of the app + API, no trailing slash. null = the origin of each request. */
   appOrigin: string | null;
   /**
@@ -100,6 +105,7 @@ export type ConfigOverrides = Partial<Omit<DropwayConfig, "anonymous" | "limits"
 /** Worker vars and secrets read by resolveConfig. All optional strings. */
 export interface DropwayVars extends Partial<Record<`QUOTA_${Uppercase<QuotaKey>}`, string>> {
   INSTANCE_NAME?: string;
+  ABUSE_CONTACT?: string;
   APP_ORIGIN?: string;
   LEGACY_APP_ORIGINS?: string;
   LEGACY_DEPRECATED_AT?: string;
@@ -120,6 +126,18 @@ export interface DropwayVars extends Partial<Record<`QUOTA_${Uppercase<QuotaKey>
   ADMIN_BOOTSTRAP_KEY?: string;
   SIGNING_SECRET?: string;
   TRANSFER_MAX_EXPIRY_DAYS?: string;
+}
+
+/** ABUSE_CONTACT as an email address or an https URL; anything else is ignored (null). */
+export function abuseContactOf(v: string | undefined): string | null {
+  const t = v?.trim() ?? "";
+  if (/^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(t)) return t;
+  try {
+    const u = new URL(t);
+    return u.protocol === "https:" ? u.href : null;
+  } catch {
+    return null;
+  }
 }
 
 const num = (v: string | undefined, d: number) => {
@@ -210,6 +228,7 @@ export function resolveConfig(vars: DropwayVars, overrides: ConfigOverrides = {}
   const adminBootstrapKey = overrides.adminBootstrapKey !== undefined ? overrides.adminBootstrapKey : vars.ADMIN_BOOTSTRAP_KEY?.trim() || null;
   return {
     instanceName: overrides.instanceName ?? (vars.INSTANCE_NAME?.trim() || "Kofra"),
+    abuseContact: overrides.abuseContact !== undefined ? overrides.abuseContact : abuseContactOf(vars.ABUSE_CONTACT),
     appOrigin,
     legacyAppOrigins,
     legacyDeprecatedAt: overrides.legacyDeprecatedAt ?? unixSeconds(vars.LEGACY_DEPRECATED_AT),

@@ -121,10 +121,10 @@ export async function themeRoute(c: Context<DropwayEnv>): Promise<Response> {
   const form = urlencoded ? new URLSearchParams(body) : null;
   const next = safeNext(form?.get("next"));
   const theme = form?.get("theme");
-  // A switch with a valid return address goes back to the switch itself (#dw-mode, ui/chrome.ts), so keyboard
-  // focus resumes where it was instead of at the top of the page.
+  // A switch with a valid return address goes back to the pressed button's marker (#dw-mode-<choice>, ui/chrome.ts),
+  // so the next Tab lands on the button that was pressed instead of at the top of the page.
   const toSwitch = isThemePref(theme) && form?.get("next") === next && !next.includes("#");
-  headers.set("Location", toSwitch ? `${next}#dw-mode` : next);
+  headers.set("Location", toSwitch ? `${next}#dw-mode-${theme}` : next);
   if (isThemePref(theme)) headers.append("Set-Cookie", themeSetCookie(theme));
   return new Response(null, { status: 303, headers });
 }

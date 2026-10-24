@@ -90,8 +90,11 @@ describe("contrast: both modes pass WCAG AA", () => {
 
 // ------------------------------------------------------------------ literal colours and classes
 
-/** Literal colours allowed in component CSS (PORT-SPEC 8.3): E2 the user-content canvas (frame, notebook output images). */
-const ALLOWED_LITERALS = [/\.frame\{[^}]*background:#fff/, /\.k-frame\{[^}]*background:#fff/, /\.nb-out img\{[^}]*background:#fff/];
+/**
+ * Literal colours allowed in component CSS (PORT-SPEC 8.3): E2 the user-content canvas (notebook output images, the
+ * html viewer's frame) and the app viewer frame's Light backing (white in Light, the mode's paper in Dark).
+ */
+const ALLOWED_LITERALS = [/\.frame\{[^}]*background:light-dark\(#fff,var\(--paper\)\)/, /\.k-frame\{[^}]*background:#fff/, /\.nb-out img\{[^}]*background:#fff/];
 const LITERAL = /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|(?<![.\w-])(?:white|black|red|green|blue|gray|grey|silver|orange|yellow|purple)\b(?![-\w])/;
 
 function stripForcedColors(css: string): string {

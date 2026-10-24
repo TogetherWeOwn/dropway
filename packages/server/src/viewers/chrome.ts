@@ -131,8 +131,9 @@ export const VIEWER_CSS = `
 /**
  * A complete viewer page response. `body` is trusted HTML (escape user content before passing it); it is the
  * page's one <main id="dw-main"> (viewers never add their own), after a "Skip to content" link that passes the
- * bar. `srHeading`: viewers with no visible heading (PDF, an HTML page in the frame) get the file name as a
- * visually hidden h1, so the page still has one.
+ * bar. Every viewer page has an h1: a body with no h1 of its own (JSON, a table, an image, code, a PDF, an HTML
+ * page in the frame...) gets the file name as a visually hidden h1 (`srHeading` forces it either way). The trust
+ * line under the body (phones and tablets; from 1000px it is in the bar) sits in the page's footer landmark.
  */
 export function viewerPage(
   vc: ViewerContext,
@@ -149,8 +150,8 @@ export function viewerPage(
     body:
       (vc.embed ? "" : SKIP_LINK) +
       viewerBar(vc, opts.tabs, opts.barExtra) +
-      `<main id="dw-main" class="k-vbody">${opts.srHeading ? `<h1 class="k-sr">${escapeHtml(name)}</h1>` : ""}${opts.body}</main>` +
-      (vc.embed ? "" : `<p class="k-trust k-vtrust k-hide-lg">${TRUST_LINE}</p>`) +
+      `<main id="dw-main" class="k-vbody">${opts.srHeading ?? !/<h1[\s>]/i.test(opts.body) ? `<h1 class="k-sr">${escapeHtml(name)}</h1>` : ""}${opts.body}</main>` +
+      (vc.embed ? "" : `<footer class="k-hide-lg"><p class="k-trust k-vtrust">${TRUST_LINE}</p></footer>`) +
       (opts.script ? `<script>${opts.script}</script>` : ""),
   });
   const headers: Record<string, string> = { "Content-Type": "text/html; charset=utf-8", ...opts.headers };

@@ -33,7 +33,7 @@ export { escapeHtml, htmlPage, systemPage, APP_PAGE_CSP, siteSystemCsp, domainsL
 export { buildOpenApi } from "./openapi";
 export { llmsTxt, llmsFullTxt, skillMarkdown, skillInstance, agentSkillsIndex, SKILL_NAME, SKILL_DESCRIPTION, type SkillInstance } from "./discovery";
 export { createMcpEndpoint, mcpInstructions, selectTools, MCP_SERVER_VERSION, type McpEndpointOptions } from "./mcp";
-export { renderAppPage, appScriptCsp, CORE_NAV, CORE_FOOTER_LINKS, APP_CSS, clientScriptUrl, type AppPageOptions } from "./ui";
+export { renderAppPage, appScriptCsp, CORE_NAV, CORE_FOOTER_LINKS, SOURCE_REPO, APP_CSS, clientScriptUrl, type AppPageOptions } from "./ui";
 export {
   renderDocument,
   appStylesheetUrl,

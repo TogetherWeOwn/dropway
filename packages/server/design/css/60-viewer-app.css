@@ -1,5 +1,5 @@
 /* App file viewer (/v/<site>/...): file tree beside a toolbar and the framed preview. Breadcrumbs are shared
-   with the site-origin viewer bar. The frame keeps a white canvas in every mode, as a browser does (E2). */
+   with the site-origin viewer bar. */
 .page.wide{height:100vh;height:100dvh;min-height:0;overflow:hidden}
 .page.wide>main{min-height:0}
 /* The file workspace is full-bleed, header included: the wordmark sits over the file list's edge. */
@@ -15,7 +15,11 @@
 .toolbar .vfile .sum{flex:1 1 100%}
 .toolbar .vfile .crumbs{overflow-wrap:anywhere;min-width:0}
 .vcenter>.trust{padding:6px 18px;border-bottom:1px solid var(--rule-soft);background:var(--paper-2)}
-.frame{flex:1;width:100%;min-height:0;border:0;background:#fff;display:block}
+/* The frame's own backing is the mode's paper (white in Light, as a browser's canvas; Midnight paper in Dark), so a
+   navigation inside it (a file or folder in the tree, the password gate, an in-place switch) never flashes white in
+   Dark while the next page loads. The site's own HTML still gets a white canvas in Dark (E2): the browser paints an
+   opaque canvas for a light-scheme document in a dark-scheme frame. */
+.frame{flex:1;width:100%;min-height:0;border:0;background:light-dark(#fff,var(--paper));display:block}
 /* The file list folds into a "Files (n)" disclosure on phones; from 761px it is always open and its summary hidden. */
 .treebox>summary{display:none}
 .treebox>.find{margin:0 0 12px}

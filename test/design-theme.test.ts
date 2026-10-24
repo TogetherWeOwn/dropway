@@ -21,8 +21,8 @@ describe("theme cookie route (POST /__dropway/theme)", () => {
     for (const theme of ["light", "dark"]) {
       const res = await themePost(dw, { theme, next: "/dashboard/keys?x=1" });
       expect(res.status).toBe(303);
-      // Back to the switch (#dw-mode), so keyboard focus resumes there after the reload.
-      expect(res.headers.get("location")).toBe("/dashboard/keys?x=1#dw-mode");
+      // Back to the pressed button's marker (#dw-mode-<choice>), so the next Tab lands on that button after the reload.
+      expect(res.headers.get("location")).toBe(`/dashboard/keys?x=1#dw-mode-${theme}`);
       expect(res.headers.get("cache-control")).toBe("no-store");
       expect(res.headers.get("set-cookie")).toBe(`${THEME_COOKIE}=${theme}; Path=/; Secure; SameSite=Lax; Max-Age=31536000`);
     }

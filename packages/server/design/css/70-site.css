@@ -9,16 +9,12 @@ html:has(.vbar){scroll-padding-top:8.5rem}
 @media (min-width:1000px){html:has(.vbar){scroll-padding-top:6rem}}
 .vbar{position:sticky;top:0;z-index:20;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;padding:8px 18px;border-bottom:1px solid var(--rule);background:color-mix(in srgb,var(--paper) 92%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);font-size:13.5px;line-height:1.3}
 .vbar .wm{font-size:15px}
-/* The bar's rows never depend on text widths (so nothing moves when the web fonts replace the fallbacks):
-   the file row stays on one line (the path shortens with an ellipsis), and from 1000px the trust line has
-   a row of its own under the file, view and buttons. */
-.vfile{display:flex;align-items:center;gap:10px;min-width:0;flex:1 1 18rem;flex-wrap:nowrap}
+/* The file row: the path wraps between its parts (and inside a name only when one is wider than the bar), never
+   cut off, so the whole name stays readable with any text spacing (WCAG 1.4.12). From 1000px the trust line has a
+   row of its own under the file, view and buttons. */
+.vfile{display:flex;align-items:center;gap:10px;min-width:0;flex:1 1 18rem}
 .vfile>*{flex:none}
-.vfile .crumbs{flex:0 1 auto;min-width:2.5rem;flex-wrap:nowrap;overflow:hidden;white-space:nowrap}
-.vfile .crumbs>*{flex:none}
-.vfile .crumbs>:last-child{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
-/* The path clips its overflow, so its links draw the focus ring inside their own box. */
-.vfile .crumbs a:focus-visible{outline-offset:-2px}
+.vfile .crumbs{flex:0 1 auto;min-width:2.5rem}
 .vbar .btnrow{gap:6px;flex:none}
 .vbar .trust{font-size:12px;margin:0;flex-basis:100%;order:3;text-align:right}
 .vtrust{max-width:60rem;margin:var(--s7) auto var(--s5);padding:12px var(--s5) 0;border-top:1px solid var(--rule-soft)}
@@ -48,14 +44,10 @@ p.notebar{display:block;margin:14px 18px 0;overflow-wrap:anywhere}
   .listing .frow .fkind{display:none}
 }
 @media (max-width:999.98px){
-  /* Two fixed rows, whatever the fonts: the file (path cut with an ellipsis) above the view and buttons, so
-     nothing below jumps when the web fonts replace the fallbacks. */
+  /* The file above the view and buttons; the path, the size and the checksum each on a row of their own. */
   .vfile{flex:1 1 100%;display:grid;grid-template-columns:auto minmax(0,1fr);row-gap:6px}
   .vfile .crumbs,.vfile .vmeta,.vfile .sum{grid-column:1/-1}
   .vfile>.chip{justify-self:start}
-  .vfile .crumbs{width:100%}
-  .vfile .crumbs>*{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis}
-  .vfile .crumbs>:last-child{flex:none;max-width:65%}
   .vmeta{white-space:normal;overflow-wrap:anywhere}
 }
 @media (max-width:720px){.vbar{position:static}}

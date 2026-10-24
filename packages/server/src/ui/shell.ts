@@ -8,6 +8,7 @@ import { accountArea, appChrome, type ChromeNavItem } from "./chrome";
 import { renderDocument } from "./document";
 import { THEME_COLORS } from "./design.generated";
 import { nextFor, themeOf } from "./theme";
+import { SOURCE_REPO } from "../repo";
 
 /**
  * The app-origin page frame shared by the home page, the dashboard, the file
@@ -123,12 +124,18 @@ export interface AppPageOptions {
  */
 export { APP_CSS } from "./design.generated";
 
-/** Footer links on core app pages. */
+export { SOURCE_REPO };
+
+/**
+ * Footer links on core app pages (PORT-SPEC 6.0): API, llms.txt, MCP, Agent skill, Self-host. Embedding apps put
+ * their own first (the hosted service adds Pricing).
+ */
 export const CORE_FOOTER_LINKS: ChromeNavItem[] = [
   { label: "API", href: "/openapi.json" },
   { label: "llms.txt", href: "/llms.txt" },
+  { label: "MCP", href: `${SOURCE_REPO}/blob/main/docs/MCP.md` },
   { label: "Agent skill", href: "/skill.md" },
-  { label: "Self-host", href: "https://github.com/TogetherWeOwn/dropway/blob/main/docs/SELF_HOST.md" },
+  { label: "Self-host", href: `${SOURCE_REPO}/blob/main/docs/SELF_HOST.md` },
 ];
 
 /**
@@ -171,7 +178,7 @@ export async function renderAppPage(c: Context<DropwayEnv>, opts: AppPageOptions
     banner,
     main: opts.body,
     mainClass: opts.wide ? "k-main-wide" : opts.bare ? "k-bare" : "k-main",
-    footer: opts.footer === false || opts.wide ? null : { name, domains: domainsLine(dw), links: CORE_FOOTER_LINKS, trust: opts.trust },
+    footer: opts.footer === false || opts.wide ? null : { name, domains: domainsLine(dw), links: [...(slots.footerLinks ?? []), ...CORE_FOOTER_LINKS], trust: opts.trust },
     after: `<div class="k-toasts" id="dw-toasts" role="status" aria-live="polite"></div><noscript><div class="k-wrap"><p class="k-banner k-warn">This page needs JavaScript for live data. The REST API (<a href="/openapi.json">/openapi.json</a>) works without it.</p></div></noscript>`,
   });
   const html = renderDocument({
@@ -195,7 +202,7 @@ export async function renderAppPage(c: Context<DropwayEnv>, opts: AppPageOptions
 export function appStatePage(
   dw: DropwayContext,
   url: string,
-  opts: { title: string; code: string; heading: string; message: string; extra?: string; actions?: string; signIn?: string; modeSwitch?: boolean },
+  opts: { title: string; code: string; heading: string; message: string; extra?: string; actions?: string; signIn?: string; modeSwitch?: boolean; footerLinks?: ChromeNavItem[] },
 ): string {
   const name = dw.config.instanceName;
   const theme = themeOf(dw);
@@ -209,7 +216,7 @@ export function appStatePage(
     body: appChrome({
       header: { name, theme, next: nextFor(url), account: accountArea({ signIn: opts.signIn ?? "/login" }), modeSwitch: opts.modeSwitch },
       main,
-      footer: { name, domains: domainsLine(dw), links: CORE_FOOTER_LINKS },
+      footer: { name, domains: domainsLine(dw), links: [...(opts.footerLinks ?? []), ...CORE_FOOTER_LINKS] },
     }),
   });
 }

@@ -131,7 +131,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
       );
     }
     // CORS-readable, so a sandboxed site (opaque origin) whose fetch() lands here sees a 404 instead of a network error.
-    const html = appStatePage(c.get("dw"), c.req.url, { title: "Not found", code: "404", heading: "Not found", message: "There is no page at this address.", actions: '<a class="k-btn" href="/">Home</a>', signIn: uiSlotsOf(c).session?.signInPath });
+    const html = appStatePage(c.get("dw"), c.req.url, { title: "Not found", code: "404", heading: "Not found", message: "There is no page at this address.", actions: '<a class="k-btn" href="/">Home</a>', signIn: uiSlotsOf(c).session?.signInPath, footerLinks: uiSlotsOf(c).footerLinks });
     return c.html(html, 404, { "Access-Control-Allow-Origin": "*", "Content-Security-Policy": APP_PAGE_CSP, "X-Content-Type-Options": "nosniff", Vary: "Cookie" });
   });
   app.onError((err, c) => {
@@ -147,6 +147,7 @@ export function createDropway(opts: CreateDropwayOptions = {}): Dropway {
       extra: id ? `<p class="k-small">Request <span class="k-mono">${escapeHtml(id)}</span></p>` : "",
       actions: `<a class="k-btn" href="${escapeHtml(new URL(c.req.url).pathname)}">Try again</a><a class="k-btn k-ghost" href="/">Home</a>`,
       signIn: uiSlotsOf(c).session?.signInPath,
+      footerLinks: uiSlotsOf(c).footerLinks,
     });
     return c.html(html, 500, { "Content-Security-Policy": APP_PAGE_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store", Vary: "Cookie" });
   });

@@ -1,5 +1,6 @@
 import { dropwayClient } from "./client";
 import { kofraMotifs } from "./motifs";
+import { SOURCE_REPO } from "../repo";
 
 /**
  * The dashboard script, served from the Worker itself at
@@ -12,7 +13,7 @@ import { kofraMotifs } from "./motifs";
  * (esbuild keepNames, which wrangler turns on), so a no-op __name is defined
  * around it.
  */
-export const CLIENT_SCRIPT = `/*! Kofra dashboard (MIT) https://github.com/TogetherWeOwn/dropway */
+export const CLIENT_SCRIPT = `/*! Kofra dashboard (MIT) ${SOURCE_REPO} */
 (function(){"use strict";var __name=function(t){return t};(${dropwayClient.toString()})(${kofraMotifs.toString()});})();
 `;
 
