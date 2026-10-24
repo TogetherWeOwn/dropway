@@ -77,7 +77,7 @@ describe("app pages", () => {
     ] as const) {
       const res = await dw.call(path);
       expect(res.status, path).toBe(200);
-      expect(res.headers.get("cache-control")).toBe("no-cache");
+      expect.soft(res.headers.get("cache-control"), path).toBe(path === "/login" ? "no-store" : "no-cache");
       const html = await res.text();
       expect(html).toContain(`data-page="${page}"`);
       expect(scriptSrc(html)).toBeTruthy();
