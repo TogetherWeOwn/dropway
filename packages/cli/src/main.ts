@@ -507,8 +507,8 @@ version listing and no auto-fetch of the whole file.
 With --json, stdout is exactly the API page (path, versionId,
 contentType, size, sha256, encoding, offset, length, truncated,
 nextOffset, content, url, rawUrl). Without --json, stdout carries only
-the page content (a trailing newline is added if missing; byte-exact
-consumers should use --json) and the page metadata goes to stderr, so
+the page content byte-for-byte (no added newline; base64 stays base64,
+so redirection is safe) and the page metadata goes to stderr, so
 pipes get clean content and truncation is never silent (shown even with
 --quiet).
 
@@ -531,7 +531,7 @@ Examples:
     if (offsetRaw !== undefined) {
       if (offsetRaw.trim() === "") throw new UsageError("--offset must be a whole number 0 or greater.");
       const n = Number(offsetRaw);
-      if (!Number.isInteger(n) || n < 0) throw new UsageError("--offset must be a whole number 0 or greater.");
+      if (!Number.isSafeInteger(n) || n < 0) throw new UsageError("--offset must be a whole number 0 or greater.");
       offset = n;
     }
     const length = int(p, "length", 1, 1048576);
@@ -543,8 +543,12 @@ Examples:
     if (length !== undefined) q.set("length", String(length));
     if (encoding !== undefined) q.set("encoding", encoding);
     const { data } = await client.get<ReadFilePage>(`/read-file?${q}`);
-    out.result(data as unknown as Record<string, unknown>, () => data.content);
-    if (!out.json) {
+    if (out.json) {
+      out.result(data as unknown as Record<string, unknown>, () => data.content);
+    } else {
+      // Human output is the content byte-for-byte: no added newline, so
+      // redirection stays safe and base64 can be decoded as-is.
+      io.stdout(data.content);
       const end = data.offset + data.length;
       const range = data.size === 0 ? "empty file" : `bytes ${data.offset}-${Math.max(data.offset, end - 1)} of ${data.size}`;
       let line = `${data.path} — ${formatBytes(data.size)} (${data.contentType}), encoding ${data.encoding}, version ${data.versionId}, ${range}. SHA-256: ${data.sha256}`;

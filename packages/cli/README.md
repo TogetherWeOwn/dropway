@@ -79,8 +79,8 @@ straight to `GET /api/v1/read-file` (operation `read_file`; MCP tool `read_file`
 listing, no auto-fetch of the whole file. For the schema see `/openapi.json` or `/llms-full.txt`
 on your instance.
 
-Without `--json`, stdout carries only the page content (a trailing newline is added if missing;
-byte-exact consumers should use `--json`) and the page metadata (size, encoding, byte range,
+Without `--json`, stdout carries only the page content byte-for-byte (no added newline;
+base64 stays base64, so redirection is safe) and the page metadata (size, encoding, byte range,
 SHA-256, truncation and the continuation command) goes to stderr, so pipes get clean content and
 truncation is never silent (shown even with `--quiet`). With `--json`, stdout is exactly the API
 page object; see "Output for agents".
