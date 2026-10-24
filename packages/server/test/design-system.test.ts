@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { buildDesign, classesIn, minifyCss, prefixCss, prefixSelector } from "../../../scripts/build-design.mjs";
 import { APP_CSS, SITE_CSS, THEME_TOKENS } from "../src/ui/design.generated";
 import { kofraMotifs } from "../src/ui/motifs";
-import { checkSelection, exitCodeFor, startFreshWorker } from "./e2e-design/shots.mjs";
+import { checkSelection, exitCodeFor, unexpectedFailures, startFreshWorker } from "./e2e-design/shots.mjs";
 
 /**
  * The Security Print design system as code: the k- prefixer, the generated modules being in sync with
@@ -286,5 +286,33 @@ describe("screenshot harness (npm run design:shots)", () => {
       status = (e as { status: number }).status;
     }
     expect(status).toBe(2);
+  });
+});
+
+describe("screenshot harness: failed requests", () => {
+  const errorPage = { url: "https://nosuch.kofra-sites.test/", status: 404 };
+  it("an error screen excuses only its own navigation, never a font or asset that failed with it", () => {
+    expect(unexpectedFailures(["GET / 404"], errorPage)).toEqual([]);
+    expect(unexpectedFailures(["GET / 404", "GET /__dropway/fonts/martian-mono-latin-normal.0123abcd.woff2 404", "GET /missing-asset.js 404"], errorPage)).toEqual([
+      "GET /__dropway/fonts/martian-mono-latin-normal.0123abcd.woff2 404",
+      "GET /missing-asset.js 404",
+    ]);
+    // The navigation itself with another status is not excused either.
+    expect(unexpectedFailures(["GET / 500"], errorPage)).toEqual(["GET / 500"]);
+  });
+  it("named expected failures match method and exact path (and status when given)", () => {
+    const sc = { url: "https://kofra.test/dashboard/sites/fx-site", expectFailed: ["PATCH /api/v1/sites/fx-site", "GET / 401"] };
+    expect(unexpectedFailures(["PATCH /api/v1/sites/fx-site 400", "GET / 401", "GET /favicon.ico 404"], sc)).toEqual([]);
+    expect(unexpectedFailures(["GET /api/v1/sites/fx-site 400", "PATCH /api/v1/sites/fx-site/x 400", "GET / 403"], sc)).toEqual(["GET /api/v1/sites/fx-site 400", "PATCH /api/v1/sites/fx-site/x 400", "GET / 403"]);
+  });
+});
+
+describe("design build on Node without type stripping (the >= 20 runtime)", () => {
+  it("design:check loads motifs.ts through the esbuild fallback and finds the generated modules in sync", () => {
+    // Node 22.6+ can turn type stripping off, which makes the native .ts import fail exactly as on Node 20;
+    // on Node 20 itself the plain command already takes that path.
+    const off = "typescript" in process.features ? ["--no-experimental-strip-types"] : [];
+    const out = execFileSync(process.execPath, [...off, join(ROOT, "scripts/build-design.mjs"), "--check"], { encoding: "utf8", timeout: 60_000 });
+    expect(out).toContain("design:check: generated modules are up to date");
   });
 });

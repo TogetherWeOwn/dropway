@@ -75,6 +75,36 @@ describe("theme cookie route (POST /__dropway/theme)", () => {
     expect(streamed.status).toBe(413);
     expect(streamed.headers.get("set-cookie")).toBeNull();
     expect(sent).toBeLessThan(64);
+    // The exact boundary, both as a declared length and as a stream with no length: 2048 bytes is the limit.
+    const sized = (n: number) => {
+      const head = "theme=dark&next=%2F&pad=";
+      return head + "x".repeat(n - head.length);
+    };
+    const streamOf = (text: string) => {
+      const bytes = new TextEncoder().encode(text);
+      return new ReadableStream<Uint8Array>({
+        start(ctl) {
+          for (let i = 0; i < bytes.length; i += 500) ctl.enqueue(bytes.subarray(i, i + 500));
+          ctl.close();
+        },
+      });
+    };
+    const post = (body: BodyInit, extra: Record<string, string> = {}) =>
+      dw.call("/__dropway/theme", { method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: ORIGIN, ...extra }, duplex: "half" } as RequestInit);
+    for (const [n, ok] of [[2047, true], [THEME_BODY_MAX, true], [THEME_BODY_MAX + 1, false]] as const) {
+      expect(sized(n).length).toBe(n);
+      for (const body of [sized(n), streamOf(sized(n))]) {
+        const res = await post(body);
+        expect(res.status, `${n} bytes, ${typeof body === "string" ? "declared" : "streamed"}`).toBe(ok ? 303 : 413);
+        expect(res.headers.get("set-cookie")).toBe(ok ? `${THEME_COOKIE}=dark; Path=/; Secure; SameSite=Lax; Max-Age=31536000` : null);
+      }
+    }
+    // An oversized Content-Length is refused before a single byte is read.
+    let pulls = 0;
+    const untouched = new ReadableStream<Uint8Array>({ pull(ctl) { pulls++; ctl.enqueue(new TextEncoder().encode("theme=dark")); ctl.close(); } }, { highWaterMark: 0 });
+    const early = await post(untouched, { "Content-Length": String(THEME_BODY_MAX + 1) });
+    expect(early.status).toBe(413);
+    expect(pulls).toBe(0);
     // Multipart is not what the switch sends: nothing is set.
     const fd = new FormData();
     fd.append("theme", "dark");
@@ -354,5 +384,33 @@ describe("design assets", () => {
     expect(art.headers.get("content-type")).toBe("image/svg+xml");
     expect(art.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
     expect(await art.text()).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 600 400"/);
+  });
+});
+
+describe("file deliveries", () => {
+  it("a locked file on the sites origin is a site page: inline CSS, fonts from the app, no app-only assets or mode switch", async () => {
+    const { create, instance, PASSWORD, siteFile } = await import("./transfer-fixtures");
+    const dw = await instance();
+    const t = await create(dw, { password: PASSWORD });
+    for (const query of ["", "?theme=dark"]) {
+      const res = await dw.call(siteFile(t) + query, { headers: { Accept: "text/html", "Sec-Fetch-Dest": "document" } });
+      expect(res.status).toBe(403);
+      expect(res.headers.get("content-security-policy")).toBe(`default-src 'none'; style-src 'unsafe-inline'; font-src ${ORIGIN}; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`);
+      const html = await res.text();
+      expect(htmlTag(html)).toBe(query ? '<html lang="en" data-theme="dark">' : '<html lang="en">');
+      expect(html).not.toContain("/__dropway/ui/");
+      expect(html).not.toMatch(/<form[^>]*k-mode-switch/);
+      expect(html).not.toContain("/__dropway/theme");
+      expect(html).not.toContain("<script");
+      expect(html).toContain(`href="${t.url}"`);
+      // Every asset the page loads exists where it points.
+      const assets = [...html.matchAll(/url\(([^)]+)\)|<link[^>]+href="([^"]+)"/g)].map((m) => (m[1] ?? m[2])!.replace(/^["']|["']$/g, "")).filter((u) => !u.startsWith("data:"));
+      expect(assets.length).toBeGreaterThan(0);
+      for (const url of new Set(assets)) {
+        const abs = new URL(url, siteFile(t)).href;
+        expect(abs.startsWith(`${ORIGIN}/__dropway/fonts/`), abs).toBe(true);
+        expect((await dw.call(abs)).status, abs).toBe(200);
+      }
+    }
   });
 });

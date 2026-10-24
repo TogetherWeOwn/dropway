@@ -5,8 +5,9 @@ import {
 } from "@dropway/core";
 import type { Hono } from "hono";
 import type { DropwayEnv } from "./env";
-import { APP_PAGE_CSP, escapeHtml } from "./html";
+import { APP_PAGE_CSP, escapeHtml, siteSystemCsp, systemPage } from "./html";
 import { appStatePage } from "./ui/shell";
+import { themeFromQuery } from "./ui/theme";
 
 const headers = {
   "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
@@ -19,6 +20,26 @@ function page(dc: DropwayContext, url: string, message: string, extra = "", stat
 }
 function passwordPage(dc: DropwayContext, url: string, t: PublicTransfer, recipient?: string) {
   return page(dc, url, "This delivery is password protected.", `<form method="post" action="${escapeHtml(transferPageUrl(dc, t.slug, recipient))}"><label class="k-label" for="dw-tpw">Password</label><div class="k-field"><input class="k-input" id="dw-tpw" type="password" name="password" minlength="8" maxlength="1024" required autocomplete="current-password"><button class="k-btn" type="submit">Unlock delivery</button></div></form>`, 403);
+}
+/**
+ * A locked file asked for on the sites origin: a site page (site CSS inline, fonts from the app origin,
+ * siteSystemCsp, no mode switch: the app's cookie and theme route do not exist here) that sends the
+ * recipient to the delivery's page in the app to unlock it.
+ */
+function lockedFilePage(dc: DropwayContext, request: Request, slug: string) {
+  const html = systemPage({
+    code: "FILE DELIVERY",
+    title: "This delivery is password protected",
+    message: "Unlock it on its page, then open this file again.",
+    extra: `<div class="k-acts"><a class="k-btn" href="${escapeHtml(transferPageUrl(dc, slug))}">Unlock this delivery</a></div>`,
+    dw: dc,
+    theme: themeFromQuery(request.url) ?? "auto",
+    trust: true,
+  });
+  return new Response(html, {
+    status: 403,
+    headers: { ...headers, "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": `${siteSystemCsp(dc)}; frame-ancestors 'none'` },
+  });
 }
 /** "2026-10-30 09:00 UTC": dates always name their zone. */
 const utc = (ms: number) => `${new Date(ms).toISOString().slice(0, 16).replace("T", " ")} UTC`;
@@ -87,7 +108,7 @@ export async function serveTransfer(request: Request, dc: DropwayContext, slug: 
     if (!["GET", "HEAD"].includes(request.method)) return new Response("Method not allowed", { status: 405, headers: { ...headers, Allow: "GET, HEAD" } });
     const out = await openTransferDownload(dc, request, slug, path);
     if (out.locked) {
-      if ((request.headers.get("Accept") ?? "").includes("text/html")) return page(dc, request.url, "This delivery is password protected.", `<div class="k-acts"><a class="k-btn" href="${escapeHtml(transferPageUrl(dc, slug))}">Unlock this delivery</a></div>`, 403);
+      if ((request.headers.get("Accept") ?? "").includes("text/html")) return lockedFilePage(dc, request, slug);
       throw new ApiError(403, "transfer_locked", "Password required.", "Unlock the delivery on its app-origin page.");
     }
     const filename = out.file.path.split("/").pop()!;

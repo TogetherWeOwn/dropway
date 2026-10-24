@@ -515,6 +515,23 @@ function screens(fx) {
 // The former product name is assembled so the rebrand check does not flag this file.
 const BANNED = new RegExp(`\\b(${["drop", "way"].join("")}|scanned|virus|virus-free|verified)\\b`, "i");
 
+/**
+ * The failed requests a screen did not expect. Each failure is "<METHOD> <path> <status>". An expected
+ * failure names the method and the exact path, and optionally the status; a screen that expects a status
+ * (sc.status) excuses only its own navigation with that status, never an asset that failed alongside it.
+ */
+export function unexpectedFailures(failed, sc) {
+  const req = (x) => {
+    const [method, path, status] = x.split(" ");
+    return { method, path, status };
+  };
+  const expected = (sc.expectFailed ?? []).concat(sc.status ? [`GET ${new URL(sc.url).pathname} ${sc.status}`] : []).map(req);
+  return failed.filter((f) => {
+    const a = req(f);
+    return a.path !== "/favicon.ico" && !expected.some((e) => e.method === a.method && e.path === a.path && (!e.status || e.status === a.status));
+  });
+}
+
 /** Refuse a selection that would run nothing (or not what was asked) before starting anything. */
 export function checkSelection(only = ONLY, widths = WIDTHS, modes = MODES) {
   const ids = screens({ owner: "", anonExpired: "x", anonLive: "y" }).map((s) => s.id);
@@ -1200,15 +1217,7 @@ async function runCell(browser, mf, fx, sc, mode, width, axeSource, opts = {}) {
   }
   // Each failed request is "<METHOD> <path> <status>". An expected failure names the method and the exact path,
   // and optionally the status; a screen that expects a status allows only its own navigation with that status.
-  const req = (x) => {
-    const [method, path, status] = x.split(" ");
-    return { method, path, status };
-  };
-  const expectFailed = (sc.expectFailed ?? []).concat(sc.status ? [`GET ${new URL(sc.url).pathname} ${sc.status}`] : []).map(req);
-  const unexpected = failed.filter((f) => {
-    const a = req(f);
-    return a.path !== "/favicon.ico" && !expectFailed.some((e) => e.method === a.method && e.path === a.path && (!e.status || e.status === a.status));
-  });
+  const unexpected = unexpectedFailures(failed, sc);
   const userContent = sc.id === "J70" || sc.id === "J72";
   // Explicit modes pin the metas to the chosen colour; Auto lists both (PORT-SPEC 3.1). The static platform
   // error page (S08) is built without request data and is always Auto.
