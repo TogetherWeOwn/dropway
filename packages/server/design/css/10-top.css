@@ -7,8 +7,9 @@
 .top{border-bottom:1px solid var(--rule);background:var(--paper)}
 .top>.wrap{display:flex;align-items:center;gap:10px var(--s5);min-height:60px;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}
 .top .wm{font-size:22px;line-height:1.2}
-/* The tag is user data (account, email): sans, as typed, never upper-cased like a kicker. */
-.top .tag{flex:1 1 0;font-size:13.5px;color:var(--ink-2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:24rem}
+/* The tag is user data (account, email): sans, as typed, never upper-cased like a kicker. It takes the room the row
+   leaves and wraps (two short lines fit the row's height) instead of cutting the address off (WCAG 1.4.12). */
+.top .tag{flex:1 1 0;font-size:13.5px;line-height:1.3;color:var(--ink-2);min-width:0;overflow-wrap:anywhere;max-width:24rem}
 .nav{flex-basis:100%;display:flex;gap:4px 18px;font-size:14px;flex-wrap:wrap;align-items:center}
 .nav a{text-decoration:none;color:var(--ink);padding:4px 0;border-bottom:2px solid transparent}
 .nav a:hover{color:var(--accent);border-bottom-color:var(--accent-line)}

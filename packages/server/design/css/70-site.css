@@ -1,7 +1,8 @@
 /* Site-origin pages (<slug>.<sites domain>): system pages, the password gate, listings and viewer pages.
    These ship inline in every response (the site bundle), so keep this file lean. */
 .sys{min-height:100vh;display:flex;flex-direction:column}
-.sys>main{flex:1 0 auto;width:100%;max-width:46rem;margin:0 auto;padding:10vh var(--s5) var(--s9)}
+/* The state panel starts on the site header's left edge (one grid on the sites origin, as the listing). */
+.sys>main{flex:1 0 auto;width:100%;max-width:calc(46rem + 36px);padding:10vh 18px var(--s9)}
 .sys>.guilloche-band{margin-top:var(--s7)}
 .sys .foot{padding-bottom:28px}
 /* Keyboard focus and #L links scroll clear of the sticky bar (it wraps to more rows on narrow screens). */
@@ -37,7 +38,7 @@ p.notebar{display:block;margin:14px 18px 0;overflow-wrap:anywhere}
 .gallery img{display:block;width:100%;aspect-ratio:1;object-fit:cover;background:var(--paper-3)}
 .gallery span{display:block;padding:6px 8px;font:400 12px/1.4 var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media (max-width:720px){
-  .sys>main{padding:6vh var(--s4) var(--s8)}
+  .sys>main{padding:6vh 12px var(--s8)}
   .vbar{padding:8px 12px}
   .listing{padding:var(--s6) 12px var(--s8)}
   .listing .frow{grid-template-columns:40px minmax(0,1fr) auto}
