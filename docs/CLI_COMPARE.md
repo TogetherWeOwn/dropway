@@ -102,44 +102,51 @@ inspection command into a credential oracle.
 
 Single files, ZIP archives, and URL sources are rejected with usage errors
 (`compare_directory_only`, `compare_zip_unsupported`; section 8) even though
-the collector and `publish` accept some of them. Encrypted sites are not
-special-cased: their remote manifest holds ciphertext metadata, so a compare
-against one reports `changed` for every path rather than attempting
-decryption; the human output adds a one-line note when the pinned version's
-`client` indicates an encrypted publish.
+the collector and `publish` accept some of them. Encrypted publishes are not
+special-cased and need no decryption: `encryptFiles()`
+(`packages/cli/src/encrypt.ts`) packs the whole tree into one
+`encrypted.bin` blob, so a compare against an encrypted version naturally
+reports N `local_only` records plus one `remote_only` (`encrypted.bin`).
+The human output adds a one-line note when the pinned manifest is exactly
+that single file — a heuristic, stated as such, since metadata alone cannot
+distinguish it from a plaintext site containing one file of the same name.
 
 ## 5. Remote side: resolve once, pin, read manifest
 
 Exactly two authenticated `GET` reads, both under existing `sites:read`
 access controls:
 
-1. **Resolve and pin.** `GET /api/v1/sites/{slug}/versions?limit=500` (the
-   same list `resolveVersion` in `packages/cli/src/main.ts` uses), or
-   `GET /api/v1/sites/{slug}/versions/{id}` for an explicit ref. The command
-   resolves the ref **once** at the start and pins the canonical version id:
-   - omitted / `live`: the response's `currentVersionId` at resolve time;
-   - `v<N>` / `<N>` / id: the matching finalized version (same matching
-     rules as `resolveVersion`; the rollback "previous version" default is
-     **not** reused — an omitted ref on `compare` always means live).
+1. **Resolve and pin.** The command resolves the ref **once** at the start
+   and pins the canonical version id:
+   - omitted / `live`: `GET /api/v1/sites/{slug}/versions?limit=500` (the
+     same list `resolveVersion` in `packages/cli/src/main.ts` uses) and pin
+     its `currentVersionId` at resolve time. The rollback "previous version"
+     default is **not** reused — an omitted ref on `compare` always means live.
+   - `v<N>` / `<N>` / id: `GET /api/v1/sites/{slug}/versions/{id}` (the
+     `get_version` operation, served by `resolveVersionRef`, which sees rows
+     of any status — unlike the CLI `resolveVersion` list, which only
+     contains `ready` versions). If the row's `status` is not `ready`, fail
+     with `version_not_ready` (section 8): a pending manifest is not
+     immutable yet, so a comparison against one could silently mislead.
    - If the site has no live version, fail with `no_live_version` (section 8);
      comparing against "nothing" is a refusal, not an empty diff.
-   - If the ref matches no finalized version, fail with `version_not_found`.
+   - If the ref matches nothing, fail with `version_not_found`.
 2. **Read the immutable manifest.**
-   `GET /api/v1/sites/{slug}/files?version=<pinnedId>` — the `list_files`
-   operation (`packages/server/src/operations/core-api.ts`), served by
-   `listFiles()` in `packages/core/src/services/deploys.ts`, which returns
+   `GET /api/v1/sites/{slug}/files?version=<pinnedId>` in its raw REST form
+   (`packages/server/src/operations/core-api.ts`, `list_files` HTTP handler),
+   which returns the whole manifest from `listFiles()` in
+   `packages/core/src/services/deploys.ts`:
    `{ version, files: [{ path, size, sha256, contentType, ... }] }` ordered
-   by path from the immutable `version_files` rows. Only `path`, `size`,
-   and `sha256` are used; URLs in the response are never fetched.
+   by path from the immutable `version_files` rows. The implementation must
+   not use the operation/MCP handler's paged form (default limit 200, max
+   1000) unless it loops cursors to exhaustion first — counts are exact over
+   the full manifest, never over one page. Only `path`, `size`, and `sha256`
+   are used; URLs in the response are never fetched.
 
 The pinned version id is echoed in every output (section 7). If live moves
 after pinning, the comparison still describes the pinned manifest; the
 implementation **must not** re-resolve mid-run. (A future `--warn-if-live-moved`
 re-check is out of scope for v1.)
-
-Pending versions (status `pending`, uploads incomplete) are refused with
-`version_not_ready`: their manifest is not immutable yet, so a comparison
-against one could silently mislead.
 
 ## 6. Comparison semantics
 
@@ -360,8 +367,9 @@ implementation pairs with a fresh Test Author.
 
 Docs-only checks performed for this spec (no code ran beyond them): every
 `--json` field traces to `collectFiles()` or `listFiles()` (section 7.1
-table); the two `GET` paths exist on current main (`core-api.ts`
-`list_files`, `main.ts` `listAllVersions`); error codes follow the
+table); all three `GET` shapes exist on current main (`list_files` raw REST
+form, `get_version`, and the versions list behind `main.ts`
+`listAllVersions`); error codes follow the
 `ApiError`/`CliError` snake_case convention; `publish --dry-run` is
 referenced but untouched.
 
