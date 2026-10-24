@@ -142,3 +142,17 @@
   text lockfiles for excluded SDKs, in addition to modern npm lockfiles. Check
   `npm:` alias targets in manifests and lockfiles as well as dependency names.
   Reject binary `bun.lockb` with instructions to regenerate an auditable text lockfile.
+
+### Link permanence
+
+- A renamed site's old name 308s to the new name (path and query kept, path and
+  subdomain modes) until `redirectUntil`, returned by `rename_site` alongside
+  `oldSlug`. Rename chains resolve through the current name.
+- Deleted and expired names are held for their previous tenant (chosen names 12
+  months, generated names 90 days): other tenants get 409 `slug_reserved`, the
+  holding tenant may reclaim. Durations are config (`SLUG_REDIRECT_DAYS`,
+  `SLUG_HOLD_CHOSEN_DAYS`, `SLUG_HOLD_GENERATED_DAYS`).
+- New operator operation `release_slug` (`POST /api/v1/slugs/release`, admin
+  scope): release a hold early with a required reason, kept as the audit record.
+- A deleted version's `<slug>--v<N>` answers 410 in both modes, never another
+  site's bytes. File deliveries keep their permanent sender-owned reservations.
